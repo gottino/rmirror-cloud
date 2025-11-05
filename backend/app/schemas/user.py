@@ -1,0 +1,40 @@
+"""User schemas."""
+
+from datetime import datetime
+
+from pydantic import BaseModel, EmailStr
+
+
+class UserBase(BaseModel):
+    """Base user schema."""
+
+    email: EmailStr
+    full_name: str | None = None
+
+
+class UserCreate(UserBase):
+    """User creation schema."""
+
+    password: str
+
+
+class UserUpdate(BaseModel):
+    """User update schema."""
+
+    email: EmailStr | None = None
+    full_name: str | None = None
+    password: str | None = None
+
+
+class User(UserBase):
+    """User response schema."""
+
+    id: int
+    subscription_tier: str
+    is_active: bool
+    is_verified: bool
+    created_at: datetime
+    last_login_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
