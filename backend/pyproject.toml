@@ -26,6 +26,10 @@ python-magic = "^0.4.27"
 aiofiles = "^23.2.1"
 httpx = "^0.26.0"
 tenacity = "^8.2.3"
+rmscene = "^0.5.0"
+svglib = "^1.5.1"
+reportlab = "^4.0.9"
+anthropic = "^0.18.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.4"

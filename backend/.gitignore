@@ -1,1 +1,2 @@
-storage/
+# Storage directory (uploaded files)
+/storage/
