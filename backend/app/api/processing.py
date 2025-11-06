@@ -15,7 +15,7 @@ from app.database import get_db
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/processing", tags=["processing"])
+router = APIRouter(tags=["processing"])
 
 
 class ProcessRMFileResponse(BaseModel):

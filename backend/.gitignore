@@ -1,2 +1,5 @@
 # Storage directory (uploaded files)
 /storage/
+
+# Test data
+/test_data/

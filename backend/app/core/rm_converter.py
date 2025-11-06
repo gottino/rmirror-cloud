@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import rmc
 import rmscene
 
 # Import color patch module - this auto-patches on import
@@ -40,7 +41,7 @@ class RMConverter:
 
     def rm_to_svg(self, rm_path: Path) -> str:
         """
-        Convert .rm file to SVG string using rmscene.
+        Convert .rm file to SVG string using rmc.
 
         Args:
             rm_path: Path to .rm file
@@ -58,17 +59,26 @@ class RMConverter:
         logger.info(f"Converting {rm_path.name} to SVG")
 
         try:
-            # Parse .rm file with rmscene
-            with open(rm_path, "rb") as f:
-                scene = rmscene.read_blocks(f)
+            # Create temporary SVG file
+            with tempfile.NamedTemporaryFile(suffix='.svg', delete=False) as svg_file:
+                svg_path = svg_file.name
 
-            if not scene:
-                raise ValueError(f"Empty or invalid .rm file: {rm_path}")
+            try:
+                # Convert .rm file to SVG using rmc (uses patched color palette)
+                rmc.rm_to_svg(str(rm_path), svg_path)
 
-            # Render to SVG (uses patched color palette)
-            svg = rmscene.scene_stream.render_to_svg(scene)
-            logger.debug(f"Generated SVG with {len(svg)} characters")
-            return svg
+                # Read SVG content
+                svg = Path(svg_path).read_text()
+
+                if not svg:
+                    raise ValueError(f"Empty SVG generated from: {rm_path}")
+
+                logger.debug(f"Generated SVG with {len(svg)} characters")
+                return svg
+
+            finally:
+                # Clean up temp file
+                Path(svg_path).unlink(missing_ok=True)
 
         except Exception as e:
             logger.error(f"Failed to convert {rm_path.name} to SVG: {e}")
@@ -101,15 +111,20 @@ class RMConverter:
                 svg_file.write(svg_content)
                 svg_path = svg_file.name
 
+            # Create temporary PDF file
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as pdf_file:
+                pdf_path = pdf_file.name
+
             try:
                 # Convert using rsvg-convert command
-                result = subprocess.run(
-                    ['rsvg-convert', '-f', 'pdf', '-o', '/dev/stdout', svg_path],
+                subprocess.run(
+                    ['rsvg-convert', '-f', 'pdf', '-o', pdf_path, svg_path],
                     capture_output=True,
                     check=True
                 )
 
-                pdf_bytes = result.stdout
+                # Read PDF bytes
+                pdf_bytes = Path(pdf_path).read_bytes()
 
                 if not pdf_bytes:
                     raise ValueError("rsvg-convert returned empty PDF")
@@ -118,8 +133,9 @@ class RMConverter:
                 return pdf_bytes
 
             finally:
-                # Clean up temporary SVG file
+                # Clean up temporary files
                 Path(svg_path).unlink(missing_ok=True)
+                Path(pdf_path).unlink(missing_ok=True)
 
         except subprocess.CalledProcessError as e:
             logger.error(f"rsvg-convert failed: {e.stderr.decode() if e.stderr else str(e)}")
@@ -134,9 +150,9 @@ class RMConverter:
 
     def rm_to_pdf_bytes(self, rm_path: Path) -> bytes:
         """
-        Convert .rm file directly to PDF bytes (convenience method).
+        Convert .rm file directly to PDF bytes.
 
-        This combines rm_to_svg() and svg_to_pdf_bytes() into a single call.
+        This uses rmc to convert to SVG, then rsvg-convert to generate PDF.
 
         Args:
             rm_path: Path to .rm file
@@ -168,13 +184,13 @@ class RMConverter:
 
         try:
             with open(rm_path, "rb") as f:
-                scene = rmscene.read_blocks(f)
+                scene_blocks = list(rmscene.read_blocks(f))
 
             # Check if any scene items exist
-            has_items = len(scene) > 0
+            has_items = len(scene_blocks) > 0
             logger.debug(
                 f"{rm_path.name} has {'content' if has_items else 'no content'} "
-                f"({len(scene)} items)"
+                f"({len(scene_blocks)} blocks)"
             )
             return has_items
 

@@ -5,6 +5,7 @@ import logging
 from typing import BinaryIO
 
 import anthropic
+import httpx
 
 from app.config import get_settings
 
@@ -34,7 +35,11 @@ class OCRService:
                 "or provide api_key parameter."
             )
 
-        self.client = anthropic.Anthropic(api_key=api_key)
+        # Create httpx client with SSL verification disabled for corporate networks
+        # TODO: In production, configure proper certificate trust instead
+        http_client = httpx.Client(verify=False)
+
+        self.client = anthropic.Anthropic(api_key=api_key, http_client=http_client)
         logger.info("Initialized OCR service with Claude API")
 
     async def extract_text_from_pdf(
@@ -69,7 +74,7 @@ class OCRService:
         try:
             # Call Claude Vision API
             message = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",  # Latest Claude with vision
+                model="claude-haiku-4-5",  # Fast, cheap Haiku model good for OCR
                 max_tokens=4096,
                 messages=[
                     {
@@ -137,7 +142,7 @@ class OCRService:
         try:
             # Call Claude Vision API
             message = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-haiku-4-5",  # Fast, cheap Haiku model good for OCR
                 max_tokens=4096,
                 messages=[
                     {
