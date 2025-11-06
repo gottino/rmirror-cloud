@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     s3_bucket_name: str = "rmirror"
     s3_region: str = "us-east-1"
 
+    # Claude API for OCR
+    claude_api_key: Optional[str] = None
+
     # Authentication
     secret_key: str
     algorithm: str = "HS256"

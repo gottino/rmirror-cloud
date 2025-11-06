@@ -49,6 +49,20 @@ class RMMetadataParser:
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in .metadata file: {e}")
 
+    def parse_bytes(self, content: bytes) -> RMMetadata:
+        """
+        Parse metadata from bytes.
+
+        Args:
+            content: Raw bytes of .metadata file
+
+        Returns:
+            Parsed RMMetadata object
+        """
+        import io
+
+        return self.parse(io.BytesIO(content))
+
     def parse_string(self, json_str: str) -> RMMetadata:
         """
         Parse metadata from JSON string.

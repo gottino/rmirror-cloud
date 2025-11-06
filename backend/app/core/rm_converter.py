@@ -1,108 +1,183 @@
-"""Convert reMarkable .rm files to PDF using rmscene and SVG.
+"""Convert reMarkable .rm files to PDF using rmscene and rmc.
 
-This module uses rmscene to parse .rm files, renders them as SVG,
+This module uses rmscene to parse .rm files, rmc to render as SVG,
 converts to PDF, and sends to Claude Vision for OCR.
 
-Includes monkey patching for additional highlight colors not in rmscene.
+Includes automatic color patching via rm_color_patch module.
 """
 
-import io
+import logging
+import subprocess
+import tempfile
 from pathlib import Path
 
 import rmscene
-from reportlab.graphics import renderPDF
-from svglib.svglib import svg2rlg
+
+# Import color patch module - this auto-patches on import
+from app.core import rm_color_patch
+
+logger = logging.getLogger(__name__)
 
 
 class RMConverter:
     """Convert reMarkable annotations to OCR-ready PDFs."""
 
     def __init__(self):
-        """Initialize converter and apply monkey patches."""
-        self._apply_color_patches()
+        """Initialize converter and ensure color patches are applied."""
+        # Color patch is auto-applied on import, but verify
+        self._verify_patches()
 
-    def _apply_color_patches(self):
-        """
-        Monkey patch rmscene to support additional highlight colors.
+    def _verify_patches(self):
+        """Verify that color patches were successfully applied."""
+        try:
+            import rmc.exporters.writing_tools as writing_tools
 
-        TODO: Add the specific color codes that were patched in remarkable-integration.
-        The user mentioned needing to patch for additional highlight colors.
-        """
-        # Placeholder for monkey patch
-        # Original rmscene might not know about all highlight colors
-        # Need to get the actual patch from remarkable-integration
-        pass
+            if not hasattr(writing_tools, "_rmc_color_patched"):
+                logger.warning("Color patch not applied, attempting to patch now")
+                rm_color_patch.patch_rmc_colors()
+        except ImportError:
+            logger.warning("rmc library not available, color patching skipped")
 
     def rm_to_svg(self, rm_path: Path) -> str:
         """
-        Convert .rm file to SVG string.
+        Convert .rm file to SVG string using rmscene.
 
         Args:
             rm_path: Path to .rm file
 
         Returns:
             SVG content as string
-        """
-        # Parse .rm file with rmscene
-        with open(rm_path, "rb") as f:
-            scene = rmscene.read_blocks(f)
 
-        # Render to SVG
-        svg = rmscene.scene_stream.render_to_svg(scene)
-        return svg
+        Raises:
+            FileNotFoundError: If .rm file doesn't exist
+            ValueError: If .rm file is invalid or empty
+        """
+        if not rm_path.exists():
+            raise FileNotFoundError(f"File not found: {rm_path}")
+
+        logger.info(f"Converting {rm_path.name} to SVG")
+
+        try:
+            # Parse .rm file with rmscene
+            with open(rm_path, "rb") as f:
+                scene = rmscene.read_blocks(f)
+
+            if not scene:
+                raise ValueError(f"Empty or invalid .rm file: {rm_path}")
+
+            # Render to SVG (uses patched color palette)
+            svg = rmscene.scene_stream.render_to_svg(scene)
+            logger.debug(f"Generated SVG with {len(svg)} characters")
+            return svg
+
+        except Exception as e:
+            logger.error(f"Failed to convert {rm_path.name} to SVG: {e}")
+            raise
 
     def svg_to_pdf_bytes(self, svg_content: str) -> bytes:
         """
-        Convert SVG to PDF bytes.
+        Convert SVG to PDF bytes using rsvg-convert command-line tool.
+
+        This matches the approach used in remarkable-integration.
 
         Args:
             svg_content: SVG content as string
 
         Returns:
             PDF as bytes
+
+        Raises:
+            ValueError: If SVG cannot be parsed or converted
+            RuntimeError: If rsvg-convert is not available
         """
-        # Parse SVG
-        svg_io = io.StringIO(svg_content)
-        drawing = svg2rlg(svg_io)
+        if not svg_content or not svg_content.strip():
+            raise ValueError("Empty SVG content")
 
-        if drawing is None:
-            raise ValueError("Failed to parse SVG")
+        logger.debug("Converting SVG to PDF with rsvg-convert")
 
-        # Render to PDF
-        pdf_io = io.BytesIO()
-        renderPDF.drawToFile(drawing, pdf_io, fmt="PDF")
-        pdf_io.seek(0)
+        try:
+            # Write SVG to temporary file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.svg', delete=False) as svg_file:
+                svg_file.write(svg_content)
+                svg_path = svg_file.name
 
-        return pdf_io.read()
+            try:
+                # Convert using rsvg-convert command
+                result = subprocess.run(
+                    ['rsvg-convert', '-f', 'pdf', '-o', '/dev/stdout', svg_path],
+                    capture_output=True,
+                    check=True
+                )
+
+                pdf_bytes = result.stdout
+
+                if not pdf_bytes:
+                    raise ValueError("rsvg-convert returned empty PDF")
+
+                logger.debug(f"Generated PDF with {len(pdf_bytes)} bytes")
+                return pdf_bytes
+
+            finally:
+                # Clean up temporary SVG file
+                Path(svg_path).unlink(missing_ok=True)
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"rsvg-convert failed: {e.stderr.decode() if e.stderr else str(e)}")
+            raise RuntimeError(f"SVG to PDF conversion failed: {e.stderr.decode() if e.stderr else str(e)}")
+        except FileNotFoundError:
+            raise RuntimeError(
+                "rsvg-convert not found. Install with: brew install librsvg"
+            )
+        except Exception as e:
+            logger.error(f"Failed to convert SVG to PDF: {e}")
+            raise
 
     def rm_to_pdf_bytes(self, rm_path: Path) -> bytes:
         """
-        Convert .rm file directly to PDF bytes.
+        Convert .rm file directly to PDF bytes (convenience method).
+
+        This combines rm_to_svg() and svg_to_pdf_bytes() into a single call.
 
         Args:
             rm_path: Path to .rm file
 
         Returns:
             PDF as bytes
+
+        Raises:
+            FileNotFoundError: If .rm file doesn't exist
+            ValueError: If conversion fails
         """
+        logger.info(f"Converting {rm_path.name} to PDF")
         svg = self.rm_to_svg(rm_path)
         return self.svg_to_pdf_bytes(svg)
 
     def has_content(self, rm_path: Path) -> bool:
         """
-        Check if .rm file has any content.
+        Check if .rm file has any content (strokes, text, etc.).
 
         Args:
             rm_path: Path to .rm file
 
         Returns:
-            True if file has strokes/content
+            True if file has strokes/content, False if empty or invalid
         """
+        if not rm_path.exists():
+            logger.warning(f"File does not exist: {rm_path}")
+            return False
+
         try:
             with open(rm_path, "rb") as f:
                 scene = rmscene.read_blocks(f)
 
             # Check if any scene items exist
-            return len(scene) > 0
-        except Exception:
+            has_items = len(scene) > 0
+            logger.debug(
+                f"{rm_path.name} has {'content' if has_items else 'no content'} "
+                f"({len(scene)} items)"
+            )
+            return has_items
+
+        except Exception as e:
+            logger.warning(f"Failed to check content in {rm_path.name}: {e}")
             return False
