@@ -97,7 +97,8 @@ def migrate_notebooks(old_conn, new_session: Session, user_id: int, stats: Migra
             publication_date,
             pinned,
             item_type,
-            parent_uuid
+            parent_uuid,
+            full_path
         FROM notebook_metadata
         WHERE deleted = FALSE OR deleted IS NULL
         ORDER BY visible_name
@@ -114,6 +115,7 @@ def migrate_notebooks(old_conn, new_session: Session, user_id: int, stats: Migra
         pinned = row[7]
         item_type = row[8]
         parent_uuid = row[9]
+        full_path = row[10]
 
         # Check if notebook already exists
         existing = new_session.query(Notebook).filter(
@@ -127,7 +129,10 @@ def migrate_notebooks(old_conn, new_session: Session, user_id: int, stats: Migra
             continue
 
         # Map document type to enum
-        if document_type == "epub":
+        # CollectionType means it's a folder in reMarkable
+        if item_type == "CollectionType":
+            doc_type = DocumentType.FOLDER
+        elif document_type == "epub":
             doc_type = DocumentType.EPUB
         elif document_type == "pdf":
             doc_type = DocumentType.PDF
@@ -160,6 +165,8 @@ def migrate_notebooks(old_conn, new_session: Session, user_id: int, stats: Migra
                 notebook_uuid=notebook_uuid,
                 visible_name=visible_name,
                 document_type=doc_type,
+                parent_uuid=parent_uuid,
+                full_path=full_path,
                 author=authors,
                 metadata_json=json.dumps(metadata),
                 last_synced_at=last_synced

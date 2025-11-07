@@ -15,6 +15,7 @@ class DocumentType(str, Enum):
     PDF = "pdf"
     EPUB = "epub"
     NOTEBOOK = "notebook"
+    FOLDER = "folder"
 
 
 class Notebook(Base):
@@ -31,6 +32,10 @@ class Notebook(Base):
     notebook_uuid: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     visible_name: Mapped[str] = mapped_column(String(500), nullable=False)
     document_type: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    # Folder hierarchy
+    parent_uuid: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    full_path: Mapped[str | None] = mapped_column(String(2000), nullable=True)
 
     # Document metadata
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
