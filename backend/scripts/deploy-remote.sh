@@ -12,7 +12,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Configuration (override with environment variables)
-SERVER_HOST="${RMIRROR_SERVER_HOST:-YOUR_SERVER_IP}"
+SERVER_HOST="${RMIRROR_SERVER_HOST:-167.235.74.51}"
 SERVER_USER="${RMIRROR_SERVER_USER:-deploy}"
 SERVER_PORT="${RMIRROR_SERVER_PORT:-22}"
 BRANCH="${1:-main}"
@@ -28,10 +28,10 @@ if [ "$SERVER_HOST" = "YOUR_SERVER_IP" ]; then
     echo ""
     echo "Please set your server details:"
     echo ""
-    echo "  export RMIRROR_SERVER_HOST=your.server.ip"
+    echo "  export RMIRROR_SERVER_HOST=167.235.74.51"
     echo "  export RMIRROR_SERVER_USER=deploy"
     echo ""
-    echo "Or edit this script and replace YOUR_SERVER_IP"
+    echo "Or edit this script with your server IP"
     exit 1
 fi
 

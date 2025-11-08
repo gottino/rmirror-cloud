@@ -81,3 +81,6 @@ htmlcov/
 
 # Concepts (strategic planning documents)
 concepts/
+
+# Debug/temp files
+pics/

@@ -3,3 +3,9 @@
 
 # Test data
 /test_data/
+
+# Config files (nginx, etc.)
+/config/
+
+# Debug/temp files
+/pics/
