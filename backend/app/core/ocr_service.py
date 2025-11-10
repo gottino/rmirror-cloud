@@ -66,9 +66,32 @@ class OCRService:
         # Default prompt for handwriting OCR
         if prompt is None:
             prompt = (
-                "Please extract all handwritten text from this image. "
-                "Return only the text content, preserving the structure and formatting as much as possible. "
-                "If there are multiple sections or paragraphs, separate them with blank lines."
+                "Please transcribe all handwritten text from this image in Markdown format.\n\n"
+                "Instructions:\n"
+                "- Extract ALL visible handwritten text, including notes, arrows, symbols, and annotations\n"
+                "- Format the output as clean Markdown with proper structure\n"
+                "- Use ## for main headings, ### for subheadings\n"
+                "- For straight arrows, use → ← ↑ ↓ symbols\n"
+                "- For curved/hooked arrows (↳), use ↳ symbol - these indicate indented sub-points, NOT tasks\n"
+                "- For bullet points, use - (dash) for bullets, NOT asterisks\n"
+                "- For checkboxes (square boxes □), use - [ ] for empty and - [x] for checked\n"
+                "- IMPORTANT: Distinguish between curved arrows (↳) and checkboxes (□) - they are NOT the same\n"
+                "- Use **bold** for emphasis where appropriate\n"
+                "- Use `code` for any technical terms or special notation\n"
+                "- Maintain line breaks and logical structure\n\n"
+                "IMPORTANT - Date Detection:\n"
+                "Look specifically on the RIGHT SIDE of the page at any height for dates in format dd-mm-yyyy "
+                "that might be surrounded by a \"lying L\" or bracket-like shape (⌐ or similar). "
+                "These dates are typically positioned at the same height as underlined titles. "
+                "This is crucial for organizing the content chronologically.\n\n"
+                "If you find a date on the right side:\n"
+                "- Start your transcription with: \"**Date: dd-mm-yyyy**\"\n"
+                "- Then add a horizontal rule: \"---\"\n"
+                "- Then proceed with the content\n\n"
+                "Output Format:\n"
+                "1. If date found: **Date: dd-mm-yyyy**\\n---\\n[content]\n"
+                "2. If no date: Just the content in Markdown format\n\n"
+                "Return only the formatted Markdown text, no explanations."
             )
 
         try:
@@ -135,8 +158,32 @@ class OCRService:
         # Default prompt
         if prompt is None:
             prompt = (
-                "Please extract all handwritten text from this image. "
-                "Return only the text content, preserving the structure and formatting."
+                "Please transcribe all handwritten text from this image in Markdown format.\n\n"
+                "Instructions:\n"
+                "- Extract ALL visible handwritten text, including notes, arrows, symbols, and annotations\n"
+                "- Format the output as clean Markdown with proper structure\n"
+                "- Use ## for main headings, ### for subheadings\n"
+                "- For straight arrows, use → ← ↑ ↓ symbols\n"
+                "- For curved/hooked arrows (↳), use ↳ symbol - these indicate indented sub-points, NOT tasks\n"
+                "- For bullet points, use - (dash) for bullets, NOT asterisks\n"
+                "- For checkboxes (square boxes □), use - [ ] for empty and - [x] for checked\n"
+                "- IMPORTANT: Distinguish between curved arrows (↳) and checkboxes (□) - they are NOT the same\n"
+                "- Use **bold** for emphasis where appropriate\n"
+                "- Use `code` for any technical terms or special notation\n"
+                "- Maintain line breaks and logical structure\n\n"
+                "IMPORTANT - Date Detection:\n"
+                "Look specifically on the RIGHT SIDE of the page at any height for dates in format dd-mm-yyyy "
+                "that might be surrounded by a \"lying L\" or bracket-like shape (⌐ or similar). "
+                "These dates are typically positioned at the same height as underlined titles. "
+                "This is crucial for organizing the content chronologically.\n\n"
+                "If you find a date on the right side:\n"
+                "- Start your transcription with: \"**Date: dd-mm-yyyy**\"\n"
+                "- Then add a horizontal rule: \"---\"\n"
+                "- Then proceed with the content\n\n"
+                "Output Format:\n"
+                "1. If date found: **Date: dd-mm-yyyy**\\n---\\n[content]\n"
+                "2. If no date: Just the content in Markdown format\n\n"
+                "Return only the formatted Markdown text, no explanations."
             )
 
         try:
