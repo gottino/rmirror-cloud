@@ -24,20 +24,12 @@ cat > /etc/sudoers.d/deploy << 'EOF'
 # Database backup
 deploy ALL=(postgres) NOPASSWD: /usr/bin/pg_dump
 
-# Service management
-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart rmirror
-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl start rmirror
-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl stop rmirror
-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl status rmirror
-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active rmirror
-deploy ALL=(root) NOPASSWD: /bin/systemctl restart rmirror
-deploy ALL=(root) NOPASSWD: /bin/systemctl start rmirror
-deploy ALL=(root) NOPASSWD: /bin/systemctl stop rmirror
-deploy ALL=(root) NOPASSWD: /bin/systemctl status rmirror
-deploy ALL=(root) NOPASSWD: /bin/systemctl is-active rmirror
+# Service management (wildcard allows any flags/arguments)
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl * rmirror
+deploy ALL=(root) NOPASSWD: /bin/systemctl * rmirror
 
-# Log viewing
-deploy ALL=(root) NOPASSWD: /usr/bin/journalctl -u rmirror*
+# Log viewing (wildcard allows any arguments)
+deploy ALL=(root) NOPASSWD: /usr/bin/journalctl *
 EOF
 
 # Set proper permissions on sudoers file (must be 0440)
