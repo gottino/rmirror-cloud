@@ -25,6 +25,11 @@ cat > /etc/sudoers.d/deploy << 'EOF'
 deploy ALL=(postgres) NOPASSWD: /usr/bin/pg_dump
 
 # Service management
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart rmirror
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl start rmirror
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl stop rmirror
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl status rmirror
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active rmirror
 deploy ALL=(root) NOPASSWD: /bin/systemctl restart rmirror
 deploy ALL=(root) NOPASSWD: /bin/systemctl start rmirror
 deploy ALL=(root) NOPASSWD: /bin/systemctl stop rmirror
