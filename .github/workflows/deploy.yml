@@ -45,7 +45,7 @@ jobs:
           ssh -i ~/.ssh/deploy_key \
               -p $SERVER_PORT \
               $SERVER_USER@$SERVER_HOST \
-              "cd /var/www/rmirror-cloud && ./backend/scripts/deploy.sh $BRANCH"
+              "cd /var/www/rmirror-cloud && git fetch origin && git checkout $BRANCH && git pull origin $BRANCH && ./backend/scripts/deploy.sh $BRANCH"
 
       - name: Check deployment status
         if: success()
