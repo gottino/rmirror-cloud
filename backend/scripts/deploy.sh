@@ -40,6 +40,8 @@ echo ""
 # Find poetry (check common locations)
 if command -v poetry &> /dev/null; then
     POETRY="poetry"
+elif [ -f "/home/deploy/.local/bin/poetry" ]; then
+    POETRY="/home/deploy/.local/bin/poetry"
 elif [ -f "$HOME/.local/bin/poetry" ]; then
     POETRY="$HOME/.local/bin/poetry"
 elif [ -f "/root/.local/bin/poetry" ]; then
