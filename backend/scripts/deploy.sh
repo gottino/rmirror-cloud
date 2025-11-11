@@ -37,6 +37,21 @@ echo -e "${BLUE}📂 Current directory: $(pwd)${NC}"
 echo -e "${BLUE}🔀 Deploying branch: $BRANCH${NC}"
 echo ""
 
+# Find poetry (check common locations)
+if command -v poetry &> /dev/null; then
+    POETRY="poetry"
+elif [ -f "$HOME/.local/bin/poetry" ]; then
+    POETRY="$HOME/.local/bin/poetry"
+elif [ -f "/root/.local/bin/poetry" ]; then
+    POETRY="/root/.local/bin/poetry"
+else
+    echo -e "${RED}❌ Poetry not found! Install it first:${NC}"
+    echo -e "${RED}   curl -sSL https://install.python-poetry.org | python3 -${NC}"
+    exit 1
+fi
+echo -e "${BLUE}📦 Using poetry: $POETRY${NC}"
+echo ""
+
 # 1. Backup database
 echo -e "${YELLOW}1/8 Creating database backup...${NC}"
 mkdir -p "$BACKUP_DIR"
@@ -66,13 +81,13 @@ echo ""
 
 # 3. Install/update dependencies
 echo -e "${YELLOW}3/8 Installing dependencies...${NC}"
-poetry install --no-dev --no-root --no-interaction
+$POETRY install --no-dev --no-root --no-interaction
 echo -e "${GREEN}✅ Dependencies installed${NC}"
 echo ""
 
 # 4. Run database migrations
 echo -e "${YELLOW}4/8 Running database migrations...${NC}"
-poetry run alembic upgrade head
+$POETRY run alembic upgrade head
 echo -e "${GREEN}✅ Migrations complete${NC}"
 echo ""
 
@@ -94,7 +109,7 @@ echo ""
 # 6. Run tests (optional)
 echo -e "${YELLOW}6/8 Running tests...${NC}"
 if [ -d "tests" ]; then
-    poetry run pytest --maxfail=1 --disable-warnings -q || {
+    $POETRY run pytest --maxfail=1 --disable-warnings -q || {
         echo -e "${RED}❌ Tests failed! Aborting deployment.${NC}"
         exit 1
     }
