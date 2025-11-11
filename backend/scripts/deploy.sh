@@ -83,7 +83,7 @@ echo ""
 
 # 3. Install/update dependencies
 echo -e "${YELLOW}3/8 Installing dependencies...${NC}"
-$POETRY install --no-dev --no-root --no-interaction
+$POETRY install --without dev --no-root --no-interaction
 echo -e "${GREEN}✅ Dependencies installed${NC}"
 echo ""
 
