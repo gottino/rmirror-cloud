@@ -84,3 +84,6 @@ concepts/
 
 # Debug/temp files
 pics/
+
+# External source code
+rm-int-src/

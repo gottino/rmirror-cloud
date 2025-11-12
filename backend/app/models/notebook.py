@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -40,6 +40,8 @@ class Notebook(Base):
     # Document metadata
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    publisher: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    publication_date: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Storage
     s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Original file
@@ -49,6 +51,13 @@ class Notebook(Base):
 
     # Metadata
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # reMarkable state
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_opened: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_opened_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

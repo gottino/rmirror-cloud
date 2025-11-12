@@ -6,12 +6,14 @@ import uuid
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_active_user
+from app.core.notebook_metadata_service import NotebookMetadataService
 from app.core.ocr_service import OCRService
 from app.core.pdf_service import PDFService
 from app.core.rm_converter import RMConverter
@@ -304,4 +306,145 @@ async def process_rm_file(
             temp_rm_path.unlink(missing_ok=True)
         raise HTTPException(
             status_code=500, detail=f"Failed to process .rm file: {str(e)}"
+        )
+
+
+class UpdateMetadataRequest(BaseModel):
+    """Request to update notebook metadata."""
+    
+    notebook_uuid: str
+    visible_name: str
+    parent_uuid: Optional[str] = None
+    document_type: str = "notebook"
+    pinned: Optional[bool] = None
+    deleted: Optional[bool] = None
+    version: Optional[int] = None
+    last_modified: Optional[str] = None
+    last_opened: Optional[str] = None
+    last_opened_page: Optional[int] = None
+    authors: Optional[str] = None
+    publisher: Optional[str] = None
+    publication_date: Optional[str] = None
+
+
+class UpdateMetadataResponse(BaseModel):
+    """Response for metadata update."""
+    
+    success: bool
+    notebook_id: int
+    notebook_uuid: str
+    full_path: str
+    message: str
+
+
+@router.post("/metadata/update", response_model=UpdateMetadataResponse)
+async def update_notebook_metadata(
+    request: UpdateMetadataRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Update or create notebook metadata and rebuild folder paths.
+    
+    This endpoint allows clients to sync metadata from reMarkable devices,
+    including folder hierarchies, document types, and reMarkable-specific
+    state like pinned, deleted, etc.
+    
+    After updating the metadata, it automatically rebuilds the full folder
+    path for the notebook and any affected children.
+    
+    Args:
+        request: Metadata update request
+        current_user: Authenticated user
+        db: Database session
+        
+    Returns:
+        UpdateMetadataResponse with updated notebook info
+    """
+    try:
+        # Initialize metadata service
+        metadata_service = NotebookMetadataService(db, current_user.id)
+        
+        # Prepare metadata dict
+        metadata = {}
+        if request.pinned is not None:
+            metadata["pinned"] = request.pinned
+        if request.deleted is not None:
+            metadata["deleted"] = request.deleted
+        if request.version is not None:
+            metadata["version"] = request.version
+        if request.last_modified:
+            metadata["last_modified"] = request.last_modified
+        if request.last_opened:
+            metadata["last_opened"] = request.last_opened
+        if request.last_opened_page is not None:
+            metadata["last_opened_page"] = request.last_opened_page
+        if request.authors:
+            metadata["authors"] = request.authors
+        if request.publisher:
+            metadata["publisher"] = request.publisher
+        if request.publication_date:
+            metadata["publication_date"] = request.publication_date
+        
+        # Update notebook
+        notebook = metadata_service.update_single_notebook_metadata(
+            notebook_uuid=request.notebook_uuid,
+            visible_name=request.visible_name,
+            parent_uuid=request.parent_uuid,
+            document_type=request.document_type,
+            metadata=metadata if metadata else None,
+        )
+        
+        # If this is a folder, update paths for all children
+        if request.document_type == "folder":
+            metadata_service.update_paths_for_subtree(request.notebook_uuid)
+        
+        return UpdateMetadataResponse(
+            success=True,
+            notebook_id=notebook.id,
+            notebook_uuid=notebook.notebook_uuid,
+            full_path=notebook.full_path or "",
+            message=f"Updated metadata for {notebook.visible_name}",
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to update metadata: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update metadata: {str(e)}"
+        )
+
+
+@router.post("/metadata/rebuild-paths")
+async def rebuild_all_paths(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Rebuild all notebook paths for the current user.
+    
+    Useful after bulk metadata updates or to fix any path inconsistencies.
+    
+    Args:
+        current_user: Authenticated user
+        db: Database session
+        
+    Returns:
+        Dict with number of updated paths
+    """
+    try:
+        metadata_service = NotebookMetadataService(db, current_user.id)
+        updated_count = metadata_service.update_notebook_paths()
+        
+        return {
+            "success": True,
+            "updated_count": updated_count,
+            "message": f"Rebuilt paths for {updated_count} notebooks",
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to rebuild paths: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to rebuild paths: {str(e)}"
         )
