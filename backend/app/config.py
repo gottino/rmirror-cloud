@@ -73,10 +73,10 @@ class Settings(BaseSettings):
         db = data.get("redis_db", 0)
         return f"redis://{host}:{port}/{db}"
 
-    # S3/MinIO Storage
-    s3_endpoint_url: str
-    s3_access_key: str
-    s3_secret_key: str
+    # S3/MinIO Storage (optional - uses local storage if not configured)
+    s3_endpoint_url: Optional[str] = None
+    s3_access_key: Optional[str] = None
+    s3_secret_key: Optional[str] = None
     s3_bucket_name: str = "rmirror"
     s3_region: str = "us-east-1"
 
