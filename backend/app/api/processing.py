@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_active_user
 from app.core.ocr_service import OCRService
+from app.core.pdf_service import PDFService
 from app.core.rm_converter import RMConverter
 from app.core.rm_metadata import RMMetadataParser
 from app.database import get_db
@@ -196,6 +197,16 @@ async def process_rm_file(
         )
         logger.info(f"Stored .rm file at: {storage_key}")
 
+        # Store page PDF
+        pdf_storage_key = f"users/{current_user.id}/notebooks/{notebook_uuid}/pages/{page_uuid}.pdf"
+        pdf_stream = BytesIO(pdf_bytes)
+        await storage.upload_file(
+            pdf_stream,
+            pdf_storage_key,
+            content_type="application/pdf"
+        )
+        logger.info(f"Stored page PDF at: {pdf_storage_key}")
+
         # Find or create Page record
         page = db.query(Page).filter(
             Page.notebook_id == notebook.id,
@@ -210,6 +221,7 @@ async def process_rm_file(
                 page_number=page_count + 1,
                 page_uuid=page_uuid,
                 s3_key=storage_key,
+                pdf_s3_key=pdf_storage_key,
                 file_hash=file_hash,
                 ocr_status=OcrStatus.PROCESSING,
             )
@@ -217,6 +229,7 @@ async def process_rm_file(
         else:
             # Update existing page
             page.s3_key = storage_key
+            page.pdf_s3_key = pdf_storage_key
             page.file_hash = file_hash
             page.ocr_status = OcrStatus.PROCESSING
 
@@ -227,6 +240,44 @@ async def process_rm_file(
 
         db.commit()
         db.refresh(page)
+
+        # Regenerate combined notebook PDF
+        logger.info(f"Regenerating combined PDF for notebook {notebook.id}")
+        try:
+            # Get all pages for this notebook, sorted by page number
+            all_pages = db.query(Page).filter(
+                Page.notebook_id == notebook.id,
+                Page.pdf_s3_key.isnot(None)
+            ).order_by(Page.page_number).all()
+
+            if all_pages:
+                # Download all page PDFs
+                page_pdfs = []
+                for p in all_pages:
+                    page_pdf_bytes = await storage.download_file(p.pdf_s3_key)
+                    page_pdfs.append(page_pdf_bytes)
+
+                # Combine into notebook PDF
+                pdf_service = PDFService()
+                combined_pdf = pdf_service.combine_page_pdfs(page_pdfs)
+
+                # Store combined notebook PDF
+                notebook_pdf_key = f"users/{current_user.id}/notebooks/{notebook_uuid}/notebook.pdf"
+                combined_pdf_stream = BytesIO(combined_pdf)
+                await storage.upload_file(
+                    combined_pdf_stream,
+                    notebook_pdf_key,
+                    content_type="application/pdf"
+                )
+
+                # Update notebook with PDF location
+                notebook.notebook_pdf_s3_key = notebook_pdf_key
+                db.commit()
+
+                logger.info(f"Combined {len(all_pages)} pages into notebook PDF at: {notebook_pdf_key}")
+        except Exception as e:
+            logger.error(f"Failed to generate notebook PDF: {e}", exc_info=True)
+            # Don't fail the whole request if PDF generation fails
 
         # Clean up temp file
         temp_rm_path.unlink(missing_ok=True)

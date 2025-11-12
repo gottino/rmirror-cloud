@@ -34,7 +34,8 @@ class Page(Base):
     page_uuid: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Storage
-    s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)  # .rm file
+    pdf_s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)  # PDF version
     file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     # OCR

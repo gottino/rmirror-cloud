@@ -42,7 +42,8 @@ class Notebook(Base):
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Storage
-    s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Original file
+    notebook_pdf_s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Combined PDF
     file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
