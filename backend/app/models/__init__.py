@@ -6,6 +6,7 @@ from app.models.notebook import Notebook
 from app.models.page import Page
 from app.models.processing_job import ProcessingJob
 from app.models.sync_record import SyncRecord
+from app.models.todo import Todo
 from app.models.user import User
 
 __all__ = [
@@ -13,6 +14,7 @@ __all__ = [
     "Notebook",
     "Page",
     "Highlight",
+    "Todo",
     "SyncRecord",
     "ProcessingJob",
     "Connector",

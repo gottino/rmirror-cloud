@@ -76,6 +76,9 @@ class Notebook(Base):
     highlights: Mapped[list["Highlight"]] = relationship(
         "Highlight", back_populates="notebook", cascade="all, delete-orphan"
     )
+    todos: Mapped[list["Todo"]] = relationship(
+        "Todo", back_populates="notebook", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Notebook(id={self.id}, name={self.visible_name})>"

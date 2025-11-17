@@ -1220,6 +1220,21 @@ files = [
 ]
 
 [[package]]
+name = "notion-client"
+version = "2.7.0"
+description = "Python client for the official Notion API"
+optional = false
+python-versions = "<4,>=3.8"
+groups = ["main"]
+files = [
+    {file = "notion_client-2.7.0-py2.py3-none-any.whl", hash = "sha256:9057a8ac2103ff245556c2a5102bde1d2ccdd3505f66bcc130fc31857731d91e"},
+    {file = "notion_client-2.7.0.tar.gz", hash = "sha256:31bde3ae03ede77650cadce136152916efdd86579ff65f49fc6705fbe462e2fb"},
+]
+
+[package.dependencies]
+httpx = ">=0.23.0"
+
+[[package]]
 name = "packaging"
 version = "23.2"
 description = "Core utilities for Python packages"
@@ -2551,4 +2566,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11,<3.14"
-content-hash = "c81a760cd78942e62025d6af1ac8cc91bf9b9349bedbfd6057cf26c044d43ce0"
+content-hash = "a94be8f544d4ac711fbccaab146a72b797613d4f72b0b6c2bd16a17b5d0be61b"

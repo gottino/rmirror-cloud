@@ -56,6 +56,9 @@ class User(Base):
     highlights: Mapped[list["Highlight"]] = relationship(
         "Highlight", back_populates="user", cascade="all, delete-orphan"
     )
+    todos: Mapped[list["Todo"]] = relationship(
+        "Todo", back_populates="user", cascade="all, delete-orphan"
+    )
     connectors: Mapped[list["Connector"]] = relationship(
         "Connector", back_populates="user", cascade="all, delete-orphan"
     )

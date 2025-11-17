@@ -58,13 +58,14 @@ class Highlight(Base):
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="highlights")
     notebook: Mapped["Notebook"] = relationship("Notebook", back_populates="highlights")
-    sync_records: Mapped[list["SyncRecord"]] = relationship(
-        "SyncRecord",
-        back_populates="highlight",
-        cascade="all, delete-orphan",
-        foreign_keys="SyncRecord.item_id",
-        primaryjoin="and_(Highlight.id==SyncRecord.item_id, SyncRecord.item_type=='highlight')",
-    )
+    # TODO: Add sync_records relationship when implementing highlight sync
+    # sync_records: Mapped[list["SyncRecord"]] = relationship(
+    #     "SyncRecord",
+    #     back_populates="highlight",
+    #     cascade="all, delete-orphan",
+    #     foreign_keys="SyncRecord.item_id",
+    #     primaryjoin="and_(Highlight.id==SyncRecord.item_id, SyncRecord.item_type=='highlight')",
+    # )
 
     def __repr__(self) -> str:
         preview = self.original_text[:50] if self.original_text else ""

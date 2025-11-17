@@ -56,6 +56,9 @@ class Page(Base):
 
     # Relationships
     notebook: Mapped["Notebook"] = relationship("Notebook", back_populates="pages")
+    todos: Mapped[list["Todo"]] = relationship(
+        "Todo", back_populates="page", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Page(id={self.id}, notebook_id={self.notebook_id}, page={self.page_number})>"

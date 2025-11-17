@@ -136,6 +136,41 @@ async def list_notebooks(
     return notebooks
 
 
+@router.get("/uuid/{notebook_uuid}", response_model=NotebookSchema)
+async def get_notebook_by_uuid(
+    notebook_uuid: str,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """
+    Get a specific notebook by UUID.
+
+    Args:
+        notebook_uuid: Notebook UUID
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        Notebook record
+    """
+    notebook = (
+        db.query(Notebook)
+        .filter(
+            Notebook.notebook_uuid == notebook_uuid,
+            Notebook.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not notebook:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notebook not found",
+        )
+
+    return notebook
+
+
 @router.get("/{notebook_id}", response_model=NotebookSchema)
 async def get_notebook(
     notebook_id: int,
