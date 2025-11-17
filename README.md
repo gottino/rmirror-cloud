@@ -48,23 +48,23 @@ See [docs/self-hosting](docs/self-hosting) for detailed instructions.
 
 ```
 ┌─────────────────┐
-│  Desktop Agent  │  ← Tauri app (Rust + React)
-│  Watches folder │     10MB installer, cross-platform
+│   Mac Agent     │  ← Python background service
+│  (Background)   │     File watching + localhost web UI
 └────────┬────────┘
          │ HTTPS
          ↓
 ┌─────────────────────────────────────┐
-│       Cloud Infrastructure          │
+│       Cloud Backend                 │
 │                                     │
 │  ┌──────────────┐  ┌─────────────┐ │
-│  │  FastAPI     │  │ PostgreSQL  │ │
-│  │  Backend     │  │ Database    │ │
+│  │  FastAPI     │  │  SQLite/    │ │
+│  │  REST API    │  │  PostgreSQL │ │
 │  └──────┬───────┘  └─────────────┘ │
 │         │                           │
-│  ┌──────▼───────┐  ┌─────────────┐ │
-│  │ OCR Workers  │  │  Redis      │ │
-│  │ Claude API   │  │  Queue      │ │
-│  └──────────────┘  └─────────────┘ │
+│  ┌──────▼───────┐                  │
+│  │ OCR Pipeline │                  │
+│  │ Claude Vision│                  │
+│  └──────────────┘                  │
 │                                     │
 │  ┌──────────────────────────────┐  │
 │  │  Next.js Web Dashboard       │  │
@@ -77,10 +77,10 @@ See [docs/self-hosting](docs/self-hosting) for detailed instructions.
 ```
 
 **Components:**
-- **Agent** (`agent/`) - Tauri desktop app for file watching and upload
+- **Agent** (`agent/`) - Python background service for Mac with localhost web UI
 - **Backend** (`backend/`) - FastAPI server with OCR workers
-- **Dashboard** (`dashboard/`) - Next.js web interface
-- **Infrastructure** (`infrastructure/`) - Docker, Kubernetes, Terraform configs
+- **Dashboard** (`dashboard/`) - Next.js web interface (planned)
+- **Infrastructure** (`infrastructure/`) - Docker, deployment configs
 
 ---
 
@@ -88,19 +88,17 @@ See [docs/self-hosting](docs/self-hosting) for detailed instructions.
 
 | Component | Technology | Why |
 |-----------|-----------|-----|
-| Agent | Tauri 2.0 | Small (~10MB), cross-platform, native performance |
+| Agent | Python + Flask | Simple, lightweight, same stack as backend |
 | Backend | FastAPI | Async Python, type-safe, auto-docs |
-| Database | PostgreSQL 15 | Robust, JSON support, row-level security |
-| Queue | Redis + RQ | Simple, Python-native, reliable |
-| Storage | S3-compatible | Scalable object storage |
-| Dashboard | Next.js 14 | SSR, great DX, Vercel deployment |
-| Auth | Supabase Auth | Secure, managed OAuth |
+| Database | SQLite/PostgreSQL | Simple for dev, robust for production |
+| OCR | Claude Vision API | Best-in-class handwriting recognition |
+| Storage | S3-compatible (Backblaze B2) | Scalable, cost-effective object storage |
+| Dashboard | Next.js 14 | SSR, great DX (planned) |
+| Auth | JWT | Simple, stateless, secure |
 
 ---
 
 ## 🎯 Roadmap
-
-### ✅ Completed
 
 **Core Backend**
 - [x] Repository setup & project structure
@@ -127,32 +125,27 @@ See [docs/self-hosting](docs/self-hosting) for detailed instructions.
 - [x] Notion sync with markdown formatting
 - [x] OAuth integration framework
 - [x] Background sync processing
+- [ ] Readwise integration
+- [ ] Obsidian sync
+- [ ] Todo app integration (other than Notion)
 
 **Documentation**
 - [x] Comprehensive API reference
 - [x] Deployment guides
 - [x] Development setup documentation
 
-### 🚧 In Progress
-
 **Mac Agent**
-- [ ] Tauri desktop application
-- [ ] File watching & automatic sync
-- [ ] Background processing
-- [ ] Installer for macOS
+- [ ] Python background service
+- [ ] File watching & automatic sync to cloud
+- [ ] Web UI for configuration (localhost)
+- [ ] System tray icon for status
+- [ ] Signed & notarized macOS installer (.pkg)
+- [ ] Auto-start on login
 
 **Web Dashboard**
 - [ ] Next.js web interface
-- [ ] Notebook browsing & search
-- [ ] Todo management UI
 - [ ] Integration configuration
-
-### 📋 Planned
-
-**Integrations**
-- [ ] Readwise integration
-- [ ] Obsidian sync
-- [ ] Todo app integration (other than Notion)
+- [ ] Notebook browsing & search
 
 **Polish**
 - [ ] Performance optimization
@@ -232,9 +225,9 @@ This means:
 
 Built with ❤️ using:
 - [Claude](https://anthropic.com) for AI-powered OCR
-- [Tauri](https://tauri.app) for the desktop agent
 - [FastAPI](https://fastapi.tiangolo.com) for the backend
-- [Next.js](https://nextjs.org) for the dashboard
+- [Python](https://python.org) for the Mac agent
+- [Next.js](https://nextjs.org) for the web dashboard
 
 Special thanks to the reMarkable community for inspiration and feedback.
 
