@@ -100,27 +100,69 @@ See [docs/self-hosting](docs/self-hosting) for detailed instructions.
 
 ## 🎯 Roadmap
 
-**Phase 1: Foundation (Months 1-2)** ✅ In Progress
-- [x] Repository setup
-- [ ] Core API (upload, auth, jobs)
-- [ ] OCR processing pipeline
-- [ ] Basic web dashboard
+### ✅ Completed
 
-**Phase 2: Agent (Months 2-3)**
-- [ ] Tauri agent with file watching
-- [ ] Cross-platform installers (Mac, Windows, Linux)
-- [ ] Auto-update mechanism
+**Core Backend**
+- [x] Repository setup & project structure
+- [x] FastAPI REST API with authentication (JWT)
+- [x] User management & authorization
+- [x] Notebook & page storage
+- [x] Database migrations (Alembic)
+- [x] Production deployment (Hetzner Cloud)
+- [x] CI/CD with GitHub Actions
 
-**Phase 3: Connectors (Month 4)**
-- [ ] Notion integration
+**OCR & Processing**
+- [x] Claude Vision API integration
+- [x] OCR processing pipeline
+- [x] Handwriting recognition from reMarkable files
+
+**Todo Management**
+- [x] Intelligent todo extraction from checkboxes
+- [x] Fuzzy matching deduplication
+- [x] Todo CRUD API endpoints
+- [x] Statistics and filtering
+- [ ] Sync todos to Notion
+
+**Integrations**
+- [x] Notion sync with markdown formatting
+- [x] OAuth integration framework
+- [x] Background sync processing
+
+**Documentation**
+- [x] Comprehensive API reference
+- [x] Deployment guides
+- [x] Development setup documentation
+
+### 🚧 In Progress
+
+**Mac Agent**
+- [ ] Tauri desktop application
+- [ ] File watching & automatic sync
+- [ ] Background processing
+- [ ] Installer for macOS
+
+**Web Dashboard**
+- [ ] Next.js web interface
+- [ ] Notebook browsing & search
+- [ ] Todo management UI
+- [ ] Integration configuration
+
+### 📋 Planned
+
+**Integrations**
 - [ ] Readwise integration
-- [ ] Generic webhook support
+- [ ] Obsidian sync
+- [ ] Todo app integration (other than Notion)
 
-**Phase 4: Polish & Launch (Months 5-6)**
-- [ ] Advanced search
-- [ ] Usage analytics
+**Polish**
 - [ ] Performance optimization
-- [ ] Public beta launch
+- [ ] End-to-end encryption option
+- [ ] Multi-language support
+
+**Launch**
+- [ ] Public beta
+- [ ] Managed cloud service
+- [ ] Pricing & subscription tiers
 
 ---
 
@@ -139,11 +181,12 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## 📚 Documentation
 
-- [Architecture Overview](docs/architecture.md)
-- [Self-Hosting Guide](docs/self-hosting/)
-- [API Reference](docs/api-reference.md)
-- [Contributing Guidelines](CONTRIBUTING.md)
-- [Security Policy](SECURITY.md)
+- **[📖 Complete Documentation](docs/)** - Comprehensive project documentation
+- **[Architecture Overview](docs/architecture.md)** - System design and components
+- **[API Reference](docs/api/backend-api.md)** - Complete REST API documentation
+- **[Development Setup](docs/development/setup.md)** - Get started with development
+- **[Deployment Guide](docs/deployment/hetzner.md)** - Production deployment
+- **[Contributing Guidelines](CONTRIBUTING.md)** - How to contribute
 
 ---
 
