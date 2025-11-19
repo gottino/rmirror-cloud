@@ -135,9 +135,11 @@ See [docs/self-hosting](docs/self-hosting) for detailed instructions.
 - [x] Development setup documentation
 
 **Mac Agent**
-- [ ] Python background service
-- [ ] File watching & automatic sync to cloud
-- [ ] Web UI for configuration (localhost)
+- [x] Python background service
+- [x] File watching & automatic sync to cloud
+- [x] Web UI for configuration (localhost)
+- [x] Intelligent sync queue with batching and deduplication
+- [x] Exponential backoff retry logic
 - [ ] System tray icon for status
 - [ ] Signed & notarized macOS installer (.pkg)
 - [ ] Auto-start on login

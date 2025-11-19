@@ -161,13 +161,28 @@ The agent runs locally on macOS and syncs reMarkable tablets with the cloud back
 
 **Location:** `/agent`
 
-**Status:** In development
+**Status:** Beta - Core functionality complete
 
 **Key Features:**
-- Automatic reMarkable tablet detection
-- File sync to cloud backend
-- Background processing
-- Native macOS integration
+- Automatic file watching with watchdog library
+- Real-time sync to cloud backend
+- Intelligent sync queue with batching and deduplication
+- Exponential backoff retry logic for failed uploads
+- Web UI for configuration and monitoring (localhost:5555)
+- CLI interface with foreground/background modes
+- Support for .rm, .metadata, and .content files
+- JWT authentication with cloud backend
+
+**Installation:**
+```bash
+cd agent
+poetry install
+cp config.example.yaml ~/.config/rmirror/config.yaml
+# Edit config with your credentials
+poetry run python -m app.main --foreground
+```
+
+See [agent/README.md](../agent/README.md) for detailed setup instructions.
 
 ### Dashboard (Web)
 
@@ -421,7 +436,7 @@ This project is proprietary software. All rights reserved.
 ## Project Status
 
 🟢 **Backend API** - Production ready
-🟡 **Mac Agent** - In development
+🟢 **Mac Agent** - Beta (core functionality complete)
 🔴 **Web Dashboard** - Planned
 
 Last updated: November 2025

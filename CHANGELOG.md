@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Mac Agent (2025-11-19)
+- Python-based background service for automatic reMarkable sync
+- Real-time file watching with watchdog library
+- Intelligent sync queue with batching and deduplication
+- Cloud sync client with JWT authentication
+- Exponential backoff retry logic for failed uploads
+- Flask web UI for configuration and monitoring (localhost:5555)
+- CLI interface with foreground/background modes
+- Support for .rm, .metadata, and .content files
+- YAML-based configuration with Pydantic validation
+- Automatic detection of reMarkable Desktop app folder on macOS
+
 #### Todo Management (2025-11-17)
 - Intelligent todo extraction from checkbox patterns in handwritten notes
 - Support for multiple checkbox formats (Markdown `- [ ]`, Unicode `☐`, etc.)
@@ -136,7 +148,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Mac Agent** (In Progress)
 - Local reMarkable tablet sync
-- Tauri desktop application
+- Python background service
 - File watching and automatic upload
 
 **Web Dashboard** (Planned)

@@ -11,11 +11,12 @@ rMirror Cloud is a multi-tenant cloud service that syncs reMarkable tablet conte
 │                      User's Device                            │
 │                                                               │
 │  ┌─────────────────────────────────────────────────────────┐ │
-│  │              Tauri Desktop Agent                         │ │
-│  │  • File system watcher (platform-specific)              │ │
-│  │  • Change detection & deduplication (SHA-256)           │ │
-│  │  • Upload queue with retry logic                        │ │
-│  │  • API key authentication                               │ │
+│  │              Python Mac Agent                            │ │
+│  │  • File system watcher (watchdog library)               │ │
+│  │  • Change detection & deduplication                     │ │
+│  │  • Upload queue with batching & retry logic             │ │
+│  │  • JWT authentication                                   │ │
+│  │  • Web UI for configuration (localhost:5555)            │ │
 │  └─────────────────────────────────────────────────────────┘ │
 └────────────────────────┬─────────────────────────────────────┘
                          │ HTTPS (TLS 1.3)
@@ -355,10 +356,12 @@ Dashboard → Supabase Auth → API
 - Row-level security for multi-tenancy
 - Proven reliability at scale
 
-### Why Tauri?
-- 10MB installer (vs Electron's 100MB+)
-- Native performance
-- Cross-platform with shared codebase
+### Why Python for Mac Agent?
+- Simple, lightweight background service
+- Same stack as backend (shared libraries)
+- Easy local development and debugging
+- Fast iteration for Mac-only initial release
+- Flask provides simple web UI
 
 ### Why Redis + RQ?
 - Simple Python integration

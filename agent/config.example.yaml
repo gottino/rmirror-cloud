@@ -1,0 +1,59 @@
+# rMirror Agent Configuration Example
+# Copy this file to ~/.config/rmirror/config.yaml and edit as needed
+
+# rMirror Cloud API Configuration
+api:
+  # API URL (use http://localhost:8000/v1 for local development)
+  url: "https://rmirror.cloud/v1"
+
+  # Your rMirror Cloud credentials
+  email: "your@email.com"
+  password: "your-password"
+
+  # JWT token (auto-populated after first login, leave empty)
+  token: null
+
+# reMarkable Desktop App Configuration
+remarkable:
+  # Path to reMarkable Desktop sync folder
+  # Default macOS location:
+  source_directory: "~/Library/Containers/com.remarkable.desktop/Data/Library/Application Support/remarkable/desktop"
+
+  # Enable automatic file watching
+  watch_enabled: true
+
+# Web UI Configuration
+web:
+  # Enable web UI
+  enabled: true
+
+  # Port for web UI (http://localhost:5555)
+  port: 5555
+
+  # Host (127.0.0.1 = localhost only)
+  host: "127.0.0.1"
+
+# System Tray Configuration
+tray:
+  # Enable system tray icon in menu bar
+  enabled: true
+
+  # Show desktop notifications
+  show_notifications: true
+
+# Sync Configuration
+sync:
+  # Enable automatic syncing
+  auto_sync: true
+
+  # Number of files to upload in one batch
+  batch_size: 10
+
+  # Number of retry attempts for failed uploads
+  retry_attempts: 3
+
+  # Sync interval in seconds (60 = 1 minute)
+  sync_interval: 60
+
+  # Cooldown period to deduplicate file events (seconds)
+  cooldown_seconds: 5
