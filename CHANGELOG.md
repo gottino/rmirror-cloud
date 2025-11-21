@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for .rm, .metadata, and .content files
 - YAML-based configuration with Pydantic validation
 - Automatic detection of reMarkable Desktop app folder on macOS
+- Menu bar integration with rumps (2025-11-21)
+  - System tray icon in macOS menu bar
+  - Quick access to web UI and settings
+  - Status display (Starting, Connected, Watching)
+  - Graceful quit functionality
 
 #### Todo Management (2025-11-17)
 - Intelligent todo extraction from checkbox patterns in handwritten notes

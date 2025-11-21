@@ -19,17 +19,17 @@ from app.config import Config
 class Agent:
     """Main rMirror Agent application."""
 
-    def __init__(self, config: Config, foreground: bool = False):
+    def __init__(self, config: Config, foreground: bool = False, tray_app: Optional[object] = None):
         """Initialize the agent."""
         self.config = config
         self.foreground = foreground
         self.running = False
+        self.tray_app = tray_app
 
         # Components (initialized later)
         self.file_watcher = None
         self.cloud_sync = None
         self.web_app = None
-        self.tray_app = None
 
     async def start(self) -> None:
         """Start the agent and all components."""
@@ -37,8 +37,16 @@ class Agent:
         self.running = True
 
         try:
+            # Update tray status
+            if self.tray_app:
+                self.tray_app.update_status("Starting...")
+
             # Initialize components
             await self._initialize_components()
+
+            # Update tray status
+            if self.tray_app:
+                self.tray_app.update_status("Connected")
 
             # Start web server in background thread
             if self.config.web.enabled:
@@ -53,6 +61,10 @@ class Agent:
                 print("\nrMirror Agent running in foreground mode. Press Ctrl+C to stop.")
                 print(f"Web UI: http://{self.config.web.host}:{self.config.web.port}")
                 print(f"Watching: {self.config.remarkable.source_directory}\n")
+
+            # Update tray status
+            if self.tray_app:
+                self.tray_app.update_status("Watching")
 
             # Start file watcher (this will block)
             if self.config.remarkable.watch_enabled:
@@ -187,10 +199,32 @@ def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> Non
     setup_signal_handlers(agent)
 
     # Run the agent
-    try:
-        asyncio.run(agent.start())
-    except KeyboardInterrupt:
-        pass
+    if foreground or not config.tray.enabled:
+        # Foreground mode: run asyncio in main thread
+        try:
+            asyncio.run(agent.start())
+        except KeyboardInterrupt:
+            pass
+    else:
+        # Background mode with menu bar: run asyncio in thread, tray in main thread
+        from app.tray import TrayApp
+
+        # Create tray app
+        app = TrayApp(config, agent=agent)
+
+        # Set tray app reference in agent
+        agent.tray_app = app
+
+        # Run agent in background thread
+        agent_thread = threading.Thread(
+            target=lambda: asyncio.run(agent.start()),
+            daemon=True,
+        )
+        agent_thread.start()
+
+        # Run tray app in main thread (blocking)
+        app.update_status("Idle")
+        app.run()
 
 
 if __name__ == "__main__":
