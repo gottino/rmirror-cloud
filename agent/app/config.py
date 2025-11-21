@@ -166,6 +166,13 @@ class Config(BaseSettings):
         }
 
         with open(config_path, "w") as f:
-            yaml.safe_dump(config_dict, f, default_flow_style=False, sort_keys=False)
+            # Prevent YAML from wrapping long strings (like paths with spaces)
+            yaml.safe_dump(
+                config_dict,
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+                width=float('inf'),  # Never wrap lines
+            )
 
         print(f"Configuration saved to: {config_path}")

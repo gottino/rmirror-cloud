@@ -23,11 +23,10 @@ class ReMarkableEventHandler(FileSystemEventHandler):
     # File extensions we care about
     RELEVANT_EXTENSIONS = {".content", ".metadata", ".pagedata", ".rm", ".pdf", ".epub"}
 
-    def __init__(self, sync_queue: SyncQueue, loop: asyncio.AbstractEventLoop):
+    def __init__(self, sync_queue: SyncQueue):
         """Initialize event handler."""
         super().__init__()
         self.sync_queue = sync_queue
-        self.loop = loop
 
     def _should_ignore_file(self, file_path: str) -> bool:
         """
@@ -122,12 +121,17 @@ class ReMarkableEventHandler(FileSystemEventHandler):
 
         print(f"📝 Detected change: {file_path.name} (UUID: {notebook_uuid}, type: {file_type})")
 
-        # Add to sync queue from the watchdog thread
-        # Use run_coroutine_threadsafe to schedule in the main event loop
-        asyncio.run_coroutine_threadsafe(
-            self.sync_queue.add(file_path, notebook_uuid, file_type),
-            self.loop
-        )
+        # Add to sync queue using the same pattern as rm-int-src
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._handle_file_change(file_path, notebook_uuid, file_type))
+        except RuntimeError:
+            # No event loop running - create a new one for this operation
+            asyncio.run(self._handle_file_change(file_path, notebook_uuid, file_type))
+
+    async def _handle_file_change(self, file_path: Path, notebook_uuid: str, file_type: str):
+        """Handle file change asynchronously."""
+        await self.sync_queue.add(file_path, notebook_uuid, file_type)
 
 
 class FileWatcher:
@@ -145,10 +149,11 @@ class FileWatcher:
         self.sync_queue = SyncQueue(config, cloud_sync)
 
         self.observer: Optional[Observer] = None
+        self.event_handler: Optional[ReMarkableEventHandler] = None
         self.running = False
 
     async def start(self) -> None:
-        """Start watching the reMarkable folder."""
+        """Start watching the reMarkable folder - EXACT COPY OF ISOLATION TEST PATTERN."""
         source_dir = Path(self.config.remarkable.source_directory)
 
         if not source_dir.exists():
@@ -159,20 +164,20 @@ class FileWatcher:
 
         print(f"👁  Watching: {source_dir}")
 
-        # Start sync queue
+        # EXACT PATTERN FROM ISOLATION TEST
         await self.sync_queue.start()
 
-        # Create and start observer
         self.observer = Observer()
-        loop = asyncio.get_event_loop()
-        event_handler = ReMarkableEventHandler(self.sync_queue, loop)
-        self.observer.schedule(event_handler, str(source_dir), recursive=True)
+        self.event_handler = ReMarkableEventHandler(self.sync_queue)
+
+        watch_dir = str(source_dir)
+        print(f'Scheduling observer for: {watch_dir}')
+        self.observer.schedule(self.event_handler, watch_dir, recursive=True)
         self.observer.start()
+        print(f'Observer started, is_alive: {self.observer.is_alive()}')
 
         self.running = True
         print("✓ File watcher started")
-        print(f"  Observer is alive: {self.observer.is_alive()}")
-        print(f"  Observer watching {len(self.observer.emitters)} emitter(s)")
 
         # Keep running
         try:
