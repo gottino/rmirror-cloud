@@ -3,6 +3,7 @@ Sync queue for batching and deduplicating file uploads.
 """
 
 import asyncio
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -11,6 +12,8 @@ from typing import Optional
 
 from app.config import Config
 from app.sync.cloud_sync import CloudSync, CloudSyncError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -88,6 +91,7 @@ class SyncQueue:
         """
         # Check cooldown
         if not self.should_sync(file_path, notebook_uuid):
+            logger.debug(f"Skipping {file_path.name} (cooldown period)")
             print(f"⏭  Skipping {file_path.name} (cooldown period)")
             return False
 
@@ -100,6 +104,7 @@ class SyncQueue:
         )
 
         await self.queue.put(item)
+        logger.info(f"Queued for sync: {file_path.name} (type={file_type}, uuid={notebook_uuid[:8]}...)")
         print(f"📝 Queued for sync: {file_path.name}")
 
         # Update recent syncs
@@ -118,6 +123,8 @@ class SyncQueue:
         Returns:
             Statistics about the batch processing
         """
+        logger.info(f"Processing batch of {len(items)} items")
+
         stats = {
             "uploaded": 0,
             "failed": 0,
@@ -129,31 +136,47 @@ class SyncQueue:
         for item in items:
             notebooks[item.notebook_uuid].append(item)
 
+        logger.debug(f"Batch contains {len(notebooks)} notebooks")
+
         # Process each notebook
         for notebook_uuid, notebook_items in notebooks.items():
+            logger.info(f"Syncing {len(notebook_items)} files for notebook {notebook_uuid[:8]}...")
             print(f"\n📤 Syncing {len(notebook_items)} files for notebook {notebook_uuid[:8]}...")
 
             for item in notebook_items:
+                logger.debug(f"Processing item: {item.file_path.name} (type={item.file_type})")
                 retry_count = 0
                 success = False
 
                 while retry_count <= self.config.sync.retry_attempts and not success:
                     try:
+                        logger.debug(f"Upload attempt {retry_count + 1} for {item.file_path.name}")
+
                         await self.cloud_sync.upload_file(
                             item.file_path,
                             item.notebook_uuid,
                             item.file_type,
                         )
+
                         stats["uploaded"] += 1
                         success = True
+                        logger.info(f"Successfully uploaded {item.file_path.name}")
 
                     except CloudSyncError as e:
                         retry_count += 1
+                        logger.warning(
+                            f"Upload failed for {item.file_path.name} (attempt {retry_count}): {e}",
+                            exc_info=retry_count > self.config.sync.retry_attempts
+                        )
+
                         if retry_count <= self.config.sync.retry_attempts:
+                            backoff_time = 2 ** retry_count
+                            logger.info(f"Retrying in {backoff_time}s ({retry_count}/{self.config.sync.retry_attempts})...")
                             print(f"⚠️  Upload failed, retrying ({retry_count}/{self.config.sync.retry_attempts})...")
                             stats["retried"] += 1
-                            await asyncio.sleep(2 ** retry_count)  # Exponential backoff
+                            await asyncio.sleep(backoff_time)  # Exponential backoff
                         else:
+                            logger.error(f"Upload failed after {self.config.sync.retry_attempts} retries: {e}")
                             print(f"✗ Upload failed after {self.config.sync.retry_attempts} retries: {e}")
                             stats["failed"] += 1
 
@@ -165,10 +188,12 @@ class SyncQueue:
             #     except CloudSyncError as e:
             #         print(f"⚠️  OCR trigger failed: {e}")
 
+        logger.info(f"Batch processing complete: {stats}")
         return stats
 
     async def _worker(self) -> None:
         """Background worker to process the sync queue."""
+        logger.info("Sync queue worker started")
         print("Sync queue worker started")
 
         while self.running:
@@ -179,13 +204,16 @@ class SyncQueue:
 
                 # Wait for at least one item
                 try:
+                    logger.debug(f"Waiting for items (timeout={self.config.sync.sync_interval}s)...")
                     item = await asyncio.wait_for(
                         self.queue.get(),
                         timeout=self.config.sync.sync_interval,
                     )
                     items.append(item)
+                    logger.debug(f"Got item from queue: {item.file_path.name}")
                 except asyncio.TimeoutError:
                     # No items in queue, continue waiting
+                    logger.debug("No items in queue, continuing to wait")
                     continue
 
                 # Collect more items up to batch size (non-blocking)
@@ -193,21 +221,29 @@ class SyncQueue:
                     try:
                         item = self.queue.get_nowait()
                         items.append(item)
+                        logger.debug(f"Added to batch: {item.file_path.name}")
                     except asyncio.QueueEmpty:
                         break
 
                 # Process the batch
                 if items:
+                    logger.info(f"Processing batch of {len(items)} items")
                     stats = await self._process_batch(items)
+                    logger.info(
+                        f"Batch complete: {stats['uploaded']} uploaded, "
+                        f"{stats['failed']} failed, {stats['retried']} retried"
+                    )
                     print(
                         f"\n✓ Batch complete: {stats['uploaded']} uploaded, "
                         f"{stats['failed']} failed, {stats['retried']} retried\n"
                     )
 
             except Exception as e:
+                logger.error(f"Error in sync queue worker: {e}", exc_info=True)
                 print(f"Error in sync queue worker: {e}")
                 await asyncio.sleep(5)  # Wait before retrying
 
+        logger.info("Sync queue worker stopped")
         print("Sync queue worker stopped")
 
     async def start(self) -> None:

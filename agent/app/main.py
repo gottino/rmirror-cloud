@@ -5,6 +5,7 @@ Monitors reMarkable Desktop app folder and syncs files to rMirror Cloud.
 """
 
 import asyncio
+import logging
 import signal
 import sys
 import threading
@@ -14,6 +15,9 @@ from typing import Optional
 import click
 
 from app.config import Config
+from app.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 class Agent:
@@ -178,6 +182,14 @@ def init() -> None:
 
 def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> None:
     """Run the agent."""
+    # Set up logging first
+    log_level = "DEBUG" if debug else "INFO"
+    setup_logging(log_level)
+    logger.info("=" * 60)
+    logger.info("rMirror Agent starting up")
+    logger.info(f"Log level: {log_level}")
+    logger.info("=" * 60)
+
     # Load configuration
     config = Config.load(config_path)
 

@@ -3,12 +3,15 @@ Cloud sync client for uploading reMarkable files to rMirror Cloud backend.
 """
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Optional
 
 import httpx
 
 from app.config import Config
+
+logger = logging.getLogger(__name__)
 
 
 class CloudSyncError(Exception):
@@ -38,9 +41,11 @@ class CloudSync:
 
         # Create HTTP client if not exists
         if self.client is None:
-            self.client = httpx.AsyncClient(timeout=30.0)
+            self.client = httpx.AsyncClient(timeout=300.0)  # 5 minute timeout for OCR
+            logger.debug(f"Created HTTP client with 300s timeout")
 
         try:
+            logger.debug(f"Authenticating with {self.config.api.url}/auth/login")
             # Login to get access token
             response = await self.client.post(
                 f"{self.config.api.url}/auth/login",
@@ -55,14 +60,17 @@ class CloudSync:
             self.config.api.token = data["access_token"]
             self.authenticated = True
 
+            logger.info(f"✓ Authenticated with rMirror Cloud as {self.config.api.email}")
             print(f"✓ Authenticated with rMirror Cloud as {self.config.api.email}")
             return True
 
         except httpx.HTTPStatusError as e:
+            logger.error(f"Authentication failed with status {e.response.status_code}: {e}")
             if e.response.status_code == 401:
                 raise CloudSyncError("Invalid email or password")
             raise CloudSyncError(f"Authentication failed: {e}")
         except Exception as e:
+            logger.error(f"Authentication error: {e}", exc_info=True)
             raise CloudSyncError(f"Authentication error: {e}")
 
     async def ensure_authenticated(self) -> None:
@@ -97,11 +105,14 @@ class CloudSync:
         await self.ensure_authenticated()
 
         if not file_path.exists():
+            logger.error(f"File not found: {file_path}")
             raise CloudSyncError(f"File not found: {file_path}")
 
         try:
             # For .rm files, use the /processing/rm-file endpoint
             if file_type == "rm":
+                logger.info(f"📤 Starting upload of .rm file: {file_path.name}")
+
                 # Look for corresponding .metadata file
                 metadata_path = file_path.parent.parent / f"{notebook_uuid}.metadata"
 
@@ -111,42 +122,68 @@ class CloudSync:
 
                 # Add metadata file if it exists
                 if metadata_path.exists():
+                    logger.debug(f"Including metadata file: {metadata_path.name}")
                     files_to_upload["metadata_file"] = (
                         metadata_path.name,
                         open(metadata_path, "rb"),
                         "application/json"
                     )
+                else:
+                    logger.warning(f"Metadata file not found: {metadata_path}")
 
                 try:
+                    logger.debug(f"POST {self.config.api.url}/processing/rm-file (timeout=300s)")
+                    logger.debug(f"Files: {list(files_to_upload.keys())}")
+
                     response = await self.client.post(
                         f"{self.config.api.url}/processing/rm-file",
                         files=files_to_upload,
                         headers=self._get_headers(),
                     )
+
+                    logger.debug(f"Response status: {response.status_code}")
+                    logger.debug(f"Response headers: {dict(response.headers)}")
+
                     response.raise_for_status()
+
+                    response_data = response.json()
+                    logger.debug(f"Response data: {response_data}")
+
                 finally:
                     # Close all file handles
                     for file_tuple in files_to_upload.values():
                         file_tuple[1].close()
 
+                logger.info(f"✓ Upload complete: {file_path.name}")
                 print(f"✓ Uploaded: {file_path.name}")
-                return response.json()
+                return response_data
 
             # For other file types (metadata, content), we currently skip them
             # as they'll be included with the .rm file upload
             else:
+                logger.debug(f"Skipping {file_type} file (handled with .rm upload)")
                 print(f"⏭️  Skipping {file_type} file (handled with .rm upload)")
                 return {"success": True, "skipped": True}
 
         except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HTTP error during upload of {file_path.name}: "
+                f"status={e.response.status_code}, body={e.response.text}"
+            )
+
             if e.response.status_code == 401:
                 # Token expired, re-authenticate and retry
+                logger.info("Token expired, re-authenticating...")
                 self.authenticated = False
                 await self.authenticate()
                 return await self.upload_file(file_path, notebook_uuid, file_type)
 
             raise CloudSyncError(f"Upload failed for {file_path.name}: {e}")
+        except httpx.TimeoutException as e:
+            logger.error(f"Upload timeout for {file_path.name}: {e}")
+            raise CloudSyncError(f"Upload timeout for {file_path.name}: Request took longer than 300 seconds")
         except Exception as e:
+            logger.error(f"Upload error for {file_path.name}: {e}", exc_info=True)
             raise CloudSyncError(f"Upload error for {file_path.name}: {e}")
 
     async def sync_notebook(self, notebook_uuid: str, notebook_dir: Path) -> dict:
