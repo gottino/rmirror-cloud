@@ -87,3 +87,12 @@ pics/
 
 # External source code
 rm-int-src/
+
+# Test files
+test_observer.py
+test_agent_observer.py
+test_data/
+
+# Database dumps and migration scripts
+backend/dumps/
+backend/migrate_to_production*.py
