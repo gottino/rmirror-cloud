@@ -75,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Mac Agent (2025-11-21)
+- Removed redundant OCR trigger call causing 404 errors (OCR is automatic in /v1/processing/rm-file)
+- Fixed async function handling in Flask web UI routes
+
 - Made database migration idempotent to handle partial failures (2025-11-15)
 - Added server_default for boolean columns in migration (2025-11-15)
 - Fixed sudoers wildcards for systemctl flags (2025-11-10)

@@ -157,12 +157,13 @@ class SyncQueue:
                             print(f"✗ Upload failed after {self.config.sync.retry_attempts} retries: {e}")
                             stats["failed"] += 1
 
-            # Trigger OCR after uploading notebook files
-            if stats["uploaded"] > 0:
-                try:
-                    await self.cloud_sync.trigger_ocr(notebook_uuid)
-                except CloudSyncError as e:
-                    print(f"⚠️  OCR trigger failed: {e}")
+            # OCR is triggered automatically by /v1/processing/rm-file endpoint
+            # No need to trigger separately
+            # if stats["uploaded"] > 0:
+            #     try:
+            #         await self.cloud_sync.trigger_ocr(notebook_uuid)
+            #     except CloudSyncError as e:
+            #         print(f"⚠️  OCR trigger failed: {e}")
 
         return stats
 

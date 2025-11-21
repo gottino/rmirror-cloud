@@ -113,13 +113,20 @@ def register_routes(app: Flask) -> None:
         return jsonify({"success": True, "message": "Configuration updated"})
 
     @app.route("/api/sync/status")
-    async def api_sync_status():
+    def api_sync_status():
         """Get sync status from backend."""
+        import asyncio
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
 
         try:
-            status = await cloud_sync.get_sync_status()
-            return jsonify(status)
+            # Run async function in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                status = loop.run_until_complete(cloud_sync.get_sync_status())
+                return jsonify(status)
+            finally:
+                loop.close()
         except CloudSyncError as e:
             return jsonify({"error": str(e)}), 500
 
@@ -130,18 +137,25 @@ def register_routes(app: Flask) -> None:
         return jsonify({"success": True, "message": "Manual sync triggered"})
 
     @app.route("/api/test-connection", methods=["POST"])
-    async def api_test_connection():
+    def api_test_connection():
         """Test connection to backend API."""
+        import asyncio
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
 
         try:
-            await cloud_sync.authenticate()
-            return jsonify(
-                {
-                    "success": True,
-                    "message": f"Successfully authenticated as {cloud_sync.config.api.email}",
-                }
-            )
+            # Run async function in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(cloud_sync.authenticate())
+                return jsonify(
+                    {
+                        "success": True,
+                        "message": f"Successfully authenticated as {cloud_sync.config.api.email}",
+                    }
+                )
+            finally:
+                loop.close()
         except CloudSyncError as e:
             return jsonify({"success": False, "message": str(e)}), 401
 
