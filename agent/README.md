@@ -85,42 +85,41 @@ agent/
 
 ### Prerequisites
 
-- macOS 10.15 or later
-- Python 3.11+
-- reMarkable Desktop app installed
+- macOS 11.0 (Big Sur) or later
+- Python 3.11 or later
+- reMarkable Desktop app installed and configured
+- rMirror Cloud account
 
-### Install via Script
+### Quick Install
 
 ```bash
-cd agent
-./scripts/install.sh
+cd rmirror-cloud/agent
+./install.sh
 ```
 
-This will:
-1. Install Python dependencies via Poetry
-2. Create launchd service for auto-start
-3. Start the agent
-4. Open web UI in browser
+The installer will:
+1. Check Python version and dependencies
+2. Install the rmirror-agent package
+3. Initialize configuration file
+4. Set up auto-start on login (LaunchAgent)
+5. Start the agent in menu bar mode
 
 ### Manual Installation
 
 ```bash
-cd agent
+cd rmirror-cloud/agent
 
-# Install dependencies
-poetry install
+# Install the package
+pip install --user -e .
 
-# Create config directory
-mkdir -p ~/.config/rmirror
+# Initialize configuration
+rmirror-agent init
 
-# Copy default config
-cp config.example.yaml ~/.config/rmirror/config.yaml
-
-# Edit config with your API credentials
+# Edit the configuration file
 nano ~/.config/rmirror/config.yaml
 
 # Run the agent
-poetry run python -m app.main
+rmirror-agent
 ```
 
 ## Configuration
@@ -269,17 +268,50 @@ poetry run ruff check app/
 2. Verify `web.enabled: true` in config
 3. Check firewall settings
 
+## Usage
+
+### Viewing Logs
+
+The agent logs all activity to `~/.config/rmirror/agent.log`:
+
+```bash
+# View real-time logs
+tail -f ~/.config/rmirror/agent.log
+
+# View last 50 lines
+tail -n 50 ~/.config/rmirror/agent.log
+
+# Search logs
+grep "OCR extracted text" ~/.config/rmirror/agent.log
+```
+
+### Command Line Interface
+
+```bash
+# Check status
+rmirror-agent status
+
+# Run in foreground (for debugging)
+rmirror-agent --foreground
+
+# Run with debug logging
+rmirror-agent --debug
+
+# Show help
+rmirror-agent --help
+```
+
 ## Uninstallation
 
 ```bash
-cd agent
-./scripts/uninstall.sh
+cd rmirror-cloud/agent
+./uninstall.sh
 ```
 
 This will:
-1. Stop the launchd service
-2. Remove launchd configuration
-3. Remove configuration files (optional)
+1. Stop and remove the LaunchAgent
+2. Uninstall the Python package
+3. Configuration files in `~/.config/rmirror` are preserved (remove manually if desired)
 
 ## License
 

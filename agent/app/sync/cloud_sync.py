@@ -149,6 +149,10 @@ class CloudSync:
                     response_data = response.json()
                     logger.debug(f"Response data: {response_data}")
 
+                    # Log OCR'd text at INFO level for visibility
+                    if response_data.get('extracted_text'):
+                        logger.info(f"✓ OCR extracted text: {response_data['extracted_text'][:200]}{'...' if len(response_data['extracted_text']) > 200 else ''}")
+
                 finally:
                     # Close all file handles
                     for file_tuple in files_to_upload.values():
