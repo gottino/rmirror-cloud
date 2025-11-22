@@ -3,6 +3,7 @@
 import asyncio
 import threading
 import webbrowser
+from pathlib import Path
 from typing import Optional
 
 import rumps
@@ -15,10 +16,13 @@ class TrayApp(rumps.App):
 
     def __init__(self, config: Config, agent: Optional[object] = None):
         """Initialize the menu bar app."""
+        # Get the path to the icon file
+        icon_path = Path(__file__).parent.parent.parent / "resources" / "menubar_icon.png"
+
         super().__init__(
             "rMirror",
-            icon=None,  # Will use default icon text
-            title="⚙",  # Gear icon
+            icon=str(icon_path) if icon_path.exists() else None,
+            title=None,  # No text title when we have an icon
             quit_button=None,  # We'll add our own quit button
         )
 
