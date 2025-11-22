@@ -1,0 +1,92 @@
+name: Deploy Landing Page
+
+on:
+  # Trigger on push to main branch when landing page changes
+  push:
+    branches:
+      - main
+    paths:
+      - 'landing/**'
+      - '.github/workflows/deploy-landing.yml'
+
+  # Allow manual deployment from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  deploy-landing:
+    name: Deploy Landing Page to Hetzner
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Create landing directory on server
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -p $SERVER_PORT \
+              $SERVER_USER@$SERVER_HOST \
+              "sudo mkdir -p /var/www/rmirror-landing && sudo chown $SERVER_USER:$SERVER_USER /var/www/rmirror-landing"
+
+      - name: Deploy landing page files
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          scp -i ~/.ssh/deploy_key \
+              -P $SERVER_PORT \
+              landing/index.html \
+              landing/logo.png \
+              $SERVER_USER@$SERVER_HOST:/var/www/rmirror-landing/
+
+      - name: Configure nginx (if needed)
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -p $SERVER_PORT \
+              $SERVER_USER@$SERVER_HOST \
+              'if [ ! -f /etc/nginx/sites-enabled/rmirror-landing ]; then
+                echo "⚠️  Nginx configuration not found. Please configure nginx manually.";
+                echo "See landing/README.md for nginx configuration instructions.";
+              else
+                echo "✅ Nginx already configured";
+              fi'
+
+      - name: Verify deployment
+        if: success()
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -p $SERVER_PORT \
+              $SERVER_USER@$SERVER_HOST \
+              "ls -lh /var/www/rmirror-landing/index.html"
+          echo "✅ Landing page deployed successfully!"
+          echo "🌐 Visit: https://rmirror.io"
+
+      - name: Deployment failed
+        if: failure()
+        run: |
+          echo "❌ Landing page deployment failed! Check the logs above."
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key

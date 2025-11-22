@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, integrations, notebooks, processing, sync, todos, users
+from app.api import auth, integrations, notebooks, processing, sync, todos, users, waitlist
 
 api_router = APIRouter()
 
@@ -14,3 +14,4 @@ api_router.include_router(processing.router, prefix="/processing", tags=["proces
 api_router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
 api_router.include_router(todos.router, prefix="/todos", tags=["todos"])
+api_router.include_router(waitlist.router, tags=["waitlist"])
