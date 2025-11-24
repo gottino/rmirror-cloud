@@ -13,6 +13,8 @@ NC='\033[0m' # No Color
 
 # Configuration
 APP_DIR="/var/www/rmirror-cloud/backend"
+ROOT_DIR="/var/www/rmirror-cloud"
+DASHBOARD_DIR="/var/www/rmirror-cloud/dashboard"
 SERVICE_NAME="rmirror"
 BACKUP_DIR="/var/backups/rmirror"
 BRANCH="${1:-main}"  # Default to main branch, or use first argument
@@ -139,18 +141,73 @@ else
 fi
 echo ""
 
-# 8. Health check
-echo -e "${YELLOW}8/8 Running health check...${NC}"
+# 8. Deploy dashboard
+echo -e "${YELLOW}8/10 Deploying Next.js dashboard...${NC}"
+if [ -d "$DASHBOARD_DIR" ]; then
+    cd "$DASHBOARD_DIR" || { echo -e "${RED}❌ Failed to cd to $DASHBOARD_DIR${NC}"; exit 1; }
+
+    # Install Node.js dependencies
+    if [ -f "package.json" ]; then
+        echo -e "${BLUE}   Installing npm dependencies...${NC}"
+        npm install
+
+        # Build Next.js for production
+        echo -e "${BLUE}   Building Next.js app...${NC}"
+        npm run build
+
+        # Check if PM2 is running the dashboard, restart it
+        if pm2 list | grep -q "rmirror-dashboard"; then
+            echo -e "${BLUE}   Restarting dashboard with PM2...${NC}"
+            pm2 restart rmirror-dashboard
+        else
+            echo -e "${BLUE}   Starting dashboard with PM2...${NC}"
+            cd "$DASHBOARD_DIR"
+            pm2 start npm --name "rmirror-dashboard" -- start
+            pm2 save
+        fi
+
+        echo -e "${GREEN}✅ Dashboard deployed${NC}"
+    else
+        echo -e "${YELLOW}⚠️  No package.json found, skipping dashboard${NC}"
+    fi
+
+    cd "$APP_DIR"  # Return to backend directory
+else
+    echo -e "${YELLOW}⚠️  Dashboard directory not found, skipping${NC}"
+fi
+echo ""
+
+# 9. Deploy landing pages
+echo -e "${YELLOW}9/10 Deploying landing pages...${NC}"
+if [ -d "$ROOT_DIR/landing" ]; then
+    # Landing pages are static HTML, just ensure they're readable
+    chmod -R 755 "$ROOT_DIR/landing"
+    echo -e "${GREEN}✅ Landing pages deployed${NC}"
+else
+    echo -e "${YELLOW}⚠️  Landing directory not found${NC}"
+fi
+echo ""
+
+# 10. Health check
+echo -e "${YELLOW}10/10 Running health check...${NC}"
 sleep 3  # Give the app time to fully start
 
 HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || echo "000")
 if [ "$HEALTH_CHECK" = "200" ]; then
-    echo -e "${GREEN}✅ Health check passed (HTTP $HEALTH_CHECK)${NC}"
+    echo -e "${GREEN}✅ Backend health check passed (HTTP $HEALTH_CHECK)${NC}"
 else
-    echo -e "${RED}❌ Health check failed (HTTP $HEALTH_CHECK)${NC}"
+    echo -e "${RED}❌ Backend health check failed (HTTP $HEALTH_CHECK)${NC}"
     echo -e "${RED}   Check application logs:${NC}"
     echo -e "${RED}   sudo journalctl -u $SERVICE_NAME -f${NC}"
     exit 1
+fi
+
+# Check dashboard health
+DASHBOARD_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 || echo "000")
+if [ "$DASHBOARD_HEALTH" = "200" ] || [ "$DASHBOARD_HEALTH" = "307" ]; then
+    echo -e "${GREEN}✅ Dashboard health check passed (HTTP $DASHBOARD_HEALTH)${NC}"
+else
+    echo -e "${YELLOW}⚠️  Dashboard health check: HTTP $DASHBOARD_HEALTH${NC}"
 fi
 echo ""
 
@@ -163,11 +220,14 @@ echo -e "${BLUE}📊 Deployment Summary:${NC}"
 echo -e "   • Branch: $BRANCH"
 echo -e "   • Commit: ${NEW_COMMIT:0:7}"
 echo -e "   • Backup: $BACKUP_FILE"
-echo -e "   • Service: $SERVICE_NAME (running)"
+echo -e "   • Backend: $SERVICE_NAME (running)"
+echo -e "   • Dashboard: PM2 (running)"
 echo -e "   • Health: OK"
 echo ""
 echo -e "${BLUE}🔍 Useful commands:${NC}"
-echo -e "   • View logs: ${YELLOW}sudo journalctl -u $SERVICE_NAME -f${NC}"
+echo -e "   • Backend logs: ${YELLOW}sudo journalctl -u $SERVICE_NAME -f${NC}"
+echo -e "   • Dashboard logs: ${YELLOW}pm2 logs rmirror-dashboard${NC}"
 echo -e "   • Service status: ${YELLOW}sudo systemctl status $SERVICE_NAME${NC}"
+echo -e "   • Dashboard status: ${YELLOW}pm2 status rmirror-dashboard${NC}"
 echo -e "   • Rollback: ${YELLOW}git checkout $CURRENT_COMMIT && ./deploy.sh${NC}"
 echo ""
