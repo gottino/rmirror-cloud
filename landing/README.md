@@ -93,10 +93,21 @@ alembic upgrade head
 
 ```
 landing/
-├── index.html          # Main landing page
-├── README.md          # This file
-└── logo.png           # rMirror logo (optional)
+├── index.html          # Main landing page (public)
+├── beta.html          # Beta access page (hidden, not linked)
+├── logo.png           # rMirror logo
+└── README.md          # This file
 ```
+
+## Beta Access Page
+
+A hidden page at `https://rmirror.io/beta` for beta testers:
+- Not linked from the main landing page
+- Not indexed by search engines (`noindex` meta tag)
+- Shows placeholder for login functionality
+- Will be updated with Clerk authentication UI once configured
+
+Access: Share the `/beta` URL directly with beta testers.
 
 ## Future Enhancements
 

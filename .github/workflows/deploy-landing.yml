@@ -48,6 +48,7 @@ jobs:
           scp -i ~/.ssh/deploy_key \
               -P $SERVER_PORT \
               landing/index.html \
+              landing/beta.html \
               landing/logo.png \
               $SERVER_USER@$SERVER_HOST:/var/www/rmirror-landing/
 

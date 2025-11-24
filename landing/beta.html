@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>rMirror Cloud - Beta Access</title>
+    <meta name="description" content="Beta access for rMirror Cloud testers">
+    <meta name="robots" content="noindex, nofollow">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #2B2B2B;
+            --accent: #E47C37;
+            --text: #333;
+            --text-light: #666;
+            --background: #FAFAFA;
+            --white: #FFFFFF;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text);
+            background: var(--background);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .beta-card {
+            background: var(--white);
+            border-radius: 16px;
+            padding: 60px 40px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            text-align: center;
+        }
+
+        .logo {
+            width: 100px;
+            height: auto;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 16px;
+            letter-spacing: -0.5px;
+        }
+
+        .beta-badge {
+            display: inline-block;
+            background: var(--accent);
+            color: var(--white);
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 30px;
+        }
+
+        .tagline {
+            font-size: 18px;
+            color: var(--text-light);
+            margin-bottom: 40px;
+        }
+
+        .login-placeholder {
+            background: var(--background);
+            border: 2px dashed #DDD;
+            border-radius: 12px;
+            padding: 40px 20px;
+            margin-bottom: 30px;
+        }
+
+        .login-placeholder p {
+            color: var(--text-light);
+            font-size: 15px;
+            margin-bottom: 16px;
+        }
+
+        .placeholder-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+
+        .info-box {
+            background: #F0F7FF;
+            border-left: 4px solid #2196F3;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: left;
+            margin-bottom: 30px;
+        }
+
+        .info-box h3 {
+            font-size: 16px;
+            color: var(--primary);
+            margin-bottom: 12px;
+        }
+
+        .info-box ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .info-box li {
+            font-size: 14px;
+            color: var(--text);
+            padding: 6px 0;
+            padding-left: 24px;
+            position: relative;
+        }
+
+        .info-box li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #2196F3;
+            font-weight: bold;
+        }
+
+        .home-link {
+            display: inline-block;
+            color: var(--text-light);
+            text-decoration: none;
+            font-size: 14px;
+            padding: 12px 24px;
+            border: 1px solid #DDD;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+
+        .home-link:hover {
+            background: var(--background);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        @media (max-width: 600px) {
+            .beta-card {
+                padding: 40px 24px;
+            }
+
+            h1 {
+                font-size: 28px;
+            }
+
+            .tagline {
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="beta-card">
+            <img src="logo.png" alt="rMirror Logo" class="logo">
+
+            <h1>rMirror Cloud</h1>
+            <div class="beta-badge">BETA ACCESS</div>
+            <p class="tagline">Early access for beta testers</p>
+
+            <div class="login-placeholder">
+                <div class="placeholder-icon">🔐</div>
+                <p><strong>Authentication Coming Soon</strong></p>
+                <p>Login functionality will be available here once Clerk is configured.</p>
+            </div>
+
+            <div class="info-box">
+                <h3>What you'll get with beta access:</h3>
+                <ul>
+                    <li>Automatic sync from reMarkable to cloud</li>
+                    <li>Full-text OCR search of handwritten notes</li>
+                    <li>Web access to all your notebooks</li>
+                    <li>Integration with Notion and other tools</li>
+                    <li>Early access to new features</li>
+                </ul>
+            </div>
+
+            <a href="/" class="home-link">← Back to Main Page</a>
+        </div>
+    </div>
+</body>
+</html>
