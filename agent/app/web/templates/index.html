@@ -206,6 +206,17 @@
 
         <div id="message" class="alert"></div>
 
+        <!-- Authentication Card (shown when not authenticated with Clerk) -->
+        <div class="card" id="auth-card" style="display: none;">
+            <h2>Authentication Required</h2>
+            <p style="margin-bottom: 20px; color: #86868b;">
+                Sign in with your rMirror account to start syncing your notebooks to the cloud.
+            </p>
+            <button onclick="openAuthPage()" style="background: #667eea;">
+                Sign in with Google
+            </button>
+        </div>
+
         <!-- Status Card -->
         <div class="card">
             <h2>Status</h2>
@@ -306,6 +317,19 @@
             }, 5000);
         }
 
+        // Open authentication page
+        function openAuthPage() {
+            fetch('/api/auth/status')
+                .then(res => res.json())
+                .then(data => {
+                    const authUrl = data.clerk_frontend_api + '/agent';
+                    window.open(authUrl, '_blank', 'width=500,height=700');
+                })
+                .catch(error => {
+                    showMessage('Failed to open authentication page', 'error');
+                });
+        }
+
         // Test connection
         async function testConnection() {
             try {
@@ -342,15 +366,27 @@
         // Refresh status
         async function refreshStatus() {
             try {
-                const response = await fetch('/api/status');
-                const data = await response.json();
+                const [statusRes, authRes] = await Promise.all([
+                    fetch('/api/status'),
+                    fetch('/api/auth/status')
+                ]);
+
+                const statusData = await statusRes.json();
+                const authData = await authRes.json();
 
                 // Update authentication status
                 const authStatus = document.getElementById('auth-status');
-                if (data.authentication.authenticated) {
+                const authCard = document.getElementById('auth-card');
+
+                if (statusData.authentication.authenticated || authData.authenticated) {
                     authStatus.innerHTML = '<span class="status-indicator green"></span>Authenticated';
+                    authCard.style.display = 'none';
                 } else {
                     authStatus.innerHTML = '<span class="status-indicator red"></span>Not Authenticated';
+                    // Show auth card if using Clerk
+                    if (authData.use_clerk_auth) {
+                        authCard.style.display = 'block';
+                    }
                 }
 
                 showMessage('Status refreshed', 'success');

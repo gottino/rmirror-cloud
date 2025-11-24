@@ -13,9 +13,19 @@ class APIConfig(BaseSettings):
     """API configuration."""
 
     url: str = Field(default="https://rmirror.cloud/v1", description="rMirror Cloud API URL")
-    email: str = Field(default="", description="User email")
-    password: str = Field(default="", description="User password")
+    email: str = Field(default="", description="User email (for legacy password auth)")
+    password: str = Field(default="", description="User password (for legacy password auth)")
     token: Optional[str] = Field(default=None, description="JWT access token (auto-populated)")
+
+    # Clerk OAuth configuration
+    clerk_frontend_api: str = Field(
+        default="https://rmirror.io",
+        description="Clerk frontend API URL for OAuth"
+    )
+    use_clerk_auth: bool = Field(
+        default=True,
+        description="Use Clerk OAuth instead of email/password"
+    )
 
     model_config = SettingsConfigDict(env_prefix="RMIRROR_API_")
 

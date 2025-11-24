@@ -159,6 +159,49 @@ def register_routes(app: Flask) -> None:
         except CloudSyncError as e:
             return jsonify({"success": False, "message": str(e)}), 401
 
+    @app.route("/auth/callback")
+    def auth_callback():
+        """
+        Handle Clerk OAuth callback redirect with JWT token in URL.
+
+        Expected query parameter:
+        ?token=clerk_jwt_token
+        """
+        config: Config = app.config["AGENT_CONFIG"]
+
+        try:
+            token = request.args.get("token")
+            if not token:
+                return render_template("auth_result.html", success=False, message="Missing authentication token")
+
+            # Store the JWT token in config
+            config.api.token = token
+            config.api.use_clerk_auth = True
+
+            # Save configuration
+            config.save()
+
+            # Mark cloud sync as authenticated
+            cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+            cloud_sync.authenticated = True
+
+            return render_template("auth_result.html", success=True, message="Successfully authenticated with Clerk!")
+        except Exception as e:
+            return render_template("auth_result.html", success=False, message=str(e))
+
+    @app.route("/api/auth/status")
+    def api_auth_status():
+        """Get current authentication status."""
+        config: Config = app.config["AGENT_CONFIG"]
+        cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+
+        return jsonify({
+            "authenticated": cloud_sync.authenticated,
+            "use_clerk_auth": config.api.use_clerk_auth,
+            "has_token": bool(config.api.token),
+            "clerk_frontend_api": config.api.clerk_frontend_api,
+        })
+
     @app.route("/health")
     def health():
         """Health check endpoint."""

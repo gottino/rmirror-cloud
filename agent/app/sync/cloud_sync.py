@@ -36,42 +36,72 @@ class CloudSync:
         Returns:
             True if authentication successful, False otherwise.
         """
-        if not self.config.api.email or not self.config.api.password:
-            raise CloudSyncError("API credentials not configured")
-
         # Create HTTP client if not exists
         if self.client is None:
             self.client = httpx.AsyncClient(timeout=300.0)  # 5 minute timeout for OCR
             logger.debug(f"Created HTTP client with 300s timeout")
 
-        try:
-            logger.debug(f"Authenticating with {self.config.api.url}/auth/login")
-            # Login to get access token
-            response = await self.client.post(
-                f"{self.config.api.url}/auth/login",
-                json={
-                    "email": self.config.api.email,
-                    "password": self.config.api.password,
-                },
-            )
-            response.raise_for_status()
+        # If using Clerk auth and we already have a token, verify it's valid
+        if self.config.api.use_clerk_auth and self.config.api.token:
+            try:
+                # Test the token with a simple API call
+                logger.debug(f"Verifying existing Clerk JWT token")
+                response = await self.client.get(
+                    f"{self.config.api.url}/sync/stats",
+                    headers={"Authorization": f"Bearer {self.config.api.token}"}
+                )
+                response.raise_for_status()
+                self.authenticated = True
+                logger.info(f"✓ Authenticated with rMirror Cloud using Clerk")
+                print(f"✓ Authenticated with rMirror Cloud using Clerk")
+                return True
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401:
+                    logger.warning("Clerk JWT token expired or invalid")
+                    # Token expired, need to re-authenticate via OAuth
+                    raise CloudSyncError(
+                        "Authentication token expired. Please sign in again via the web interface."
+                    )
+                raise CloudSyncError(f"Token verification failed: {e}")
 
-            data = response.json()
-            self.config.api.token = data["access_token"]
-            self.authenticated = True
+        # Fall back to password authentication if configured
+        if not self.config.api.use_clerk_auth:
+            if not self.config.api.email or not self.config.api.password:
+                raise CloudSyncError("API credentials not configured")
 
-            logger.info(f"✓ Authenticated with rMirror Cloud as {self.config.api.email}")
-            print(f"✓ Authenticated with rMirror Cloud as {self.config.api.email}")
-            return True
+            try:
+                logger.debug(f"Authenticating with {self.config.api.url}/auth/login")
+                # Login to get access token
+                response = await self.client.post(
+                    f"{self.config.api.url}/auth/login",
+                    json={
+                        "email": self.config.api.email,
+                        "password": self.config.api.password,
+                    },
+                )
+                response.raise_for_status()
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Authentication failed with status {e.response.status_code}: {e}")
-            if e.response.status_code == 401:
-                raise CloudSyncError("Invalid email or password")
-            raise CloudSyncError(f"Authentication failed: {e}")
-        except Exception as e:
-            logger.error(f"Authentication error: {e}", exc_info=True)
-            raise CloudSyncError(f"Authentication error: {e}")
+                data = response.json()
+                self.config.api.token = data["access_token"]
+                self.authenticated = True
+
+                logger.info(f"✓ Authenticated with rMirror Cloud as {self.config.api.email}")
+                print(f"✓ Authenticated with rMirror Cloud as {self.config.api.email}")
+                return True
+
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Authentication failed with status {e.response.status_code}: {e}")
+                if e.response.status_code == 401:
+                    raise CloudSyncError("Invalid email or password")
+                raise CloudSyncError(f"Authentication failed: {e}")
+            except Exception as e:
+                logger.error(f"Authentication error: {e}", exc_info=True)
+                raise CloudSyncError(f"Authentication error: {e}")
+
+        # If we got here with Clerk auth but no token, user needs to sign in
+        raise CloudSyncError(
+            "Please sign in via the web interface at http://localhost:5555"
+        )
 
     async def ensure_authenticated(self) -> None:
         """Ensure we have a valid authentication token."""
