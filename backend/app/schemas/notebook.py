@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.page import Page
+
 
 class NotebookBase(BaseModel):
     """Base notebook schema."""
@@ -40,6 +42,15 @@ class Notebook(NotebookBase):
     created_at: datetime
     updated_at: datetime
     last_synced_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class NotebookWithPages(Notebook):
+    """Notebook response schema with pages."""
+
+    pages: list[Page] = []
 
     class Config:
         from_attributes = True

@@ -11,9 +11,10 @@ from app.auth import get_current_active_user
 from app.database import get_db
 from app.dependencies import get_storage_service
 from app.models.notebook import Notebook
+from app.models.page import Page
 from app.models.user import User
 from app.schemas.notebook import Notebook as NotebookSchema
-from app.schemas.notebook import NotebookUploadResponse
+from app.schemas.notebook import NotebookUploadResponse, NotebookWithPages
 from app.storage import StorageService
 from app.utils.files import calculate_file_hash, get_document_type, validate_file_type
 
@@ -171,14 +172,14 @@ async def get_notebook_by_uuid(
     return notebook
 
 
-@router.get("/{notebook_id}", response_model=NotebookSchema)
+@router.get("/{notebook_id}", response_model=NotebookWithPages)
 async def get_notebook(
     notebook_id: int,
     current_user: Annotated[User, Depends(get_current_active_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
-    Get a specific notebook by ID.
+    Get a specific notebook by ID with its pages.
 
     Args:
         notebook_id: Notebook ID
@@ -186,10 +187,13 @@ async def get_notebook(
         db: Database session
 
     Returns:
-        Notebook record
+        Notebook record with pages
     """
+    from sqlalchemy.orm import joinedload
+
     notebook = (
         db.query(Notebook)
+        .options(joinedload(Notebook.pages))
         .filter(
             Notebook.id == notebook_id,
             Notebook.user_id == current_user.id,
