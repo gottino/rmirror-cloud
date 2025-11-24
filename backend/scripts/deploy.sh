@@ -146,6 +146,18 @@ echo -e "${YELLOW}8/10 Deploying Next.js dashboard...${NC}"
 if [ -d "$DASHBOARD_DIR" ]; then
     cd "$DASHBOARD_DIR" || { echo -e "${RED}❌ Failed to cd to $DASHBOARD_DIR${NC}"; exit 1; }
 
+    # Load nvm (Node Version Manager)
+    export NVM_DIR="$HOME/.nvm"
+    if [ -s "$NVM_DIR/nvm.sh" ]; then
+        \. "$NVM_DIR/nvm.sh"
+        echo -e "${BLUE}   Using Node.js $(node --version) and npm $(npm --version)${NC}"
+    else
+        echo -e "${RED}❌ nvm not found! Install it first:${NC}"
+        echo -e "${RED}   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash${NC}"
+        echo -e "${RED}   Then run: nvm install --lts${NC}"
+        exit 1
+    fi
+
     # Install Node.js dependencies
     if [ -f "package.json" ]; then
         echo -e "${BLUE}   Installing npm dependencies...${NC}"
