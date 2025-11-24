@@ -6,11 +6,18 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
 
 export interface Notebook {
   id: number;
-  name: string;
-  uuid: string;
+  visible_name: string;
+  document_type: string;
+  title: string | null;
+  author: string | null;
+  notebook_uuid: string;
+  user_id: number;
+  s3_key: string | null;
+  file_hash: string | null;
+  file_size: number | null;
   created_at: string;
   updated_at: string;
-  page_count: number;
+  last_synced_at: string | null;
 }
 
 export interface Page {
