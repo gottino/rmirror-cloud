@@ -374,3 +374,420 @@ After setup:
 - [FastAPI-Clerk-Auth](https://pypi.org/project/fastapi-clerk-auth/)
 - [Clerk Python Backend SDK](https://pypi.org/project/clerk-backend-sdk/)
 - [Clerk Dashboard](https://dashboard.clerk.com/)
+
+---
+
+## Understanding the Complete Authentication Flow
+
+This section explains how authentication works in rMirror Cloud using Clerk in simple terms.
+
+### The Big Picture
+
+Think of Clerk as a "security guard" that sits between your users and your application. When someone wants to use rMirror Cloud, they need to prove who they are. Instead of managing passwords ourselves (which is complex and risky), we let Clerk handle all the security details.
+
+### The Three Main Flows
+
+There are three important flows to understand:
+
+1. **Initial Sign-Up Flow** - What happens when someone creates an account
+2. **Sign-In Flow** - What happens when they come back later
+3. **API Access Flow** - What happens when they try to use the application
+
+---
+
+### 1. Initial Sign-Up Flow (First Time User)
+
+```
+┌─────────────┐
+│   Gabriele  │  "I want to use rMirror Cloud"
+└──────┬──────┘
+       │
+       │ 1. Visits https://rmirror.io/beta
+       ▼
+┌─────────────────────────────┐
+│   rMirror Beta Page         │  Shows "Sign in with Google" button
+│   (Your Website)            │
+└──────┬──────────────────────┘
+       │
+       │ 2. Clicks "Sign in with Google"
+       ▼
+┌─────────────────────────────┐
+│   Clerk                     │  "Let me handle this securely"
+│   (Authentication Service)  │
+└──────┬──────────────────────┘
+       │
+       │ 3. Redirects to Google
+       ▼
+┌─────────────────────────────┐
+│   Google OAuth              │  "Do you want to allow rMirror Cloud
+│   (Google's Login System)   │   to access your email and name?"
+└──────┬──────────────────────┘
+       │
+       │ 4. User clicks "Allow"
+       │
+       ├─────────────────────────────────────────┐
+       │                                         │
+       │ 5a. Google confirms identity            │ 5b. Google sends info
+       ▼                                         ▼
+┌─────────────────────────────┐        ┌────────────────────────┐
+│   Clerk                     │        │   Clerk                │
+│   "Great! I'll create a     │        │   Creates user profile │
+│    session for Gabriele"    │        │   - Clerk user ID      │
+└──────┬──────────────────────┘        │   - Email              │
+       │                                │   - Name               │
+       │                                └────────┬───────────────┘
+       │                                         │
+       │ 6. Creates JWT token                    │ 7. Sends webhook
+       │    (like a secure ID badge)             │    "New user created!"
+       ▼                                         ▼
+┌─────────────────────────────┐        ┌────────────────────────┐
+│   rMirror Beta Page         │        │  rMirror Backend       │
+│   "Welcome, Gabriele!"      │        │  Receives webhook      │
+│   - Shows user's name       │        │  Creates user in DB:   │
+│   - Stores token in browser │        │  - clerk_user_id       │
+└─────────────────────────────┘        │  - email               │
+                                        │  - full_name           │
+                                        └────────────────────────┘
+```
+
+**What Just Happened (Step by Step):**
+
+1. **You visit the beta page**: Your browser loads the website with Clerk's sign-in button
+2. **You click "Sign in with Google"**: Clerk takes over and redirects you to Google
+3. **Google asks for permission**: "Do you want to share your email with rMirror Cloud?"
+4. **You click "Allow"**: Google confirms your identity
+5. **Clerk creates your account**:
+   - Assigns you a unique Clerk user ID (like `user_abc123`)
+   - Stores your email and name
+   - Creates a "session" (you're now logged in)
+6. **You get a token**: Clerk gives your browser a JWT token (think of it as a temporary VIP pass)
+7. **Webhook syncs your data**: Clerk sends a message to our backend saying "New user!" and we create your user profile in our database
+
+**Result**: You're now signed in on the website AND your account exists in our database.
+
+---
+
+### 2. Sign-In Flow (Returning User)
+
+```
+┌─────────────┐
+│   Gabriele  │  "I'm back!"
+└──────┬──────┘
+       │
+       │ 1. Visits https://rmirror.io/beta
+       ▼
+┌─────────────────────────────┐
+│   rMirror Beta Page         │  Checks browser for existing session
+│   (Your Website)            │
+└──────┬──────────────────────┘
+       │
+       │ 2. No valid session found → Shows "Sign in with Google"
+       │    (If session exists and valid → Skip to step 7)
+       ▼
+┌─────────────────────────────┐
+│   Clerk                     │  Checks if you're already logged in
+└──────┬──────────────────────┘
+       │
+       │ 3. Recognizes you from browser cookie
+       │    (or redirects to Google if not)
+       ▼
+┌─────────────────────────────┐
+│   Clerk                     │  "Welcome back, Gabriele!"
+│   Issues fresh JWT token    │  Creates new session token
+└──────┬──────────────────────┘
+       │
+       │ 4. Returns to beta page with token
+       ▼
+┌─────────────────────────────┐
+│   rMirror Beta Page         │  "Welcome back, Gabriele!"
+│   - Displays your name      │
+│   - Stores token            │
+│   - Ready to use app        │
+└─────────────────────────────┘
+```
+
+**What Just Happened:**
+
+1. **You visit the beta page again**: The website checks if you're already logged in
+2. **Clerk recognizes you**: Either from a browser cookie or you re-authenticate with Google
+3. **You get a fresh token**: Clerk issues a new JWT token (your VIP pass is renewed)
+4. **You're signed in**: The website shows your welcome message
+
+**Result**: You're signed in quickly without re-entering credentials every time.
+
+---
+
+### 3. API Access Flow (Using the Application)
+
+Now that you're signed in, you want to actually USE rMirror Cloud - view notebooks, run OCR, etc.
+
+```
+┌─────────────┐
+│   User's    │  "I want to see my notebooks"
+│   Browser   │
+│   or Agent  │
+└──────┬──────┘
+       │
+       │ 1. Sends API request with JWT token:
+       │    GET /api/v1/notebooks
+       │    Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+       ▼
+┌─────────────────────────────┐
+│   rMirror Backend           │  "Let me verify this token"
+│   (FastAPI Server)          │
+└──────┬──────────────────────┘
+       │
+       │ 2. Extracts token from Authorization header
+       ▼
+┌─────────────────────────────┐
+│   Clerk Auth Dependency     │  Step 2a: Calls Clerk to verify token
+│   (app/auth/clerk.py)       │  Step 2b: Checks token signature
+└──────┬──────────────────────┘  Step 2c: Ensures token not expired
+       │
+       │ 3. Clerk confirms: "Yes, valid token for user_abc123"
+       ▼
+┌─────────────────────────────┐
+│   Database Lookup           │  Searches for user:
+│   (PostgreSQL)              │  WHERE clerk_user_id = 'user_abc123'
+└──────┬──────────────────────┘
+       │
+       │ 4. Found user: Gabriele (ID: 42)
+       ▼
+┌─────────────────────────────┐
+│   API Endpoint              │  "User is authenticated!"
+│   (get_notebooks)           │  Fetches Gabriele's notebooks
+└──────┬──────────────────────┘
+       │
+       │ 5. Returns data
+       ▼
+┌─────────────────────────────┐
+│   User's Browser/Agent      │  Receives notebooks:
+│                             │  - Notebook 1
+│                             │  - Notebook 2
+└─────────────────────────────┘  - ...
+```
+
+**What Just Happened (Detailed):**
+
+1. **You make a request**: Your browser (or agent) sends an API request with your JWT token in the header
+2. **Backend checks the token**:
+   - Extracts the token from the `Authorization: Bearer <token>` header
+   - Calls our Clerk authentication dependency (`get_clerk_user`)
+   - Clerk verifies the token signature (proves it came from Clerk)
+   - Checks if the token has expired (tokens are only valid for 1 hour)
+3. **Clerk confirms identity**: Returns the Clerk user ID (`user_abc123`)
+4. **Database lookup**: We find your user record using the Clerk user ID
+5. **Access granted**: The API returns your notebooks
+
+**Result**: You can securely access your data. The backend knows it's really you because Clerk verified the token.
+
+---
+
+### Security: How JWT Tokens Work
+
+Think of a JWT token like a tamper-proof concert wristband:
+
+```
+JWT Token Structure:
+┌─────────────────────────────────────────────────────────────┐
+│ Header        │ Payload             │ Signature              │
+│ (Algorithm)   │ (Your Info)         │ (Proof of Authenticity)│
+├───────────────┼─────────────────────┼────────────────────────┤
+│ {             │ {                   │ [Cryptographic         │
+│   "alg": "RS" │   "sub": "user_abc" │  signature that        │
+│   "typ": "JWT"│   "email": "g@..."  │  proves Clerk          │
+│ }             │   "exp": 1234567890 │  issued this token]    │
+│               │ }                   │                        │
+└───────────────┴─────────────────────┴────────────────────────┘
+```
+
+**Key Points:**
+
+- **Payload contains your info**: User ID, email, expiration time
+- **Signature proves it's real**: Like a watermark that can't be forged
+- **Tokens expire**: After 1 hour, you need a fresh token
+- **Can't be modified**: Changing any part breaks the signature
+- **Transmitted securely**: Always sent over HTTPS
+
+**Why This Is Secure:**
+
+1. Even if someone intercepts the token, they can only use it for 1 hour
+2. The backend verifies every token with Clerk before granting access
+3. We never store the token on our backend (stateless authentication)
+4. Only Clerk can create valid tokens (we can't forge them)
+
+---
+
+### Complete Architecture Diagram
+
+```
+┌───────────────────────────────────────────────────────────────────────┐
+│                          CLERK ECOSYSTEM                              │
+│  ┌──────────────────┐         ┌────────────────────┐                 │
+│  │  Clerk Dashboard │         │   Clerk Backend    │                 │
+│  │  (Configuration) │         │   (Token Issuer)   │                 │
+│  └──────────────────┘         └────────┬───────────┘                 │
+│                                         │                              │
+│                                         │ Issues JWT Tokens            │
+│                                         │ Sends Webhooks               │
+└─────────────────────────────────────────┼──────────────────────────────┘
+                                          │
+                    ┌─────────────────────┼─────────────────────┐
+                    │                     │                     │
+                    │                     │                     │
+          Webhooks  │           Tokens    │           Tokens    │
+          (user     │           (browser) │           (agent)   │
+          events)   │                     │                     │
+                    ▼                     ▼                     ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                         RMIRROR CLOUD                                │
+│                                                                      │
+│  ┌────────────────────┐      ┌──────────────────────────────────┐  │
+│  │  Landing/Beta Page │      │  rMirror Agent (macOS)           │  │
+│  │  https://rmirror.io│      │  - Syncs reMarkable files        │  │
+│  │                    │      │  - Uses JWT for API calls        │  │
+│  │  Clerk UI:         │      └──────────────┬───────────────────┘  │
+│  │  - Sign in         │                     │                      │
+│  │  - Sign out        │                     │ API calls with       │
+│  │  - User profile    │                     │ JWT token            │
+│  └────────┬───────────┘                     │                      │
+│           │                                 │                      │
+│           │ API calls with JWT token        │                      │
+│           ▼                                 ▼                      │
+│  ┌─────────────────────────────────────────────────────────────┐  │
+│  │              FastAPI Backend (rmirror.io/api)                │  │
+│  │                                                               │  │
+│  │  ┌──────────────────────────────────────────────────────┐   │  │
+│  │  │  Authentication Middleware                          │   │  │
+│  │  │  1. Extract JWT from Authorization header           │   │  │
+│  │  │  2. Verify with Clerk (check signature + expiry)    │   │  │
+│  │  │  3. Extract clerk_user_id from token                │   │  │
+│  │  │  4. Look up user in database                        │   │  │
+│  │  └──────────────────┬───────────────────────────────────┘   │  │
+│  │                     │                                        │  │
+│  │                     ▼                                        │  │
+│  │  ┌──────────────────────────────────────────────────────┐   │  │
+│  │  │  Protected API Endpoints                            │   │  │
+│  │  │  - GET /notebooks (list user's notebooks)           │   │  │
+│  │  │  - POST /processing/ocr (run OCR)                   │   │  │
+│  │  │  - GET /integrations (list connected services)      │   │  │
+│  │  │  ... all require valid JWT                          │   │  │
+│  │  └──────────────────────────────────────────────────────┘   │  │
+│  │                                                               │  │
+│  │  ┌──────────────────────────────────────────────────────┐   │  │
+│  │  │  Webhook Endpoint                                    │   │  │
+│  │  │  POST /webhooks/clerk                                │   │  │
+│  │  │  - Receives user.created events                      │   │  │
+│  │  │  - Receives user.updated events                      │   │  │
+│  │  │  - Receives user.deleted events                      │   │  │
+│  │  │  - Syncs user data to database                       │   │  │
+│  │  └──────────────────┬───────────────────────────────────┘   │  │
+│  │                     │                                        │  │
+│  │                     ▼                                        │  │
+│  │  ┌──────────────────────────────────────────────────────┐   │  │
+│  │  │  PostgreSQL Database                                 │   │  │
+│  │  │                                                       │   │  │
+│  │  │  users table:                                        │   │  │
+│  │  │    - id (primary key)                                │   │  │
+│  │  │    - email                                           │   │  │
+│  │  │    - full_name                                       │   │  │
+│  │  │    - clerk_user_id (from Clerk)                      │   │  │
+│  │  │    - hashed_password (NULL for Clerk users)          │   │  │
+│  │  │    - is_active                                       │   │  │
+│  │  │    - created_at                                      │   │  │
+│  │  │                                                       │   │  │
+│  │  │  notebooks, pages, ocr_results, etc...               │   │  │
+│  │  └──────────────────────────────────────────────────────┘   │  │
+│  │                                                               │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
+
+External Services:
+┌───────────────────┐
+│  Google OAuth     │  Used by Clerk for social login
+└───────────────────┘
+```
+
+---
+
+### Real-World Example: Gabriele's Journey
+
+Let's follow a complete user journey:
+
+**Day 1: First Sign-Up**
+
+1. **9:00 AM**: Gabriele visits `https://rmirror.io/beta`
+2. **9:00:10 AM**: Clicks "Sign in with Google"
+3. **9:00:15 AM**: Google asks "Allow rMirror Cloud to access your info?"
+4. **9:00:20 AM**: Clicks "Allow"
+5. **9:00:25 AM**:
+   - Clerk creates Gabriele's account with ID `user_2abc123xyz`
+   - Issues JWT token (expires at 10:00 AM)
+   - Sends webhook to rMirror backend
+6. **9:00:26 AM**: rMirror backend receives webhook, creates user:
+   ```sql
+   INSERT INTO users (clerk_user_id, email, full_name)
+   VALUES ('user_2abc123xyz', 'gabriele@example.com', 'Gabriele Gottino');
+   ```
+7. **9:00:27 AM**: Gabriele sees "Welcome, Gabriele!" on the beta page
+
+**Day 1: Using the Mac Agent**
+
+1. **9:05 AM**: Gabriele installs rMirror Mac agent
+2. **9:06 AM**: Agent needs to authenticate - opens browser to Clerk
+3. **9:06:30 AM**: Clerk recognizes Gabriele is already signed in, issues new token
+4. **9:06:35 AM**: Agent stores token and begins syncing notebooks:
+   ```http
+   POST /api/v1/sync/upload
+   Authorization: Bearer eyJhbGc...
+   ```
+5. **9:06:36 AM**: Backend verifies token with Clerk ✓
+6. **9:06:37 AM**: Backend looks up user by `clerk_user_id` ✓
+7. **9:06:38 AM**: Upload succeeds, notebooks saved to Gabriele's account
+
+**Day 2: Coming Back**
+
+1. **10:15 AM**: Gabriele opens laptop, visits `https://rmirror.io/beta`
+2. **10:15:05 AM**: Old JWT has expired (they last 1 hour)
+3. **10:15:06 AM**: Clerk sees Gabriele's browser cookie, issues fresh token automatically
+4. **10:15:07 AM**: "Welcome back, Gabriele!" - signed in without re-entering password
+
+**Day 2: Agent Keeps Working**
+
+1. **10:20 AM**: Agent tries to sync new notebook
+2. **10:20:01 AM**: Backend rejects old expired token (401 Unauthorized)
+3. **10:20:02 AM**: Agent automatically gets fresh token from Clerk
+4. **10:20:03 AM**: Retry succeeds with new token
+
+---
+
+### Key Takeaways
+
+1. **Clerk handles all authentication complexity**
+   - You never see passwords, tokens are issued automatically
+   - Social login "just works" (Google, Apple, etc.)
+
+2. **JWT tokens are temporary passes**
+   - Valid for 1 hour
+   - Automatically refreshed when needed
+   - Can't be forged or tampered with
+
+3. **Webhooks keep everything in sync**
+   - When you sign up in Clerk → User created in our database
+   - When you update profile → Changes synced to our database
+   - When you delete account → Account deactivated in our database
+
+4. **Your data is secure**
+   - Every API call is verified with Clerk
+   - Tokens expire quickly
+   - All communication over HTTPS
+   - We can revoke access instantly via Clerk dashboard
+
+5. **Seamless experience**
+   - Sign in once, use everywhere (web, agent, mobile eventually)
+   - No passwords to remember
+   - Fast authentication with session caching
+
+---
+
+This architecture means you get enterprise-grade security without the complexity of building it yourself!
