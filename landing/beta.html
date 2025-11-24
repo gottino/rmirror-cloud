@@ -6,6 +6,16 @@
     <title>rMirror Cloud - Beta Access</title>
     <meta name="description" content="Beta access for rMirror Cloud testers">
     <meta name="robots" content="noindex, nofollow">
+
+    <!-- Clerk JavaScript SDK -->
+    <script
+        async
+        crossorigin="anonymous"
+        data-clerk-publishable-key="pk_test_Y29ycmVjdC1lbGYtNTUuY2xlcmsuYWNjb3VudHMuZGV2JA"
+        src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"
+        onload="window.Clerk.load()"
+    ></script>
+
     <style>
         * {
             margin: 0;
@@ -151,6 +161,57 @@
             color: var(--accent);
         }
 
+        /* Clerk component container */
+        #clerk-signin {
+            margin-bottom: 30px;
+        }
+
+        /* Signed in content */
+        .signed-in-content {
+            display: none;
+        }
+
+        .signed-in-content.active {
+            display: block;
+        }
+
+        .user-info {
+            background: var(--white);
+            border: 2px solid var(--accent);
+            border-radius: 12px;
+            padding: 30px 20px;
+            margin-bottom: 30px;
+        }
+
+        .user-info h2 {
+            font-size: 20px;
+            color: var(--primary);
+            margin-bottom: 12px;
+        }
+
+        .user-info p {
+            color: var(--text-light);
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .sign-out-btn {
+            background: var(--accent);
+            color: var(--white);
+            border: none;
+            padding: 12px 32px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .sign-out-btn:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
         @media (max-width: 600px) {
             .beta-card {
                 padding: 40px 24px;
@@ -175,10 +236,16 @@
             <div class="beta-badge">BETA ACCESS</div>
             <p class="tagline">Early access for beta testers</p>
 
-            <div class="login-placeholder">
-                <div class="placeholder-icon">🔐</div>
-                <p><strong>Authentication Coming Soon</strong></p>
-                <p>Login functionality will be available here once Clerk is configured.</p>
+            <!-- Clerk Sign-In Component (shown when signed out) -->
+            <div id="clerk-signin"></div>
+
+            <!-- Signed In Content (shown when signed in) -->
+            <div class="signed-in-content" id="signed-in-content">
+                <div class="user-info">
+                    <h2>Welcome, <span id="user-name"></span>!</h2>
+                    <p>You're signed in as <span id="user-email"></span></p>
+                    <button class="sign-out-btn" id="sign-out-btn">Sign Out</button>
+                </div>
             </div>
 
             <div class="info-box">
@@ -195,5 +262,75 @@
             <a href="/" class="home-link">← Back to Main Page</a>
         </div>
     </div>
+
+    <script>
+        // Initialize Clerk when loaded
+        window.addEventListener('load', async () => {
+            try {
+                // Wait for Clerk to be available
+                if (!window.Clerk) {
+                    console.error('Clerk not loaded');
+                    return;
+                }
+
+                const clerk = window.Clerk;
+
+                // Load Clerk
+                await clerk.load();
+
+                // Function to update UI based on auth state
+                function updateUI(user) {
+                    const signInDiv = document.getElementById('clerk-signin');
+                    const signedInContent = document.getElementById('signed-in-content');
+
+                    if (user) {
+                        // User is signed in
+                        signInDiv.style.display = 'none';
+                        signedInContent.classList.add('active');
+
+                        // Update user info
+                        document.getElementById('user-name').textContent =
+                            user.firstName || user.username || 'User';
+                        document.getElementById('user-email').textContent =
+                            user.primaryEmailAddress?.emailAddress || 'No email';
+
+                        console.log('User signed in:', user);
+                    } else {
+                        // User is signed out
+                        signInDiv.style.display = 'block';
+                        signedInContent.classList.remove('active');
+
+                        // Mount the sign-in component
+                        clerk.mountSignIn(signInDiv, {
+                            afterSignInUrl: '/beta',
+                            afterSignUpUrl: '/beta',
+                            appearance: {
+                                elements: {
+                                    rootBox: 'mx-auto',
+                                    card: 'shadow-none'
+                                }
+                            }
+                        });
+                    }
+                }
+
+                // Initial UI update
+                updateUI(clerk.user);
+
+                // Listen for auth state changes
+                clerk.addListener((resources) => {
+                    updateUI(resources.user);
+                });
+
+                // Handle sign out
+                document.getElementById('sign-out-btn').addEventListener('click', async () => {
+                    await clerk.signOut();
+                });
+
+            } catch (error) {
+                console.error('Error initializing Clerk:', error);
+            }
+        });
+    </script>
 </body>
 </html>
