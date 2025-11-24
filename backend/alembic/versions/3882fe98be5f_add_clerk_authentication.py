@@ -25,18 +25,21 @@ def upgrade() -> None:
     op.create_index(op.f('ix_users_clerk_user_id'), 'users', ['clerk_user_id'], unique=True)
 
     # Make hashed_password nullable (for Clerk users)
-    op.alter_column('users', 'hashed_password',
-               existing_type=sa.String(length=255),
-               nullable=True)
+    # Use batch_alter_table for SQLite compatibility
+    with op.batch_alter_table('users', schema=None) as batch_op:
+        batch_op.alter_column('hashed_password',
+                   existing_type=sa.String(length=255),
+                   nullable=True)
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    # Make hashed_password non-nullable again
+    with op.batch_alter_table('users', schema=None) as batch_op:
+        batch_op.alter_column('hashed_password',
+                   existing_type=sa.String(length=255),
+                   nullable=False)
+
     # Remove clerk_user_id column
     op.drop_index(op.f('ix_users_clerk_user_id'), table_name='users')
     op.drop_column('users', 'clerk_user_id')
-
-    # Make hashed_password non-nullable again
-    op.alter_column('users', 'hashed_password',
-               existing_type=sa.String(length=255),
-               nullable=False)
