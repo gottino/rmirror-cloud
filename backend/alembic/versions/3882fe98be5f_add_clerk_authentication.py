@@ -20,9 +20,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # Add clerk_user_id column
-    op.add_column('users', sa.Column('clerk_user_id', sa.String(length=255), nullable=True))
-    op.create_index(op.f('ix_users_clerk_user_id'), 'users', ['clerk_user_id'], unique=True)
+    # Check if column exists before adding
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('users')]
+
+    # Add clerk_user_id column if it doesn't exist
+    if 'clerk_user_id' not in columns:
+        op.add_column('users', sa.Column('clerk_user_id', sa.String(length=255), nullable=True))
+        op.create_index(op.f('ix_users_clerk_user_id'), 'users', ['clerk_user_id'], unique=True)
 
     # Make hashed_password nullable (for Clerk users)
     # Use batch_alter_table for SQLite compatibility
