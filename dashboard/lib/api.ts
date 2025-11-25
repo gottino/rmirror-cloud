@@ -39,7 +39,7 @@ export interface NotebookWithPages extends Notebook {
  * Fetch notebooks for the current user
  */
 export async function getNotebooks(token: string): Promise<Notebook[]> {
-  const response = await fetch(`${API_URL}/notebooks`, {
+  const response = await fetch(`${API_URL}/notebooks/`, {
     headers: {
       'Authorization': `Bearer ${token}`,
     },
