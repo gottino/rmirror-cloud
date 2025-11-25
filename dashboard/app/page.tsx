@@ -3,14 +3,19 @@
 import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getNotebooksTree, type NotebookTree as NotebookTreeData } from '@/lib/api';
-import NotebookTree from '@/components/NotebookTree';
+import { getNotebooksTree, type NotebookTree as NotebookTreeData, NotebookTreeNode } from '@/lib/api';
+import FolderSidebar from '@/components/FolderSidebar';
+import Breadcrumb from '@/components/Breadcrumb';
+import MainContentArea from '@/components/MainContentArea';
 
 export default function Home() {
   const { getToken, isSignedIn } = useAuth();
   const [notebookTree, setNotebookTree] = useState<NotebookTreeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [currentFolder, setCurrentFolder] = useState<NotebookTreeNode | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const fetchNotebooks = async () => {
     if (!isSignedIn) {
@@ -39,12 +44,58 @@ export default function Home() {
     fetchNotebooks();
   }, [isSignedIn, getToken]);
 
+  // Find a node by UUID in the tree
+  const findNodeByUuid = (nodes: NotebookTreeNode[], uuid: string): NotebookTreeNode | null => {
+    for (const node of nodes) {
+      if (node.notebook_uuid === uuid) {
+        return node;
+      }
+      if (node.children && node.children.length > 0) {
+        const found = findNodeByUuid(node.children, uuid);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  // Get items to display in the main content area
+  const getCurrentItems = (): NotebookTreeNode[] => {
+    if (!notebookTree) return [];
+
+    if (currentFolderId === null) {
+      // Show root level items
+      return notebookTree.tree;
+    }
+
+    // Find the current folder and return its children
+    const folder = findNodeByUuid(notebookTree.tree, currentFolderId);
+    return folder?.children || [];
+  };
+
+  const handleFolderSelect = (folderId: string | null, node: NotebookTreeNode | null) => {
+    setCurrentFolderId(folderId);
+    setCurrentFolder(node);
+    // Close sidebar on mobile when folder is selected
+    if (window.innerWidth < 1024) {
+      setSidebarOpen(false);
+    }
+  };
+
   // Header component that's always visible
   const Header = () => (
-    <header className="bg-white shadow-sm sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+    <header className="bg-white shadow-sm sticky top-0 z-30">
+      <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="lg:hidden text-gray-600 hover:text-gray-900 p-2"
+              aria-label="Toggle sidebar"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
             <h1 className="text-2xl font-bold text-gray-900">📓 rMirror</h1>
           </div>
           <div className="flex items-center space-x-4">
@@ -98,38 +149,53 @@ export default function Home() {
     );
   }
 
+  const currentItems = getCurrentItems();
+
   return (
     <>
       <Header />
-      <div className="min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                Your Notebooks
-              </h1>
-              {notebookTree && (
-                <p className="text-gray-600">
-                  {notebookTree.total} {notebookTree.total === 1 ? 'item' : 'items'}
-                </p>
-              )}
-            </div>
-          </div>
+      <div className="flex h-screen overflow-hidden bg-gray-50">
+        {/* Sidebar */}
+        {notebookTree && (
+          <FolderSidebar
+            nodes={notebookTree.tree}
+            selectedFolderId={currentFolderId}
+            onFolderSelect={handleFolderSelect}
+            isOpen={sidebarOpen}
+            onToggle={() => setSidebarOpen(!sidebarOpen)}
+          />
+        )}
 
-          {!notebookTree || notebookTree.total === 0 ? (
-            <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-              <div className="text-gray-400 text-6xl mb-4">📚</div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                No notebooks yet
-              </h3>
-              <p className="text-gray-600">
-                Sync your reMarkable notebooks using the Mac agent to get started.
-              </p>
-            </div>
-          ) : (
-            <NotebookTree nodes={notebookTree.tree} />
-          )}
-        </div>
+        {/* Main content area */}
+        <main className="flex-1 overflow-y-auto">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            {!notebookTree || notebookTree.total === 0 ? (
+              <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+                <div className="text-gray-400 text-6xl mb-4">📚</div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  No notebooks yet
+                </h3>
+                <p className="text-gray-600">
+                  Sync your reMarkable notebooks using the Mac agent to get started.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Breadcrumb */}
+                <Breadcrumb
+                  currentFolder={currentFolder}
+                  onNavigate={handleFolderSelect}
+                />
+
+                {/* Content grid */}
+                <MainContentArea
+                  items={currentItems}
+                  onFolderClick={handleFolderSelect}
+                />
+              </>
+            )}
+          </div>
+        </main>
       </div>
     </>
   );
