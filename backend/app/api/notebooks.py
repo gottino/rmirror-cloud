@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_active_user
+from app.auth.clerk import get_clerk_active_user
 from app.database import get_db
 from app.dependencies import get_storage_service
 from app.models.notebook import Notebook
@@ -24,7 +24,7 @@ router = APIRouter()
 @router.post("/upload", response_model=NotebookUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_notebook(
     file: UploadFile = File(...),
-    current_user: Annotated[User, Depends(get_current_active_user)] = None,
+    current_user: Annotated[User, Depends(get_clerk_active_user)] = None,
     db: Annotated[Session, Depends(get_db)] = None,
     storage: Annotated[StorageService, Depends(get_storage_service)] = None,
 ):
@@ -108,7 +108,7 @@ async def upload_notebook(
 
 @router.get("/", response_model=list[NotebookSchema])
 async def list_notebooks(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
     skip: int = 0,
     limit: int = 100,
@@ -140,7 +140,7 @@ async def list_notebooks(
 @router.get("/uuid/{notebook_uuid}", response_model=NotebookSchema)
 async def get_notebook_by_uuid(
     notebook_uuid: str,
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
@@ -175,7 +175,7 @@ async def get_notebook_by_uuid(
 @router.get("/{notebook_id}", response_model=NotebookWithPages)
 async def get_notebook(
     notebook_id: int,
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
@@ -213,7 +213,7 @@ async def get_notebook(
 @router.delete("/{notebook_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_notebook(
     notebook_id: int,
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageService, Depends(get_storage_service)],
 ):
