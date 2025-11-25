@@ -4,7 +4,7 @@ from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from clerk_backend_sdk import Clerk
+from clerk_backend_sdk import Client
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -15,10 +15,10 @@ from app.models.user import User
 security = HTTPBearer()
 
 # Initialize Clerk SDK (lazy-loaded)
-_clerk_client: Optional[Clerk] = None
+_clerk_client: Optional[Client] = None
 
 
-def get_clerk_client() -> Clerk:
+def get_clerk_client() -> Client:
     """Get or create Clerk client instance."""
     global _clerk_client
     if _clerk_client is None:
@@ -28,7 +28,7 @@ def get_clerk_client() -> Clerk:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Clerk is not configured",
             )
-        _clerk_client = Clerk(bearer_auth=settings.clerk_secret_key)
+        _clerk_client = Client(bearer_auth=settings.clerk_secret_key)
     return _clerk_client
 
 
