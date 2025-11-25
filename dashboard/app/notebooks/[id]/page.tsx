@@ -1,6 +1,6 @@
 'use client';
 
-import { useAuth } from '@clerk/nextjs';
+import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -45,48 +45,72 @@ export default function NotebookPage() {
     fetchNotebook();
   }, [params.id, isSignedIn, getToken, router]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading notebook...</p>
+  // Header component that's always visible
+  const Header = () => (
+    <header className="bg-white shadow-sm sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="flex items-center justify-between">
+          <Link href="/" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
+            <h1 className="text-2xl font-bold text-gray-900">📓 rMirror</h1>
+          </Link>
+          <div className="flex items-center space-x-4">
+            {isSignedIn && <UserButton afterSignOutUrl="/" />}
+          </div>
         </div>
       </div>
+    </header>
+  );
+
+  if (loading) {
+    return (
+      <>
+        <Header />
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading notebook...</p>
+          </div>
+        </div>
+      </>
     );
   }
 
   if (error || !notebook) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="text-red-600 text-5xl mb-4">✗</div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Error</h2>
-          <p className="text-gray-600 mb-6">{error || 'Notebook not found'}</p>
-          <Link
-            href="/"
-            className="inline-block bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition-colors"
-          >
-            ← Back to notebooks
-          </Link>
+      <>
+        <Header />
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+          <div className="text-center max-w-md">
+            <div className="text-red-600 text-5xl mb-4">✗</div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Error</h2>
+            <p className="text-gray-600 mb-6">{error || 'Notebook not found'}</p>
+            <Link
+              href="/"
+              className="inline-block bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition-colors"
+            >
+              ← Back to notebooks
+            </Link>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   const sortedPages = [...notebook.pages].sort((a, b) => a.page_number - b.page_number);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        {/* Header */}
-        <div className="mb-8">
-          <Link
-            href="/"
-            className="inline-flex items-center text-purple-600 hover:text-purple-700 mb-4"
-          >
-            ← Back to notebooks
-          </Link>
+    <>
+      <Header />
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          {/* Back link and notebook header */}
+          <div className="mb-8">
+            <Link
+              href="/"
+              className="inline-flex items-center text-purple-600 hover:text-purple-700 mb-4"
+            >
+              ← Back to notebooks
+            </Link>
 
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             {notebook.visible_name || notebook.title || 'Untitled'}
@@ -170,7 +194,8 @@ export default function NotebookPage() {
             ))}
           </div>
         )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
