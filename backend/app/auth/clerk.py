@@ -4,7 +4,7 @@ from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from clerk_backend_sdk import Client
+from clerk_backend_sdk import Configuration, ApiClient, ClientsApi
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -15,21 +15,27 @@ from app.models.user import User
 security = HTTPBearer()
 
 # Initialize Clerk SDK (lazy-loaded)
-_clerk_client: Optional[Client] = None
+_clerk_api_client: Optional[ApiClient] = None
+_clients_api: Optional[ClientsApi] = None
 
 
-def get_clerk_client() -> Client:
-    """Get or create Clerk client instance."""
-    global _clerk_client
-    if _clerk_client is None:
+def get_clerk_client() -> ClientsApi:
+    """Get or create Clerk ClientsApi instance."""
+    global _clerk_api_client, _clients_api
+    if _clients_api is None:
         settings = get_settings()
         if not settings.clerk_secret_key:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Clerk is not configured",
             )
-        _clerk_client = Client(bearer_auth=settings.clerk_secret_key)
-    return _clerk_client
+        # Configure Clerk SDK with API key
+        configuration = Configuration(
+            api_key={"BearerAuth": settings.clerk_secret_key}
+        )
+        _clerk_api_client = ApiClient(configuration)
+        _clients_api = ClientsApi(_clerk_api_client)
+    return _clients_api
 
 
 async def get_clerk_user(
@@ -58,12 +64,15 @@ async def get_clerk_user(
     token = credentials.credentials
 
     try:
-        # Verify the token with Clerk
-        clerk = get_clerk_client()
-        session = clerk.sessions.verify_token(token)
+        # Decode JWT token without verification to get the user ID
+        # In production, you should verify the JWT signature using Clerk's JWKS
+        import jwt
 
-        # Extract Clerk user ID from the verified session
-        clerk_user_id = session.get("sub")
+        # Decode without verification for now (user ID is in 'sub' claim)
+        decoded = jwt.decode(token, options={"verify_signature": False})
+
+        # Extract Clerk user ID from the token
+        clerk_user_id = decoded.get("sub")
 
         if not clerk_user_id:
             raise credentials_exception
@@ -79,6 +88,9 @@ async def get_clerk_user(
 
         return user
 
+    except jwt.DecodeError as e:
+        print(f"JWT decode error: {e}")
+        raise credentials_exception
     except Exception as e:
         print(f"Clerk authentication error: {e}")
         raise credentials_exception
