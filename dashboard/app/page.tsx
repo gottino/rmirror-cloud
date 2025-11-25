@@ -3,12 +3,12 @@
 import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getNotebooksTree, type NotebookTree } from '@/lib/api';
+import { getNotebooksTree, type NotebookTree as NotebookTreeData } from '@/lib/api';
 import NotebookTree from '@/components/NotebookTree';
 
 export default function Home() {
   const { getToken, isSignedIn } = useAuth();
-  const [notebookTree, setNotebookTree] = useState<NotebookTree | null>(null);
+  const [notebookTree, setNotebookTree] = useState<NotebookTreeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
