@@ -202,13 +202,24 @@ echo ""
 
 # 10. Health check
 echo -e "${YELLOW}10/10 Running health check...${NC}"
-sleep 3  # Give the app time to fully start
 
-HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || echo "000")
+# Retry health check up to 10 times with 2 second delays (20 seconds total)
+HEALTH_CHECK="000"
+for i in {1..10}; do
+    sleep 2
+    HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+    if [ "$HEALTH_CHECK" = "200" ]; then
+        break
+    fi
+    if [ $i -lt 10 ]; then
+        echo -e "${YELLOW}   Waiting for backend to start... (attempt $i/10)${NC}"
+    fi
+done
+
 if [ "$HEALTH_CHECK" = "200" ]; then
     echo -e "${GREEN}✅ Backend health check passed (HTTP $HEALTH_CHECK)${NC}"
 else
-    echo -e "${RED}❌ Backend health check failed (HTTP $HEALTH_CHECK)${NC}"
+    echo -e "${RED}❌ Backend health check failed after 20s (HTTP $HEALTH_CHECK)${NC}"
     echo -e "${RED}   Check application logs:${NC}"
     echo -e "${RED}   sudo journalctl -u $SERVICE_NAME -f${NC}"
     exit 1
