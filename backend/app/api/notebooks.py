@@ -137,6 +137,90 @@ async def list_notebooks(
     return notebooks
 
 
+@router.get("/tree")
+async def get_notebooks_tree(
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """
+    Get all notebooks organized in a tree structure by folders.
+
+    Args:
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        Tree structure with folders and notebooks
+    """
+    # Get all notebooks for the user
+    all_notebooks = (
+        db.query(Notebook)
+        .filter(Notebook.user_id == current_user.id)
+        .order_by(Notebook.visible_name)
+        .all()
+    )
+
+    # Build a map of UUID to notebook
+    notebook_map = {nb.notebook_uuid: nb for nb in all_notebooks}
+
+    # Identify which notebooks have children (i.e., are folders)
+    has_children = set()
+    for nb in all_notebooks:
+        if nb.parent_uuid:
+            has_children.add(nb.parent_uuid)
+
+    # Build tree structure
+    def build_tree_node(notebook):
+        """Convert a notebook to a tree node with children."""
+        node = {
+            "id": notebook.id,
+            "notebook_uuid": notebook.notebook_uuid,
+            "visible_name": notebook.visible_name,
+            "document_type": notebook.document_type,
+            "parent_uuid": notebook.parent_uuid,
+            "full_path": notebook.full_path,
+            "created_at": notebook.created_at.isoformat() if notebook.created_at else None,
+            "last_synced_at": notebook.last_synced_at.isoformat() if notebook.last_synced_at else None,
+            "is_folder": notebook.notebook_uuid in has_children,
+            "children": [],
+        }
+        return node
+
+    # Create tree nodes
+    tree_nodes = {}
+    root_nodes = []
+
+    # First pass: create all nodes
+    for nb in all_notebooks:
+        tree_nodes[nb.notebook_uuid] = build_tree_node(nb)
+
+    # Second pass: build parent-child relationships
+    for uuid, node in tree_nodes.items():
+        parent_uuid = node["parent_uuid"]
+        if parent_uuid and parent_uuid in tree_nodes:
+            # Add to parent's children
+            tree_nodes[parent_uuid]["children"].append(node)
+        else:
+            # Root level item
+            root_nodes.append(node)
+
+    # Sort children by name
+    def sort_children(node):
+        if node["children"]:
+            # Sort folders first, then by name
+            node["children"].sort(key=lambda x: (not x["is_folder"], x["visible_name"].lower()))
+            for child in node["children"]:
+                sort_children(child)
+
+    for node in root_nodes:
+        sort_children(node)
+
+    # Sort root nodes (folders first, then by name)
+    root_nodes.sort(key=lambda x: (not x["is_folder"], x["visible_name"].lower()))
+
+    return {"tree": root_nodes, "total": len(all_notebooks)}
+
+
 @router.get("/uuid/{notebook_uuid}", response_model=NotebookSchema)
 async def get_notebook_by_uuid(
     notebook_uuid: str,

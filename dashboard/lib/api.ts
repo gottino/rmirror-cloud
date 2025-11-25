@@ -35,6 +35,24 @@ export interface NotebookWithPages extends Notebook {
   pages: Page[];
 }
 
+export interface NotebookTreeNode {
+  id: number;
+  notebook_uuid: string;
+  visible_name: string;
+  document_type: string;
+  parent_uuid: string | null;
+  full_path: string | null;
+  created_at: string | null;
+  last_synced_at: string | null;
+  is_folder: boolean;
+  children: NotebookTreeNode[];
+}
+
+export interface NotebookTree {
+  tree: NotebookTreeNode[];
+  total: number;
+}
+
 /**
  * Fetch notebooks for the current user
  */
@@ -47,6 +65,23 @@ export async function getNotebooks(token: string): Promise<Notebook[]> {
 
   if (!response.ok) {
     throw new Error('Failed to fetch notebooks');
+  }
+
+  return response.json();
+}
+
+/**
+ * Fetch notebooks organized in a tree structure
+ */
+export async function getNotebooksTree(token: string): Promise<NotebookTree> {
+  const response = await fetch(`${API_URL}/notebooks/tree`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch notebook tree');
   }
 
   return response.json();
