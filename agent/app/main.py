@@ -45,34 +45,58 @@ class Agent:
             if self.tray_app:
                 self.tray_app.update_status("Starting...")
 
-            # Initialize components
-            await self._initialize_components()
+            # Initialize CloudSync object BEFORE starting web server
+            # This way the web server has a reference to the actual object
+            from app.sync.cloud_sync import CloudSync
+            self.cloud_sync = CloudSync(self.config)
 
-            # Update tray status
-            if self.tray_app:
-                self.tray_app.update_status("Connected")
-
-            # Start web server in background thread
+            # Start web server in background thread (before auth)
+            # This ensures users can access the login page even if auth fails
             if self.config.web.enabled:
                 web_thread = threading.Thread(
                     target=self._run_web_server_thread,
                     daemon=True,
                 )
                 web_thread.start()
+                # Give the web server a moment to start
+                await asyncio.sleep(0.5)
+
+            # Try to authenticate
+            try:
+                await self.cloud_sync.authenticate()
+
+                # Update tray status if authentication succeeded
+                if self.tray_app:
+                    self.tray_app.update_status("Connected")
+
+            except Exception as e:
+                # Authentication failed - log it but keep running
+                print(f"\n⚠️  {e}")
+                print(f"Please sign in via the web interface at http://{self.config.web.host}:{self.config.web.port}\n")
+
+                if self.tray_app:
+                    self.tray_app.update_status("Not authenticated")
 
             # Keep running until stopped
             if self.foreground:
-                print("\nrMirror Agent running in foreground mode. Press Ctrl+C to stop.")
+                print(f"\nrMirror Agent running in foreground mode. Press Ctrl+C to stop.")
                 print(f"Web UI: http://{self.config.web.host}:{self.config.web.port}")
-                print(f"Watching: {self.config.remarkable.source_directory}\n")
+                if self.cloud_sync and self.cloud_sync.authenticated:
+                    print(f"Watching: {self.config.remarkable.source_directory}")
+                print()
 
             # Update tray status
-            if self.tray_app:
+            if self.tray_app and self.cloud_sync and self.cloud_sync.authenticated:
                 self.tray_app.update_status("Watching")
 
-            # Start file watcher (this will block)
-            if self.config.remarkable.watch_enabled:
+            # Start file watcher (this will block) - only if authenticated
+            if self.config.remarkable.watch_enabled and self.cloud_sync and self.cloud_sync.authenticated:
                 await self._run_file_watcher()
+            else:
+                # Keep agent running even without file watcher
+                # Just wait for interrupt signal
+                while self.running:
+                    await asyncio.sleep(1)
 
         except KeyboardInterrupt:
             print("\nReceived interrupt signal, shutting down...")
@@ -193,8 +217,8 @@ def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> Non
     # Load configuration
     config = Config.load(config_path)
 
-    # Validate configuration
-    if not config.api.email or not config.api.password:
+    # Validate configuration (only for legacy password auth)
+    if not config.api.use_clerk_auth and (not config.api.email or not config.api.password):
         click.echo("Error: API credentials not configured.", err=True)
         click.echo("Run 'rmirror-agent init' to create a configuration file.", err=True)
         sys.exit(1)

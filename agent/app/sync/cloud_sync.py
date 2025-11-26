@@ -41,28 +41,41 @@ class CloudSync:
             self.client = httpx.AsyncClient(timeout=300.0)  # 5 minute timeout for OCR
             logger.debug(f"Created HTTP client with 300s timeout")
 
-        # If using Clerk auth and we already have a token, verify it's valid
-        if self.config.api.use_clerk_auth and self.config.api.token:
+        # If we already have a token (from any source), verify it's valid
+        if self.config.api.token:
             try:
                 # Test the token with a simple API call
-                logger.debug(f"Verifying existing Clerk JWT token")
+                logger.debug(f"Verifying existing JWT token")
                 response = await self.client.get(
                     f"{self.config.api.url}/sync/stats",
                     headers={"Authorization": f"Bearer {self.config.api.token}"}
                 )
                 response.raise_for_status()
                 self.authenticated = True
-                logger.info(f"✓ Authenticated with rMirror Cloud using Clerk")
-                print(f"✓ Authenticated with rMirror Cloud using Clerk")
+                auth_method = "Clerk" if self.config.api.use_clerk_auth else "password"
+                logger.info(f"✓ Authenticated with rMirror Cloud using existing token ({auth_method})")
+                print(f"✓ Authenticated with rMirror Cloud using existing token ({auth_method})")
                 return True
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 401:
-                    logger.warning("Clerk JWT token expired or invalid")
-                    # Token expired, need to re-authenticate via OAuth
-                    raise CloudSyncError(
-                        "Authentication token expired. Please sign in again via the web interface."
-                    )
-                raise CloudSyncError(f"Token verification failed: {e}")
+                    logger.warning("JWT token expired or invalid")
+                    # Token expired - if using Clerk, need to re-auth via web
+                    if self.config.api.use_clerk_auth:
+                        raise CloudSyncError(
+                            "Authentication token expired. Please sign in again via the web interface."
+                        )
+                    # Otherwise, fall through to password auth below
+                    logger.info("Token expired, will try password authentication")
+                else:
+                    raise CloudSyncError(f"Token verification failed: {e}")
+            except Exception as e:
+                # Log the actual exception for debugging
+                logger.error(f"Token verification error: {type(e).__name__}: {e}", exc_info=True)
+                # If using Clerk auth, we can't fall back to password auth
+                if self.config.api.use_clerk_auth:
+                    raise CloudSyncError(f"Token verification failed: {e}")
+                # Otherwise fall through to password auth
+                logger.info("Token verification failed, will try password authentication")
 
         # Fall back to password authentication if configured
         if not self.config.api.use_clerk_auth:

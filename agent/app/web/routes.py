@@ -17,6 +17,7 @@ def register_routes(app: Flask) -> None:
     def index():
         """Main dashboard page."""
         config: Config = app.config["AGENT_CONFIG"]
+        cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
         return render_template(
             "index.html",
             config=config,
@@ -24,6 +25,8 @@ def register_routes(app: Flask) -> None:
             email=config.api.email,
             remarkable_dir=config.remarkable.source_directory,
             auto_sync=config.sync.auto_sync,
+            use_clerk_auth=config.api.use_clerk_auth,
+            authenticated=cloud_sync.authenticated if cloud_sync else False,
         )
 
     @app.route("/api/status")
@@ -39,7 +42,7 @@ def register_routes(app: Flask) -> None:
                     "version": "0.1.0",
                 },
                 "authentication": {
-                    "authenticated": cloud_sync.authenticated,
+                    "authenticated": cloud_sync.authenticated if cloud_sync else False,
                     "email": config.api.email,
                 },
                 "watching": {
@@ -196,7 +199,7 @@ def register_routes(app: Flask) -> None:
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
 
         return jsonify({
-            "authenticated": cloud_sync.authenticated,
+            "authenticated": cloud_sync.authenticated if cloud_sync else False,
             "use_clerk_auth": config.api.use_clerk_auth,
             "has_token": bool(config.api.token),
             "clerk_frontend_api": config.api.clerk_frontend_api,

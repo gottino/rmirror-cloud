@@ -207,7 +207,7 @@
         <div id="message" class="alert"></div>
 
         <!-- Authentication Card (shown when not authenticated with Clerk) -->
-        <div class="card" id="auth-card" style="display: none;">
+        <div class="card" id="auth-card" style="display: {% if use_clerk_auth and not authenticated %}block{% else %}none{% endif %};">
             <h2>Authentication Required</h2>
             <p style="margin-bottom: 20px; color: #86868b;">
                 Sign in with your rMirror account to start syncing your notebooks to the cloud.
@@ -263,6 +263,7 @@
                     <input type="text" id="api-url" name="api_url" value="{{ api_url }}" required>
                 </div>
 
+                {% if not use_clerk_auth %}
                 <div class="form-group">
                     <label for="email">Email</label>
                     <input type="email" id="email" name="email" value="{{ email }}" required>
@@ -272,6 +273,7 @@
                     <label for="password">Password</label>
                     <input type="password" id="password" name="password" placeholder="Enter to update">
                 </div>
+                {% endif %}
 
                 <h3 style="margin: 30px 0 15px; font-size: 1.2em;">reMarkable Settings</h3>
 

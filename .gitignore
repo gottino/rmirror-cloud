@@ -97,3 +97,4 @@ test_data/
 # Database dumps and migration scripts
 backend/dumps/
 backend/migrate_to_production*.py
+scripts/
