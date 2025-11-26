@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Folder, FolderOpen, File, FileText, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
+import { Folder, FolderOpen, NotebookText, FileText, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import { NotebookTreeNode } from '@/lib/api';
 
 interface NotebookTreeProps {
@@ -29,9 +29,9 @@ function TreeNode({ node, level }: TreeNodeProps) {
       case 'epub':
         return <BookOpen className={iconClass} />;
       case 'notebook':
-        return <File className={iconClass} />;
+        return <NotebookText className={iconClass} />;
       default:
-        return <File className={iconClass} />;
+        return <NotebookText className={iconClass} />;
     }
   };
 

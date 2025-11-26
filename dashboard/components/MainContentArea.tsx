@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Folder, File, FileText, BookOpen } from 'lucide-react';
+import { Folder, NotebookText, FileText, BookOpen } from 'lucide-react';
 import { NotebookTreeNode } from '@/lib/api';
 
 interface MainContentAreaProps {
@@ -24,9 +24,9 @@ function ItemCard({ item, onFolderClick }: { item: NotebookTreeNode; onFolderCli
       case 'epub':
         return <BookOpen className={iconClass} />;
       case 'notebook':
-        return <File className={iconClass} />;
+        return <NotebookText className={iconClass} />;
       default:
-        return <File className={iconClass} />;
+        return <NotebookText className={iconClass} />;
     }
   };
 
