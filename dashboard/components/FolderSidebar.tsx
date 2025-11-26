@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Folder, FolderOpen, Home, ChevronDown, ChevronRight } from 'lucide-react';
 import { NotebookTreeNode } from '@/lib/api';
 
 interface FolderSidebarProps {
@@ -60,12 +61,12 @@ function FolderNode({ node, level, selectedFolderId, onFolderSelect }: FolderNod
             onClick={toggleExpand}
             className="mr-1 text-gray-400 hover:text-gray-600 focus:outline-none"
           >
-            {isExpanded ? '▼' : '▶'}
+            {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
         )}
         {folderChildren.length === 0 && <span className="mr-1 w-4" />}
 
-        <span className="mr-2">{isExpanded ? '📂' : '📁'}</span>
+        <span className="mr-2 flex items-center">{isExpanded ? <FolderOpen className="w-4 h-4" /> : <Folder className="w-4 h-4" />}</span>
         <span className="truncate flex-1">{node.visible_name}</span>
         <span className="ml-1 text-xs text-gray-400">
           {node.children.length}
@@ -141,7 +142,7 @@ export default function FolderSidebar({
             }`}
             onClick={handleRootClick}
           >
-            <span className="mr-2">🏠</span>
+            <span className="mr-2 flex items-center"><Home className="w-4 h-4" /></span>
             <span>All Notebooks</span>
           </div>
         </div>

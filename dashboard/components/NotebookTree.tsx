@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { Folder, FolderOpen, File, FileText, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import { NotebookTreeNode } from '@/lib/api';
 
 interface NotebookTreeProps {
@@ -18,18 +19,19 @@ function TreeNode({ node, level }: TreeNodeProps) {
   const hasChildren = node.children && node.children.length > 0;
 
   const getIcon = () => {
+    const iconClass = "w-4 h-4";
     if (node.is_folder || hasChildren) {
-      return isExpanded ? '📂' : '📁';
+      return isExpanded ? <FolderOpen className={iconClass} /> : <Folder className={iconClass} />;
     }
     switch (node.document_type) {
       case 'pdf':
-        return '📄';
+        return <FileText className={iconClass} />;
       case 'epub':
-        return '📕';
+        return <BookOpen className={iconClass} />;
       case 'notebook':
-        return '📓';
+        return <File className={iconClass} />;
       default:
-        return '📄';
+        return <File className={iconClass} />;
     }
   };
 
@@ -50,14 +52,14 @@ function TreeNode({ node, level }: TreeNodeProps) {
             onClick={toggleExpand}
             className="mr-1 text-gray-400 hover:text-gray-600 focus:outline-none"
           >
-            {isExpanded ? '▼' : '▶'}
+            {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
         )}
         {!hasChildren && <span className="mr-1 w-4" />}
 
         {node.is_folder || hasChildren ? (
           <div className="flex items-center flex-1 min-w-0">
-            <span className="mr-2">{getIcon()}</span>
+            <span className="mr-2 flex items-center">{getIcon()}</span>
             <span className="font-medium text-gray-900 truncate">
               {node.visible_name}
             </span>
@@ -70,7 +72,7 @@ function TreeNode({ node, level }: TreeNodeProps) {
             href={`/notebooks/${node.id}`}
             className="flex items-center flex-1 min-w-0 hover:text-blue-600"
           >
-            <span className="mr-2">{getIcon()}</span>
+            <span className="mr-2 flex items-center">{getIcon()}</span>
             <span className="text-gray-700 group-hover:text-blue-600 truncate">
               {node.visible_name}
             </span>

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Folder, File, FileText, BookOpen } from 'lucide-react';
 import { NotebookTreeNode } from '@/lib/api';
 
 interface MainContentAreaProps {
@@ -13,18 +14,19 @@ function ItemCard({ item, onFolderClick }: { item: NotebookTreeNode; onFolderCli
   const isFolder = item.is_folder || hasChildren;
 
   const getIcon = () => {
+    const iconClass = "w-12 h-12";
     if (isFolder) {
-      return '📂';
+      return <Folder className={iconClass} />;
     }
     switch (item.document_type) {
       case 'pdf':
-        return '📄';
+        return <FileText className={iconClass} />;
       case 'epub':
-        return '📕';
+        return <BookOpen className={iconClass} />;
       case 'notebook':
-        return '📓';
+        return <File className={iconClass} />;
       default:
-        return '📄';
+        return <File className={iconClass} />;
     }
   };
 
@@ -38,7 +40,7 @@ function ItemCard({ item, onFolderClick }: { item: NotebookTreeNode; onFolderCli
   const content = (
     <div className="group relative bg-white rounded-lg border border-gray-200 p-6 hover:shadow-md transition-all cursor-pointer">
       <div className="flex flex-col items-center text-center">
-        <div className="text-5xl mb-3">{getIcon()}</div>
+        <div className="mb-3 text-gray-600 group-hover:text-purple-600 transition-colors">{getIcon()}</div>
         <h3 className="font-medium text-gray-900 mb-1 line-clamp-2 group-hover:text-purple-600">
           {item.visible_name}
         </h3>
@@ -87,7 +89,7 @@ export default function MainContentArea({ items, onFolderClick }: MainContentAre
     return (
       <div className="flex items-center justify-center h-64 bg-white rounded-lg border border-gray-200">
         <div className="text-center text-gray-500">
-          <div className="text-6xl mb-4">📂</div>
+          <div className="mb-4 flex justify-center"><Folder className="w-16 h-16" /></div>
           <p>This folder is empty</p>
         </div>
       </div>
