@@ -3,6 +3,7 @@
 import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { getNotebooksTree, type NotebookTree as NotebookTreeData, NotebookTreeNode } from '@/lib/api';
 import FolderSidebar from '@/components/FolderSidebar';
 import Breadcrumb from '@/components/Breadcrumb';
@@ -96,7 +97,10 @@ export default function Home() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <h1 className="text-2xl font-bold text-gray-900">📓 rMirror</h1>
+            <div className="flex items-center space-x-2">
+              <Image src="/rm-icon.png" alt="rMirror" width={32} height={32} className="inline-block" />
+              <h1 className="text-2xl font-bold text-gray-900">rMirror</h1>
+            </div>
           </div>
           <div className="flex items-center space-x-4">
             {isSignedIn && <UserButton afterSignOutUrl="/" />}
