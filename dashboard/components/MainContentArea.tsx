@@ -9,6 +9,28 @@ interface MainContentAreaProps {
   onFolderClick: (folderId: string, node: NotebookTreeNode) => void;
 }
 
+// Format date as relative time (e.g., "2 days ago")
+function formatRelativeTime(dateString: string | null): string | null {
+  if (!dateString) return null;
+
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  const diffMonths = Math.floor(diffDays / 30);
+  const diffYears = Math.floor(diffDays / 365);
+
+  if (diffSecs < 60) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 30) return `${diffDays}d ago`;
+  if (diffMonths < 12) return `${diffMonths}mo ago`;
+  return `${diffYears}y ago`;
+}
+
 function ItemCard({ item, onFolderClick }: { item: NotebookTreeNode; onFolderClick: (folderId: string, node: NotebookTreeNode) => void }) {
   const hasChildren = item.children && item.children.length > 0;
   const isFolder = item.is_folder || hasChildren;
@@ -37,6 +59,8 @@ function ItemCard({ item, onFolderClick }: { item: NotebookTreeNode; onFolderCli
     }
   };
 
+  const relativeTime = formatRelativeTime(item.last_synced_at);
+
   const content = (
     <div className="group relative bg-white rounded-lg border border-gray-200 p-6 hover:shadow-md transition-all cursor-pointer">
       <div className="flex flex-col items-center text-center">
@@ -49,9 +73,9 @@ function ItemCard({ item, onFolderClick }: { item: NotebookTreeNode; onFolderCli
             {item.children.length} {item.children.length === 1 ? 'item' : 'items'}
           </p>
         )}
-        {!isFolder && item.document_type && (
-          <p className="text-xs text-gray-400 uppercase mt-1">
-            {item.document_type}
+        {!isFolder && relativeTime && (
+          <p className="text-xs text-gray-400 mt-1">
+            {relativeTime}
           </p>
         )}
       </div>
