@@ -20,6 +20,7 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<'notebook' | 'epub' | 'pdf' | null>(null);
 
   const fetchNotebooks = async () => {
     if (!isSignedIn) {
@@ -81,9 +82,37 @@ export default function Home() {
     return results;
   };
 
+  // Flatten tree and get all items of a specific document type
+  const getItemsByType = (nodes: NotebookTreeNode[], docType: string): NotebookTreeNode[] => {
+    const results: NotebookTreeNode[] = [];
+
+    for (const node of nodes) {
+      // Only include non-folder items that match the type
+      if (!node.is_folder && node.document_type === docType) {
+        results.push(node);
+      }
+      // Recursively search children
+      if (node.children && node.children.length > 0) {
+        results.push(...getItemsByType(node.children, docType));
+      }
+    }
+
+    // Sort by last_synced_at (most recent first)
+    return results.sort((a, b) => {
+      const dateA = a.last_synced_at ? new Date(a.last_synced_at).getTime() : 0;
+      const dateB = b.last_synced_at ? new Date(b.last_synced_at).getTime() : 0;
+      return dateB - dateA; // descending order
+    });
+  };
+
   // Get items to display in the main content area
   const getCurrentItems = (): NotebookTreeNode[] => {
     if (!notebookTree) return [];
+
+    // If filtering by type, return all items of that type
+    if (activeFilter) {
+      return getItemsByType(notebookTree.tree, activeFilter);
+    }
 
     // If searching, return search results
     if (searchQuery.trim()) {
@@ -270,8 +299,59 @@ export default function Home() {
               </div>
             ) : (
               <>
-                {/* Search results header or Breadcrumb */}
-                {searchQuery.trim() ? (
+                {/* Filters */}
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => setActiveFilter(activeFilter === 'notebook' ? null : 'notebook')}
+                    className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
+                      activeFilter === 'notebook'
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    Notebooks
+                  </button>
+                  <button
+                    onClick={() => setActiveFilter(activeFilter === 'pdf' ? null : 'pdf')}
+                    className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
+                      activeFilter === 'pdf'
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    PDFs
+                  </button>
+                  <button
+                    onClick={() => setActiveFilter(activeFilter === 'epub' ? null : 'epub')}
+                    className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
+                      activeFilter === 'epub'
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    EPubs
+                  </button>
+                </div>
+
+                {/* Filter results header, Search results header, or Breadcrumb */}
+                {activeFilter ? (
+                  <div className="mb-6">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        {activeFilter === 'notebook' ? 'All Notebooks' : activeFilter === 'pdf' ? 'All PDFs' : 'All EPubs'}
+                      </h2>
+                      <button
+                        onClick={() => setActiveFilter(null)}
+                        className="text-sm text-purple-600 hover:text-purple-700"
+                      >
+                        Clear filter
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {currentItems.length} {currentItems.length === 1 ? 'item' : 'items'} · Sorted by most recent
+                    </p>
+                  </div>
+                ) : searchQuery.trim() ? (
                   <div className="mb-6">
                     <div className="flex items-center justify-between">
                       <h2 className="text-lg font-semibold text-gray-900">
@@ -316,6 +396,7 @@ export default function Home() {
                   <MainContentArea
                     items={currentItems}
                     onFolderClick={handleFolderSelect}
+                    skipSort={activeFilter !== null}
                   />
                 )}
               </>

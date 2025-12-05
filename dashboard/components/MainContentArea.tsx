@@ -7,6 +7,7 @@ import { NotebookTreeNode } from '@/lib/api';
 interface MainContentAreaProps {
   items: NotebookTreeNode[];
   onFolderClick: (folderId: string, node: NotebookTreeNode) => void;
+  skipSort?: boolean;
 }
 
 // Format date as relative time (e.g., "2 days ago")
@@ -97,9 +98,9 @@ function ItemCard({ item, onFolderClick }: { item: NotebookTreeNode; onFolderCli
   );
 }
 
-export default function MainContentArea({ items, onFolderClick }: MainContentAreaProps) {
-  // Sort: folders first, then alphabetically
-  const sortedItems = [...items].sort((a, b) => {
+export default function MainContentArea({ items, onFolderClick, skipSort = false }: MainContentAreaProps) {
+  // Sort: folders first, then alphabetically (unless skipSort is true)
+  const sortedItems = skipSort ? items : [...items].sort((a, b) => {
     const aIsFolder = a.is_folder || (a.children && a.children.length > 0);
     const bIsFolder = b.is_folder || (b.children && b.children.length > 0);
 
