@@ -4,6 +4,7 @@ import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { Search, X } from 'lucide-react';
 import { getNotebooksTree, type NotebookTree as NotebookTreeData, NotebookTreeNode } from '@/lib/api';
 import FolderSidebar from '@/components/FolderSidebar';
 import Breadcrumb from '@/components/Breadcrumb';
@@ -17,6 +18,7 @@ export default function Home() {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [currentFolder, setCurrentFolder] = useState<NotebookTreeNode | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const fetchNotebooks = async () => {
     if (!isSignedIn) {
@@ -59,9 +61,33 @@ export default function Home() {
     return null;
   };
 
+  // Search through all nodes recursively
+  const searchNodes = (nodes: NotebookTreeNode[], query: string): NotebookTreeNode[] => {
+    const results: NotebookTreeNode[] = [];
+    const lowerQuery = query.toLowerCase();
+
+    for (const node of nodes) {
+      // Check if current node matches
+      if (node.visible_name.toLowerCase().includes(lowerQuery)) {
+        results.push(node);
+      }
+      // Search children recursively
+      if (node.children && node.children.length > 0) {
+        results.push(...searchNodes(node.children, query));
+      }
+    }
+
+    return results;
+  };
+
   // Get items to display in the main content area
   const getCurrentItems = (): NotebookTreeNode[] => {
     if (!notebookTree) return [];
+
+    // If searching, return search results
+    if (searchQuery.trim()) {
+      return searchNodes(notebookTree.tree, searchQuery.trim());
+    }
 
     if (currentFolderId === null) {
       // Show root level items
@@ -86,7 +112,7 @@ export default function Home() {
   const Header = () => (
     <header className="bg-white shadow-sm sticky top-0 z-30">
       <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -102,6 +128,30 @@ export default function Home() {
               <h1 className="text-2xl font-bold text-gray-900">rMirror</h1>
             </div>
           </div>
+
+          {/* Search bar */}
+          <div className="flex-1 max-w-md hidden sm:block">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Search notebooks and folders..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  aria-label="Clear search"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+          </div>
+
           <div className="flex items-center space-x-4">
             {isSignedIn && <UserButton afterSignOutUrl="/" />}
           </div>
@@ -185,17 +235,54 @@ export default function Home() {
               </div>
             ) : (
               <>
-                {/* Breadcrumb */}
-                <Breadcrumb
-                  currentFolder={currentFolder}
-                  onNavigate={handleFolderSelect}
-                />
+                {/* Search results header or Breadcrumb */}
+                {searchQuery.trim() ? (
+                  <div className="mb-6">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Search results for &quot;{searchQuery}&quot;
+                      </h2>
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className="text-sm text-purple-600 hover:text-purple-700"
+                      >
+                        Clear search
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {currentItems.length} {currentItems.length === 1 ? 'result' : 'results'} found
+                    </p>
+                  </div>
+                ) : (
+                  <Breadcrumb
+                    currentFolder={currentFolder}
+                    onNavigate={handleFolderSelect}
+                  />
+                )}
 
-                {/* Content grid */}
-                <MainContentArea
-                  items={currentItems}
-                  onFolderClick={handleFolderSelect}
-                />
+                {/* Content grid or empty search results */}
+                {currentItems.length === 0 && searchQuery.trim() ? (
+                  <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+                    <Search className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                      No results found
+                    </h3>
+                    <p className="text-gray-600">
+                      Try adjusting your search terms or{' '}
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className="text-purple-600 hover:text-purple-700 underline"
+                      >
+                        clear the search
+                      </button>
+                    </p>
+                  </div>
+                ) : (
+                  <MainContentArea
+                    items={currentItems}
+                    onFolderClick={handleFolderSelect}
+                  />
+                )}
               </>
             )}
           </div>
