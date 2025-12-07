@@ -1,13 +1,12 @@
 """Clerk webhook handler for user synchronization."""
 
-import hashlib
-import hmac
 import json
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
+from svix.webhooks import Webhook, WebhookVerificationError
 
 from app.config import get_settings
 from app.database import get_db
@@ -19,7 +18,7 @@ router = APIRouter()
 
 def verify_webhook_signature(payload: bytes, headers: dict, webhook_secret: str) -> bool:
     """
-    Verify that the webhook request came from Clerk.
+    Verify that the webhook request came from Clerk using Svix.
 
     Args:
         payload: Raw request body
@@ -29,26 +28,22 @@ def verify_webhook_signature(payload: bytes, headers: dict, webhook_secret: str)
     Returns:
         True if signature is valid
     """
-    # Get the signature from headers
-    svix_id = headers.get("svix-id")
-    svix_timestamp = headers.get("svix-timestamp")
-    svix_signature = headers.get("svix-signature")
-
-    if not all([svix_id, svix_timestamp, svix_signature]):
+    try:
+        wh = Webhook(webhook_secret)
+        # Svix expects headers as dict with lowercase keys
+        svix_headers = {
+            "svix-id": headers.get("svix-id"),
+            "svix-timestamp": headers.get("svix-timestamp"),
+            "svix-signature": headers.get("svix-signature"),
+        }
+        # This will raise WebhookVerificationError if invalid
+        wh.verify(payload, svix_headers)
+        return True
+    except WebhookVerificationError:
         return False
-
-    # Construct the signed content
-    signed_content = f"{svix_id}.{svix_timestamp}.{payload.decode()}"
-
-    # Compute the expected signature
-    secret_bytes = webhook_secret.encode()
-    mac = hmac.new(secret_bytes, signed_content.encode(), hashlib.sha256)
-    expected_signature = mac.hexdigest()
-
-    # Compare signatures (get the first signature from the header)
-    signature = svix_signature.split(",")[0].replace("v1,", "")
-
-    return hmac.compare_digest(expected_signature, signature)
+    except Exception as e:
+        print(f"Webhook verification error: {e}")
+        return False
 
 
 @router.post("")

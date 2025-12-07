@@ -31,6 +31,8 @@ rmc = {git = "https://github.com/ricklupton/rmc.git"}
 anthropic = "^0.18.0"
 notion-client = "^2.7.0"
 clerk-backend-sdk = "^1.0.0"
+svix = "^1.17.0"
+resend = "^2.19.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.4"
