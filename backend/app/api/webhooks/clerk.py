@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
+from app.utils.email import get_email_service
 
 router = APIRouter()
 
@@ -159,6 +160,21 @@ async def handle_user_created(data: dict, db: Session):
     db.refresh(new_user)
 
     print(f"Created user: {new_user.email} (Clerk ID: {clerk_user_id})")
+
+    # Send welcome email to new user
+    try:
+        email_service = get_email_service()
+        email_sent = email_service.send_welcome_email(
+            user_email=new_user.email,
+            user_name=new_user.full_name
+        )
+        if email_sent:
+            print(f"Welcome email sent to {new_user.email}")
+        else:
+            print(f"Failed to send welcome email to {new_user.email}")
+    except Exception as e:
+        print(f"Error sending welcome email to {new_user.email}: {str(e)}")
+        # Don't fail the webhook if email fails
 
 
 async def handle_user_updated(data: dict, db: Session):
