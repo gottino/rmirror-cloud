@@ -51,15 +51,33 @@ jobs:
           ssh -i ~/.ssh/deploy_key \
               -p $SERVER_PORT \
               $SERVER_USER@$SERVER_HOST \
-              "cd /var/www/rmirror-cloud && \
+              'cd /var/www/rmirror-cloud && \
                git fetch origin && \
-               git checkout $BRANCH && \
-               git pull origin $BRANCH && \
-               sed -i 's|^CLERK_SECRET_KEY=.*|CLERK_SECRET_KEY=$CLERK_SECRET_KEY|' dashboard/.env && \
-               sed -i 's|^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=.*|NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY|' dashboard/.env && \
-               sed -i 's|^RESEND_API_KEY=.*|RESEND_API_KEY=$RESEND_API_KEY|' backend/.env && \
-               sed -i 's|^CLERK_WEBHOOK_SECRET=.*|CLERK_WEBHOOK_SECRET=$CLERK_WEBHOOK_SECRET|' backend/.env || echo 'CLERK_WEBHOOK_SECRET=$CLERK_WEBHOOK_SECRET' >> backend/.env && \
-               ./backend/scripts/deploy.sh $BRANCH"
+               git checkout '"$BRANCH"' && \
+               git pull origin '"$BRANCH"' && \
+
+               # Helper function to update or add env variable
+               update_env() {
+                 local file=$1
+                 local key=$2
+                 local value=$3
+                 if grep -q "^${key}=" "$file"; then
+                   sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+                 else
+                   echo "${key}=${value}" >> "$file"
+                 fi
+               }
+
+               # Update dashboard .env
+               update_env dashboard/.env CLERK_SECRET_KEY "'"$CLERK_SECRET_KEY"'"
+               update_env dashboard/.env NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY "'"$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"'"
+
+               # Update backend .env
+               update_env backend/.env RESEND_API_KEY "'"$RESEND_API_KEY"'"
+               update_env backend/.env CLERK_WEBHOOK_SECRET "'"$CLERK_WEBHOOK_SECRET"'"
+
+               # Run deploy script
+               ./backend/scripts/deploy.sh '"$BRANCH"
 
       - name: Check deployment status
         if: success()
