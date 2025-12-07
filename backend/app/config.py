@@ -101,6 +101,12 @@ class Settings(BaseSettings):
     max_upload_size: int = 100 * 1024 * 1024  # 100MB
     allowed_file_types: list[str] = [".pdf", ".epub"]
 
+    # Email Configuration (Resend)
+    resend_api_key: Optional[str] = None
+    resend_from_email: str = "noreply@rmirror.io"
+    resend_from_name: str = "rMirror Cloud"
+    admin_email: Optional[str] = None
+
 
 @lru_cache
 def get_settings() -> Settings:
