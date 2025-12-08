@@ -56,38 +56,40 @@ jobs:
           ssh -i ~/.ssh/deploy_key \
               -p $SERVER_PORT \
               $SERVER_USER@$SERVER_HOST \
-              'cd /var/www/rmirror-cloud && \
+              "cd /var/www/rmirror-cloud && \
                git fetch origin && \
-               git checkout '"$BRANCH"' && \
-               git pull origin '"$BRANCH"' && \
+               git checkout $BRANCH && \
+               git stash && \
+               git pull origin $BRANCH && \
+               git stash pop || true && \
 
                # Helper function to update or add env variable
                update_env() {
-                 local file=$1
-                 local key=$2
-                 local value=$3
-                 if grep -q "^${key}=" "$file"; then
-                   sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+                 local file=\$1
+                 local key=\$2
+                 local value=\$3
+                 if grep -q \"^\${key}=\" \"\$file\"; then
+                   sed -i \"s|^\${key}=.*|\${key}=\${value}|\" \"\$file\"
                  else
-                   echo "${key}=${value}" >> "$file"
+                   echo \"\${key}=\${value}\" >> \"\$file\"
                  fi
-               }
+               } && \
 
                # Update dashboard .env
-               update_env dashboard/.env CLERK_SECRET_KEY "'"$CLERK_SECRET_KEY"'"
-               update_env dashboard/.env NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY "'"$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"'"
+               update_env dashboard/.env CLERK_SECRET_KEY \"$CLERK_SECRET_KEY\" && \
+               update_env dashboard/.env NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \"$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\" && \
 
                # Update backend .env
-               update_env backend/.env RESEND_API_KEY "'"$RESEND_API_KEY"'"
-               update_env backend/.env CLERK_WEBHOOK_SECRET "'"$CLERK_WEBHOOK_SECRET"'"
-               update_env backend/.env S3_ENDPOINT_URL "'"$B2_ENDPOINT_URL"'"
-               update_env backend/.env S3_ACCESS_KEY "'"$B2_ACCESS_KEY_ID"'"
-               update_env backend/.env S3_SECRET_KEY "'"$B2_SECRET_ACCESS_KEY"'"
-               update_env backend/.env S3_BUCKET_NAME "'"$B2_BUCKET_NAME"'"
-               update_env backend/.env S3_REGION "'"$B2_REGION"'"
+               update_env backend/.env RESEND_API_KEY \"$RESEND_API_KEY\" && \
+               update_env backend/.env CLERK_WEBHOOK_SECRET \"$CLERK_WEBHOOK_SECRET\" && \
+               update_env backend/.env S3_ENDPOINT_URL \"$B2_ENDPOINT_URL\" && \
+               update_env backend/.env S3_ACCESS_KEY \"$B2_ACCESS_KEY_ID\" && \
+               update_env backend/.env S3_SECRET_KEY \"$B2_SECRET_ACCESS_KEY\" && \
+               update_env backend/.env S3_BUCKET_NAME \"$B2_BUCKET_NAME\" && \
+               update_env backend/.env S3_REGION \"$B2_REGION\" && \
 
                # Run deploy script
-               ./backend/scripts/deploy.sh '"$BRANCH"
+               ./backend/scripts/deploy.sh $BRANCH"
 
       - name: Check deployment status
         if: success()
