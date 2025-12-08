@@ -158,6 +158,8 @@ async def process_rm_file(
             logger.info(f"Created notebook with ID: {notebook.id}")
         else:
             logger.info(f"Found existing notebook: {notebook.id}")
+            # Update last_synced_at when syncing existing notebook
+            notebook.last_synced_at = datetime.utcnow()
 
         # Save .rm file to temporary location for processing
         temp_rm_path = Path(f"/tmp/{rm_file.filename}")
