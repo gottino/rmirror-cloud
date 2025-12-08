@@ -4,8 +4,9 @@
 # Test data
 /test_data/
 
-# Config files (nginx, etc.)
-/config/
+# Config files (nginx configs are tracked, other configs ignored)
+/config/*
+!/config/nginx/
 
 # Debug/temp files
 /pics/
