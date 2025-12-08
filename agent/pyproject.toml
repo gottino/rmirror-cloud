@@ -25,6 +25,7 @@ pytest-asyncio = "^0.23.2"
 mypy = "^1.7.1"
 ruff = "^0.1.7"
 types-pyyaml = "^6.0.12"
+pyinstaller = "^6.3.0"
 
 [tool.poetry.scripts]
 rmirror-agent = "app.main:cli"

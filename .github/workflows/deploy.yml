@@ -47,6 +47,11 @@ jobs:
           CLERK_WEBHOOK_SECRET: ${{ secrets.CLERK_WEBHOOK_SECRET }}
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          B2_ENDPOINT_URL: ${{ secrets.B2_ENDPOINT_URL }}
+          B2_ACCESS_KEY_ID: ${{ secrets.B2_ACCESS_KEY_ID }}
+          B2_SECRET_ACCESS_KEY: ${{ secrets.B2_SECRET_ACCESS_KEY }}
+          B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
+          B2_REGION: ${{ secrets.B2_REGION }}
         run: |
           ssh -i ~/.ssh/deploy_key \
               -p $SERVER_PORT \
@@ -75,6 +80,11 @@ jobs:
                # Update backend .env
                update_env backend/.env RESEND_API_KEY "'"$RESEND_API_KEY"'"
                update_env backend/.env CLERK_WEBHOOK_SECRET "'"$CLERK_WEBHOOK_SECRET"'"
+               update_env backend/.env S3_ENDPOINT_URL "'"$B2_ENDPOINT_URL"'"
+               update_env backend/.env S3_ACCESS_KEY "'"$B2_ACCESS_KEY_ID"'"
+               update_env backend/.env S3_SECRET_KEY "'"$B2_SECRET_ACCESS_KEY"'"
+               update_env backend/.env S3_BUCKET_NAME "'"$B2_BUCKET_NAME"'"
+               update_env backend/.env S3_REGION "'"$B2_REGION"'"
 
                # Run deploy script
                ./backend/scripts/deploy.sh '"$BRANCH"
