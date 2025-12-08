@@ -1,12 +1,13 @@
 name: Deploy Landing Page
 
 on:
-  # Trigger on push to main branch when landing page changes
+  # Trigger on push to main branch when landing page or nginx config changes
   push:
     branches:
       - main
     paths:
       - 'landing/**'
+      - 'backend/config/nginx/**'
       - '.github/workflows/deploy-landing.yml'
 
   # Allow manual deployment from GitHub UI
@@ -52,21 +53,27 @@ jobs:
               landing/logo.png \
               $SERVER_USER@$SERVER_HOST:/var/www/rmirror-landing/
 
-      - name: Configure nginx (if needed)
+      - name: Update nginx configuration
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
         run: |
+          # Copy nginx config to server
+          scp -i ~/.ssh/deploy_key \
+              -P $SERVER_PORT \
+              backend/config/nginx/rmirror-production.conf \
+              $SERVER_USER@$SERVER_HOST:/tmp/rmirror-nginx.conf
+
+          # Apply nginx config
           ssh -i ~/.ssh/deploy_key \
               -p $SERVER_PORT \
               $SERVER_USER@$SERVER_HOST \
-              'if [ ! -f /etc/nginx/sites-enabled/rmirror-landing ]; then
-                echo "⚠️  Nginx configuration not found. Please configure nginx manually.";
-                echo "See landing/README.md for nginx configuration instructions.";
-              else
-                echo "✅ Nginx already configured";
-              fi'
+              "sudo cp /tmp/rmirror-nginx.conf /etc/nginx/sites-available/rmirror && \
+               sudo nginx -t && \
+               sudo systemctl reload nginx && \
+               echo '✅ Nginx configuration updated' || \
+               echo '❌ Nginx configuration failed'"
 
       - name: Verify deployment
         if: success()
