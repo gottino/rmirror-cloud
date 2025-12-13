@@ -288,14 +288,47 @@ export default function Home() {
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             {!notebookTree || notebookTree.total === 0 ? (
-              <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+              <div className="text-center py-12 bg-white rounded-lg border border-gray-200 max-w-2xl mx-auto">
                 <div className="text-gray-400 text-6xl mb-4">📚</div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">
                   No notebooks yet
                 </h3>
-                <p className="text-gray-600">
-                  Sync your reMarkable notebooks using the Mac agent to get started.
+                <p className="text-gray-600 mb-6">
+                  Download and install the rMirror Agent to sync your reMarkable notebooks.
                 </p>
+                <div className="space-y-4">
+                  <a
+                    href="https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.0.0/rMirror-1.0.0.dmg"
+                    className="inline-block px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold"
+                    download
+                  >
+                    Download rMirror Agent for macOS
+                  </a>
+                  <div className="text-sm text-gray-500">
+                    Version 1.0.0 • macOS 12.0 or later • 18 MB
+                  </div>
+                  <div className="mt-6 pt-6 border-t border-gray-200">
+                    <h4 className="text-sm font-semibold text-gray-900 mb-3">Getting Started:</h4>
+                    <ol className="text-sm text-gray-600 text-left space-y-2 max-w-md mx-auto">
+                      <li className="flex items-start">
+                        <span className="font-semibold mr-2">1.</span>
+                        <span>Download and install the agent on your Mac</span>
+                      </li>
+                      <li className="flex items-start">
+                        <span className="font-semibold mr-2">2.</span>
+                        <span>Make sure reMarkable Desktop app is installed and synced</span>
+                      </li>
+                      <li className="flex items-start">
+                        <span className="font-semibold mr-2">3.</span>
+                        <span>Launch rMirror Agent and sign in with your account</span>
+                      </li>
+                      <li className="flex items-start">
+                        <span className="font-semibold mr-2">4.</span>
+                        <span>Your notebooks will automatically sync to the cloud</span>
+                      </li>
+                    </ol>
+                  </div>
+                </div>
               </div>
             ) : (
               <>

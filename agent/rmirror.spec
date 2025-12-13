@@ -2,11 +2,25 @@
 
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 # Get the agent directory
 agent_dir = Path(SPECPATH)
 
 block_cipher = None
+
+# Collect all submodules for packages that PyInstaller might miss
+hiddenimports = []
+datas = []
+
+# Collect all submodules for critical packages
+packages_to_collect = ['click', 'flask', 'watchdog', 'httpx', 'pydantic', 'pydantic_settings', 'rumps']
+for package in packages_to_collect:
+    try:
+        hiddenimports += collect_submodules(package)
+        datas += copy_metadata(package)
+    except Exception as e:
+        print(f"Warning: Could not collect {package}: {e}")
 
 # Collect all Flask templates and web UI files
 web_datas = [
@@ -22,8 +36,9 @@ a = Analysis(
     [str(agent_dir / 'app' / 'main.py')],
     pathex=[str(agent_dir)],
     binaries=[],
-    datas=web_datas + resource_datas,
-    hiddenimports=[
+    datas=web_datas + resource_datas + datas,
+    hiddenimports=hiddenimports + [
+        # App modules
         'app.watcher.file_watcher',
         'app.sync.cloud_sync',
         'app.sync.queue',
@@ -32,15 +47,6 @@ a = Analysis(
         'app.tray.menu_bar',
         'app.config',
         'app.logging_config',
-        'watchdog.observers',
-        'watchdog.observers.fsevents',
-        'flask',
-        'rumps',
-        'httpx',
-        'yaml',
-        'pydantic',
-        'pydantic_settings',
-        'click',
     ],
     hookspath=[],
     hooksconfig={},
@@ -51,6 +57,7 @@ a = Analysis(
         'scipy',
         'pandas',
         'PIL',
+        'tkinter',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

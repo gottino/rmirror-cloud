@@ -92,8 +92,8 @@ echo -e "   This may take a few minutes..."
 # Clean previous builds
 rm -rf "$DIST_DIR" "$SCRIPT_DIR/build/rMirror"
 
-# Run PyInstaller
-pyinstaller \
+# Run PyInstaller via Poetry (ensures correct environment with all dependencies)
+poetry run pyinstaller \
     --clean \
     --noconfirm \
     "$SCRIPT_DIR/rmirror.spec" 2>&1 | grep -v "^[0-9]* INFO:" || true
@@ -110,8 +110,12 @@ echo ""
 echo -e "${YELLOW}→${NC} Code signing..."
 if [ -n "$CODESIGN_IDENTITY" ]; then
     echo -e "   Signing with identity: $CODESIGN_IDENTITY"
-    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$DIST_DIR/rMirror.app"
-    echo -e "${GREEN}✓${NC} App signed"
+    # Sign with hardened runtime enabled (required for notarization)
+    codesign --force --deep --sign "$CODESIGN_IDENTITY" \
+        --options runtime \
+        --timestamp \
+        "$DIST_DIR/rMirror.app"
+    echo -e "${GREEN}✓${NC} App signed with hardened runtime"
 else
     echo -e "${YELLOW}⚠${NC}  Skipping code signing (CODESIGN_IDENTITY not set)"
     echo -e "   The app will work but macOS will show a security warning"

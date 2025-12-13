@@ -82,13 +82,21 @@ class EmailService:
                     <p>Hi {user_name},</p>
                     <p>Thank you for signing up for rMirror Cloud. We're excited to help you sync and transcribe your reMarkable notebooks.</p>
                     <h2 style="color: #6B46C1;">Getting Started</h2>
+                    <p>To start syncing your reMarkable notebooks:</p>
                     <ol>
-                        <li>Download the rMirror Mac agent</li>
-                        <li>Connect your reMarkable tablet</li>
-                        <li>Start syncing your notebooks to the cloud</li>
+                        <li>Visit your <a href="https://rmirror.io" style="color: #6B46C1; text-decoration: none;">dashboard</a> to download the macOS agent</li>
+                        <li>Install the agent and sign in with your account</li>
+                        <li>Your notebooks will automatically sync to the cloud</li>
                     </ol>
-                    <p>If you have any questions, feel free to reach out to our support team.</p>
-                    <p>Happy note-taking!</p>
+                    <p style="margin-top: 30px;">
+                        <a href="https://rmirror.io"
+                           style="display: inline-block; padding: 12px 24px; background-color: #6B46C1; color: white; text-decoration: none; border-radius: 6px; font-weight: 600;">
+                            Go to Dashboard
+                        </a>
+                    </p>
+                    <p style="color: #6B7280; font-size: 14px; margin-top: 30px;">
+                        If you have any questions, feel free to reach out to our support team.
+                    </p>
                     <p style="margin-top: 30px;">
                         <strong>The rMirror Team</strong>
                     </p>
@@ -105,9 +113,11 @@ class EmailService:
         Thank you for signing up for rMirror Cloud. We're excited to help you sync and transcribe your reMarkable notebooks.
 
         Getting Started:
-        1. Download the rMirror Mac agent
-        2. Connect your reMarkable tablet
-        3. Start syncing your notebooks to the cloud
+        1. Visit your dashboard at https://rmirror.io to download the macOS agent
+        2. Install the agent and sign in with your account
+        3. Your notebooks will automatically sync to the cloud
+
+        Go to Dashboard: https://rmirror.io
 
         If you have any questions, feel free to reach out to our support team.
 
