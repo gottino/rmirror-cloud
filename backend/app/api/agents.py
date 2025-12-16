@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, desc
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_active_user
+from app.auth.clerk import get_clerk_active_user
 from app.database import get_db
 from app.models.user import OnboardingState, User
 
@@ -47,7 +47,7 @@ class AgentStatusResponse(BaseModel):
 @router.post("/register")
 async def register_agent(
     request: AgentRegistrationRequest,
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Session = Depends(get_db),
 ):
     """
@@ -105,7 +105,7 @@ async def register_agent(
 @router.post("/heartbeat")
 async def agent_heartbeat(
     request: AgentHeartbeatRequest,
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Session = Depends(get_db),
 ):
     """
@@ -129,7 +129,7 @@ async def agent_heartbeat(
 
 @router.get("/status")
 async def get_agent_status(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
 ):
     """
     Get current agent connection status.
