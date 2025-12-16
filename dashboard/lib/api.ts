@@ -103,3 +103,48 @@ export async function getNotebook(id: number, token: string): Promise<NotebookWi
 
   return response.json();
 }
+
+/**
+ * Track agent download
+ */
+export async function trackAgentDownload(token: string): Promise<void> {
+  try {
+    const response = await fetch(`${API_URL}/onboarding/agent-downloaded`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error('Failed to track agent download');
+    }
+  } catch (error) {
+    // Silent fail - don't block the download
+    console.error('Error tracking agent download:', error);
+  }
+}
+
+export interface AgentStatus {
+  has_agent_connected: boolean;
+  first_connected_at: string | null;
+  onboarding_state: string;
+}
+
+/**
+ * Get agent connection status
+ */
+export async function getAgentStatus(token: string): Promise<AgentStatus> {
+  const response = await fetch(`${API_URL}/agents/status`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch agent status');
+  }
+
+  return response.json();
+}

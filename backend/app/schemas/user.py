@@ -35,6 +35,11 @@ class User(UserBase):
     is_verified: bool
     created_at: datetime
     last_login_at: datetime | None = None
+    onboarding_state: str
+    onboarding_started_at: datetime | None = None
+    onboarding_completed_at: datetime | None = None
+    agent_downloaded_at: datetime | None = None
+    agent_first_connected_at: datetime | None = None
 
     class Config:
         from_attributes = True

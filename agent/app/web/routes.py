@@ -10,6 +10,41 @@ from app.config import Config
 from app.sync.cloud_sync import CloudSync, CloudSyncError
 
 
+async def register_agent_with_backend(
+    cloud_sync: CloudSync,
+    version: str,
+    platform: str,
+    hostname: str
+) -> None:
+    """
+    Register agent with backend after successful authentication.
+
+    Args:
+        cloud_sync: CloudSync instance
+        version: Agent version
+        platform: Platform (e.g., "Darwin" for macOS)
+        hostname: Machine hostname
+    """
+    if not cloud_sync.client:
+        return
+
+    try:
+        response = await cloud_sync.client.post(
+            f"{cloud_sync.config.api.url}/agents/register",
+            headers={"Authorization": f"Bearer {cloud_sync.config.api.token}"},
+            json={
+                "version": version,
+                "platform": platform,
+                "hostname": hostname,
+            },
+        )
+        response.raise_for_status()
+        print(f"✓ Agent registered with backend")
+    except Exception as e:
+        print(f"⚠ Failed to register agent with backend: {e}")
+        raise
+
+
 def register_routes(app: Flask) -> None:
     """Register all web UI routes."""
 
@@ -170,6 +205,9 @@ def register_routes(app: Flask) -> None:
         Expected query parameter:
         ?token=clerk_jwt_token
         """
+        import asyncio
+        import platform
+
         config: Config = app.config["AGENT_CONFIG"]
 
         try:
@@ -177,7 +215,7 @@ def register_routes(app: Flask) -> None:
             if not token:
                 return render_template("auth_result.html", success=False, message="Missing authentication token")
 
-            # Store the JWT token in config
+            # Store the JWT token in config (will be saved to keychain)
             config.api.token = token
             config.api.use_clerk_auth = True
 
@@ -187,6 +225,28 @@ def register_routes(app: Flask) -> None:
             # Mark cloud sync as authenticated
             cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
             cloud_sync.authenticated = True
+
+            # Register agent with backend
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Get agent info
+                agent_version = "1.0.0"
+                agent_platform = platform.system()
+                agent_hostname = platform.node()
+
+                # Register with backend
+                loop.run_until_complete(register_agent_with_backend(
+                    cloud_sync,
+                    agent_version,
+                    agent_platform,
+                    agent_hostname
+                ))
+            except Exception as e:
+                # Log error but don't fail authentication
+                app.logger.error(f"Failed to register agent: {e}")
+            finally:
+                loop.close()
 
             return render_template("auth_result.html", success=True, message="Successfully authenticated with Clerk!")
         except Exception as e:

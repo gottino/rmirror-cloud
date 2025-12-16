@@ -14,7 +14,7 @@ hiddenimports = []
 datas = []
 
 # Collect all submodules for critical packages
-packages_to_collect = ['click', 'flask', 'watchdog', 'httpx', 'pydantic', 'pydantic_settings', 'rumps']
+packages_to_collect = ['click', 'flask', 'watchdog', 'httpx', 'pydantic', 'pydantic_settings', 'rumps', 'keyring']
 for package in packages_to_collect:
     try:
         hiddenimports += collect_submodules(package)
@@ -47,8 +47,13 @@ a = Analysis(
         'app.tray.menu_bar',
         'app.config',
         'app.logging_config',
+        'app.auth.keychain',
+        # Keyring backends
+        'keyring.backends',
+        'keyring.backends.macOS',
+        'keyring.backends.OS_X',
     ],
-    hookspath=[],
+    hookspath=[str(agent_dir / 'hooks')],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[

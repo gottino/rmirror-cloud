@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Search, X } from 'lucide-react';
-import { getNotebooksTree, type NotebookTree as NotebookTreeData, NotebookTreeNode } from '@/lib/api';
+import { getNotebooksTree, trackAgentDownload, getAgentStatus, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus } from '@/lib/api';
 import FolderSidebar from '@/components/FolderSidebar';
 import Breadcrumb from '@/components/Breadcrumb';
 import MainContentArea from '@/components/MainContentArea';
@@ -21,6 +21,20 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'notebook' | 'epub' | 'pdf' | null>(null);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+
+  const handleDownloadClick = async () => {
+    // Track the download
+    if (isSignedIn) {
+      const token = await getToken();
+      if (token) {
+        await trackAgentDownload(token);
+      }
+    }
+
+    // Open the download link
+    window.location.href = 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.0.0/rMirror-1.0.0.dmg';
+  };
 
   const fetchNotebooks = async () => {
     if (!isSignedIn) {
@@ -47,7 +61,22 @@ export default function Home() {
 
   useEffect(() => {
     fetchNotebooks();
+    fetchAgentStatus();
   }, [isSignedIn, getToken]);
+
+  const fetchAgentStatus = async () => {
+    if (!isSignedIn) return;
+
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const status = await getAgentStatus(token);
+      setAgentStatus(status);
+    } catch (err) {
+      console.error('Error fetching agent status:', err);
+    }
+  };
 
   // Find a node by UUID in the tree
   const findNodeByUuid = (nodes: NotebookTreeNode[], uuid: string): NotebookTreeNode | null => {
@@ -182,7 +211,17 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-4">
+            {/* Agent status indicator */}
+            {agentStatus && (
+              <div className="hidden md:flex items-center space-x-2 px-3 py-1.5 rounded-full bg-gray-100">
+                <div className={`w-2 h-2 rounded-full ${agentStatus.has_agent_connected ? 'bg-green-500' : 'bg-gray-400'}`} />
+                <span className="text-sm text-gray-700">
+                  {agentStatus.has_agent_connected ? 'Agent Connected' : 'No Agent'}
+                </span>
+              </div>
+            )}
+
             {/* Mobile search icon */}
             <button
               onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
@@ -295,15 +334,16 @@ export default function Home() {
                 </h3>
                 <p className="text-gray-600 mb-6">
                   Download and install the rMirror Agent to sync your reMarkable notebooks.
+                  <br />
+                  <span className="text-sm text-gray-500">Free tier includes 30 pages of OCR transcription per month</span>
                 </p>
                 <div className="space-y-4">
-                  <a
-                    href="https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.0.0/rMirror-1.0.0.dmg"
-                    className="inline-block px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold"
-                    download
+                  <button
+                    onClick={handleDownloadClick}
+                    className="inline-block px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold cursor-pointer"
                   >
                     Download rMirror Agent for macOS
-                  </a>
+                  </button>
                   <div className="text-sm text-gray-500">
                     Version 1.0.0 • macOS 12.0 or later • 18 MB
                   </div>

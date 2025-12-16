@@ -8,14 +8,16 @@ import yaml
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.auth.keychain import get_keychain_manager
+
 
 class APIConfig(BaseSettings):
     """API configuration."""
 
-    url: str = Field(default="https://rmirror.cloud/v1", description="rMirror Cloud API URL")
+    url: str = Field(default="https://rmirror.io/api/v1", description="rMirror Cloud API URL")
     email: str = Field(default="", description="User email (for legacy password auth)")
     password: str = Field(default="", description="User password (for legacy password auth)")
-    token: Optional[str] = Field(default=None, description="JWT access token (auto-populated)")
+    _token: Optional[str] = None  # Private field, use token property instead
 
     # Clerk OAuth configuration
     clerk_frontend_api: str = Field(
@@ -28,6 +30,31 @@ class APIConfig(BaseSettings):
     )
 
     model_config = SettingsConfigDict(env_prefix="RMIRROR_API_")
+
+    @property
+    def token(self) -> Optional[str]:
+        """Get token from keychain if available, otherwise return in-memory token."""
+        if self._token:
+            return self._token
+
+        # Try to get from keychain
+        keychain = get_keychain_manager()
+        return keychain.get_token()
+
+    @token.setter
+    def token(self, value: Optional[str]) -> None:
+        """Set token and store in keychain for persistence."""
+        self._token = value
+        if value:
+            # Store in keychain for persistence
+            keychain = get_keychain_manager()
+            keychain.store_token(value)
+
+    def clear_token(self) -> None:
+        """Clear token from both memory and keychain."""
+        self._token = None
+        keychain = get_keychain_manager()
+        keychain.delete_token()
 
 
 class ReMarkableConfig(BaseSettings):

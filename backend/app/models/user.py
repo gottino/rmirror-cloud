@@ -17,6 +17,18 @@ class SubscriptionTier(str, Enum):
     ENTERPRISE = "enterprise"
 
 
+class OnboardingState(str, Enum):
+    """User onboarding progress states."""
+
+    SIGNED_UP = "signed_up"
+    AGENT_DOWNLOADED = "agent_downloaded"
+    AGENT_CONNECTED = "agent_connected"
+    FOLDER_CONFIGURED = "folder_configured"
+    FIRST_SYNC_STARTED = "first_sync_started"
+    FIRST_SYNC_COMPLETED = "first_sync_completed"
+    COMPLETE = "complete"
+
+
 class User(Base):
     """User accounts with authentication and subscription info."""
 
@@ -43,6 +55,15 @@ class User(Base):
     # Status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Onboarding
+    onboarding_state: Mapped[str] = mapped_column(
+        String(30), default=OnboardingState.SIGNED_UP, nullable=False
+    )
+    onboarding_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    agent_downloaded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    agent_first_connected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, integrations, notebooks, processing, sync, todos, users, waitlist
+from app.api import agents, auth, integrations, notebooks, onboarding, processing, sync, todos, users, waitlist
 from app.api.webhooks import clerk as clerk_webhook
 
 api_router = APIRouter()
@@ -10,6 +10,8 @@ api_router = APIRouter()
 # Include routers
 api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
+api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
 api_router.include_router(notebooks.router, prefix="/notebooks", tags=["notebooks"])
 api_router.include_router(processing.router, prefix="/processing", tags=["processing"])
 api_router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])

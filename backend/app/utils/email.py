@@ -81,6 +81,9 @@ class EmailService:
                     <h1 style="color: #6B46C1;">Welcome to rMirror Cloud!</h1>
                     <p>Hi {user_name},</p>
                     <p>Thank you for signing up for rMirror Cloud. We're excited to help you sync and transcribe your reMarkable notebooks.</p>
+                    <p style="background-color: #F3F4F6; padding: 12px; border-radius: 6px; font-size: 14px;">
+                        <strong>Free tier includes:</strong> 30 pages of OCR transcription per month
+                    </p>
                     <h2 style="color: #6B46C1;">Getting Started</h2>
                     <p>To start syncing your reMarkable notebooks:</p>
                     <ol>
