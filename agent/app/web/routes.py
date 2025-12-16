@@ -25,8 +25,10 @@ async def register_agent_with_backend(
         platform: Platform (e.g., "Darwin" for macOS)
         hostname: Machine hostname
     """
+    # Initialize HTTP client if not exists
     if not cloud_sync.client:
-        return
+        import httpx
+        cloud_sync.client = httpx.AsyncClient(timeout=30.0)
 
     try:
         response = await cloud_sync.client.post(
