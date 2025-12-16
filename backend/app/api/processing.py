@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_active_user
+from app.auth.clerk import get_clerk_active_user
 from app.core.notebook_metadata_service import NotebookMetadataService
 from app.core.ocr_service import OCRService
 from app.core.pdf_service import PDFService
@@ -51,7 +51,7 @@ class ProcessRMFileRequest(BaseModel):
 async def process_rm_file(
     rm_file: UploadFile = File(..., description=".rm file from reMarkable tablet"),
     metadata_file: UploadFile | None = File(None, description="Optional .metadata file"),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
 ):
@@ -342,7 +342,7 @@ class UpdateMetadataResponse(BaseModel):
 @router.post("/metadata/update", response_model=UpdateMetadataResponse)
 async def update_notebook_metadata(
     request: UpdateMetadataRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -419,7 +419,7 @@ async def update_notebook_metadata(
 
 @router.post("/metadata/rebuild-paths")
 async def rebuild_all_paths(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """

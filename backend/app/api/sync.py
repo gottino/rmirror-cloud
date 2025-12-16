@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_active_user
+from app.auth.clerk import get_clerk_active_user
 from app.core.sync_engine import SyncItem
 from app.core.unified_sync_manager import UnifiedSyncManager
 from app.database import get_db
@@ -54,7 +54,7 @@ class SyncStatsResponse(BaseModel):
 async def trigger_sync(
     request: SyncRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -215,7 +215,7 @@ async def _run_sync(
 @router.get("/stats", response_model=SyncStatsResponse)
 async def get_sync_stats(
     target_name: str | None = None,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -243,7 +243,7 @@ async def get_sync_stats(
 @router.get("/status/{target_name}")
 async def get_sync_status(
     target_name: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """
