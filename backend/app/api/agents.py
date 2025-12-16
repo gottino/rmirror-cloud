@@ -1,5 +1,6 @@
 """Agent registration and status endpoints."""
 
+import logging
 from datetime import datetime, timedelta
 from typing import Annotated
 
@@ -11,6 +12,8 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_active_user
 from app.database import get_db
 from app.models.user import OnboardingState, User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -58,6 +61,12 @@ async def register_agent(
     Returns:
         Agent ID and status
     """
+    logger.info(
+        f"Agent registration request from user {current_user.email} "
+        f"(ID: {current_user.id}, version: {request.version}, "
+        f"platform: {request.platform}, hostname: {request.hostname})"
+    )
+
     now = datetime.utcnow()
 
     # Generate a simple agent ID (user_id + timestamp)
@@ -65,6 +74,7 @@ async def register_agent(
 
     # Update user's onboarding state if this is first connection
     if not current_user.agent_first_connected_at:
+        logger.info(f"First agent connection for user {current_user.email}")
         current_user.agent_first_connected_at = now
 
         # Update onboarding state
@@ -72,9 +82,18 @@ async def register_agent(
             OnboardingState.SIGNED_UP.value,
             OnboardingState.AGENT_DOWNLOADED.value,
         ]:
+            old_state = current_user.onboarding_state
             current_user.onboarding_state = OnboardingState.AGENT_CONNECTED.value
+            logger.info(
+                f"Updated onboarding state for {current_user.email}: "
+                f"{old_state} -> {OnboardingState.AGENT_CONNECTED.value}"
+            )
+    else:
+        logger.info(f"Repeat agent registration for user {current_user.email}")
 
     db.commit()
+
+    logger.info(f"Agent registered successfully: {agent_id}")
 
     return {
         "agent_id": agent_id,
