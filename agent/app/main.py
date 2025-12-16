@@ -119,11 +119,33 @@ class Agent:
         self.file_watcher = FileWatcher(self.config, self.cloud_sync)
         await self.file_watcher.start()
 
+    def start_file_watcher_sync(self) -> None:
+        """
+        Start the file watcher after authentication (called from Flask route).
+        This is called from a Flask thread, so we need to create a new task in the agent's event loop.
+        """
+        if self.file_watcher is not None:
+            logger.info("File watcher already running")
+            return
+
+        if not self.cloud_sync or not self.cloud_sync.authenticated:
+            logger.warning("Cannot start file watcher: not authenticated")
+            return
+
+        # Schedule the file watcher to start in the agent's event loop
+        logger.info("Starting file watcher after authentication...")
+        import threading
+        watcher_thread = threading.Thread(
+            target=lambda: asyncio.run(self._run_file_watcher()),
+            daemon=True
+        )
+        watcher_thread.start()
+
     def _run_web_server_thread(self) -> None:
         """Run the web server in a background thread."""
         from app.web.app import create_app
 
-        app = create_app(self.config, self.cloud_sync)
+        app = create_app(self.config, self.cloud_sync, agent=self)
         app.run(
             host=self.config.web.host,
             port=self.config.web.port,

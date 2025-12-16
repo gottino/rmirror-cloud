@@ -250,6 +250,15 @@ def register_routes(app: Flask) -> None:
             finally:
                 loop.close()
 
+            # Start file watcher now that we're authenticated
+            agent = app.config.get("AGENT")
+            if agent and config.remarkable.watch_enabled:
+                try:
+                    agent.start_file_watcher_sync()
+                    app.logger.info("File watcher started after authentication")
+                except Exception as e:
+                    app.logger.error(f"Failed to start file watcher: {e}")
+
             return render_template("auth_result.html", success=True, message="Successfully authenticated with Clerk!")
         except Exception as e:
             return render_template("auth_result.html", success=False, message=str(e))
