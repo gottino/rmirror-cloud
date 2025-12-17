@@ -14,6 +14,7 @@ export default function NotebookPage() {
   const [notebook, setNotebook] = useState<NotebookWithPages | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [copiedPageId, setCopiedPageId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!isSignedIn) {
@@ -147,13 +148,11 @@ export default function NotebookPage() {
         ) : (
           <div className="space-y-6">
             {sortedPages.map((page) => {
-              const [copied, setCopied] = useState(false);
-
               const handleCopy = async () => {
                 if (page.ocr_text) {
                   await navigator.clipboard.writeText(page.ocr_text);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
+                  setCopiedPageId(page.id);
+                  setTimeout(() => setCopiedPageId(null), 2000);
                 }
               };
 
@@ -174,7 +173,7 @@ export default function NotebookPage() {
                           className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
                           title="Copy markdown"
                         >
-                          {copied ? (
+                          {copiedPageId === page.id ? (
                             <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
