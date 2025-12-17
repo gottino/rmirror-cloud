@@ -71,6 +71,9 @@ docker-compose.override.yml
 secrets/
 credentials.json
 
+# Security configurations (nginx, fail2ban)
+nginx/
+
 # Test coverage
 .coverage
 htmlcov/
