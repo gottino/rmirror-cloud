@@ -109,6 +109,14 @@ class SyncConfig(BaseSettings):
     cooldown_seconds: int = Field(
         default=5, description="Cooldown period to deduplicate file events"
     )
+    selected_notebooks: list[str] = Field(
+        default_factory=list,
+        description="List of notebook UUIDs to sync (empty = sync all)"
+    )
+    sync_all_notebooks: bool = Field(
+        default=True,
+        description="Sync all notebooks (ignores selected_notebooks if True)"
+    )
 
     model_config = SettingsConfigDict(env_prefix="RMIRROR_SYNC_", extra="ignore")
 

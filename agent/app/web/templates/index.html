@@ -296,6 +296,41 @@
             </form>
         </div>
 
+        <!-- Notebook Selection Card -->
+        <div class="card">
+            <h2>Notebook Selection</h2>
+            <p style="color: #666; margin-bottom: 20px;">Choose which notebooks to sync to stay within your plan limits.</p>
+
+            <div class="status-group" style="margin-bottom: 20px;">
+                <div class="status-item">
+                    <div class="status-label">Total Pages:</div>
+                    <div class="status-value" id="total-pages">-</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Selected Pages:</div>
+                    <div class="status-value" id="selected-pages">-</div>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="sync-all" style="margin-right: 10px;">
+                    <span>Sync all notebooks</span>
+                </label>
+            </div>
+
+            <div id="notebook-tree" style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 10px; background: #f9f9f9;">
+                <div style="text-align: center; padding: 20px; color: #999;">
+                    Loading notebooks...
+                </div>
+            </div>
+
+            <div class="button-group" style="margin-top: 15px;">
+                <button onclick="saveNotebookSelection()">Save Selection</button>
+                <button class="secondary" onclick="loadNotebookTree()">Refresh</button>
+            </div>
+        </div>
+
         <!-- Actions Card -->
         <div class="card">
             <h2>Actions</h2>
@@ -444,8 +479,191 @@
             }
         });
 
+        // Notebook selection state
+        let selectedNotebooks = new Set();
+        let syncAll = true;
+        let notebookTree = [];
+
+        // Load notebook tree
+        async function loadNotebookTree() {
+            try {
+                const response = await fetch('/api/notebooks/tree');
+                const data = await response.json();
+
+                if (data.error) {
+                    showMessage('Failed to load notebooks: ' + data.error, 'error');
+                    return;
+                }
+
+                notebookTree = data.tree;
+
+                // Update stats
+                document.getElementById('total-pages').textContent = data.stats.total_pages || '0';
+                document.getElementById('selected-pages').textContent = data.stats.selected_pages || '0';
+
+                // Render tree
+                renderNotebookTree(data.tree);
+
+                // Load current selection
+                await loadNotebookSelection();
+            } catch (error) {
+                showMessage('Failed to load notebooks: ' + error.message, 'error');
+            }
+        }
+
+        // Load current selection
+        async function loadNotebookSelection() {
+            try {
+                const response = await fetch('/api/notebooks/selection');
+                const data = await response.json();
+
+                syncAll = data.sync_all_notebooks;
+                selectedNotebooks = new Set(data.selected_notebooks || []);
+
+                // Update checkbox
+                document.getElementById('sync-all').checked = syncAll;
+
+                // Update tree checkboxes
+                updateTreeCheckboxes();
+            } catch (error) {
+                console.error('Failed to load selection:', error);
+            }
+        }
+
+        // Render notebook tree
+        function renderNotebookTree(items, level = 0) {
+            const container = document.getElementById('notebook-tree');
+
+            if (level === 0) {
+                container.innerHTML = '';
+            }
+
+            items.forEach(item => {
+                const div = document.createElement('div');
+                div.style.marginLeft = (level * 20) + 'px';
+                div.style.marginBottom = '8px';
+
+                const isFolder = item.type === 'CollectionType';
+                const icon = isFolder ? '📁' : '📄';
+                const pageInfo = item.pageCount ? ` (${item.pageCount} pages)` : '';
+
+                // Only add checkbox for documents (not folders)
+                if (!isFolder) {
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.id = 'nb-' + item.uuid;
+                    checkbox.checked = syncAll || selectedNotebooks.has(item.uuid);
+                    checkbox.disabled = syncAll;
+                    checkbox.style.marginRight = '8px';
+                    checkbox.addEventListener('change', () => toggleNotebook(item.uuid));
+                    div.appendChild(checkbox);
+                }
+
+                const label = document.createElement('label');
+                label.htmlFor = 'nb-' + item.uuid;
+                label.style.cursor = isFolder ? 'default' : 'pointer';
+                label.textContent = icon + ' ' + item.name + pageInfo;
+
+                if (isFolder) {
+                    label.style.fontWeight = 'bold';
+                    label.style.marginLeft = '8px';
+                }
+
+                div.appendChild(label);
+                container.appendChild(div);
+
+                // Recursively render children
+                if (item.children && item.children.length > 0) {
+                    renderNotebookTree(item.children, level + 1);
+                }
+            });
+        }
+
+        // Update tree checkboxes based on sync mode
+        function updateTreeCheckboxes() {
+            const checkboxes = document.querySelectorAll('#notebook-tree input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                cb.disabled = syncAll;
+                if (syncAll) {
+                    cb.checked = true;
+                } else {
+                    const uuid = cb.id.replace('nb-', '');
+                    cb.checked = selectedNotebooks.has(uuid);
+                }
+            });
+        }
+
+        // Toggle notebook selection
+        function toggleNotebook(uuid) {
+            if (selectedNotebooks.has(uuid)) {
+                selectedNotebooks.delete(uuid);
+            } else {
+                selectedNotebooks.add(uuid);
+            }
+            updateSelectedPagesCount();
+        }
+
+        // Update selected pages count
+        async function updateSelectedPagesCount() {
+            if (syncAll) {
+                const response = await fetch('/api/notebooks/tree');
+                const data = await response.json();
+                document.getElementById('selected-pages').textContent = data.stats.total_pages || '0';
+            } else {
+                // Calculate from selected notebooks
+                let totalPages = 0;
+                function countPages(items) {
+                    items.forEach(item => {
+                        if (item.type === 'DocumentType' && selectedNotebooks.has(item.uuid) && item.pageCount) {
+                            totalPages += item.pageCount;
+                        }
+                        if (item.children) {
+                            countPages(item.children);
+                        }
+                    });
+                }
+                countPages(notebookTree);
+                document.getElementById('selected-pages').textContent = totalPages;
+            }
+        }
+
+        // Save notebook selection
+        async function saveNotebookSelection() {
+            try {
+                const response = await fetch('/api/notebooks/selection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        sync_all_notebooks: syncAll,
+                        selected_notebooks: Array.from(selectedNotebooks),
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showMessage(data.message, 'success');
+                    await loadNotebookTree(); // Refresh to show updated stats
+                } else {
+                    showMessage('Failed to save selection', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to save selection: ' + error.message, 'error');
+            }
+        }
+
+        // Sync all checkbox handler
+        document.getElementById('sync-all').addEventListener('change', (e) => {
+            syncAll = e.target.checked;
+            updateTreeCheckboxes();
+            updateSelectedPagesCount();
+        });
+
         // Refresh status on load
         refreshStatus();
+        loadNotebookTree();
     </script>
 </body>
 </html>

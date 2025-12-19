@@ -23,10 +23,11 @@ class ReMarkableEventHandler(FileSystemEventHandler):
     # File extensions we care about
     RELEVANT_EXTENSIONS = {".content", ".metadata", ".pagedata", ".rm", ".pdf", ".epub"}
 
-    def __init__(self, sync_queue: SyncQueue):
+    def __init__(self, sync_queue: SyncQueue, config: Config):
         """Initialize event handler."""
         super().__init__()
         self.sync_queue = sync_queue
+        self.config = config
 
     def _should_ignore_file(self, file_path: str) -> bool:
         """
@@ -53,6 +54,23 @@ class ReMarkableEventHandler(FileSystemEventHandler):
             return True
 
         return False
+
+    def _should_sync_notebook(self, notebook_uuid: str) -> bool:
+        """
+        Check if a notebook should be synced based on user selection.
+
+        Args:
+            notebook_uuid: UUID of the notebook
+
+        Returns:
+            True if notebook should be synced, False otherwise
+        """
+        # If sync_all_notebooks is True, sync everything
+        if self.config.sync.sync_all_notebooks:
+            return True
+
+        # Otherwise, only sync selected notebooks
+        return notebook_uuid in self.config.sync.selected_notebooks
 
     def _extract_notebook_uuid(self, file_path: Path) -> Optional[str]:
         """
@@ -116,6 +134,11 @@ class ReMarkableEventHandler(FileSystemEventHandler):
         if not notebook_uuid:
             return
 
+        # Check if this notebook should be synced
+        if not self._should_sync_notebook(notebook_uuid):
+            print(f"⏭️  Skipping (not selected): {file_path.name} (UUID: {notebook_uuid})")
+            return
+
         # Get file type
         file_type = self._get_file_type(file_path)
 
@@ -168,7 +191,7 @@ class FileWatcher:
         await self.sync_queue.start()
 
         self.observer = Observer()
-        self.event_handler = ReMarkableEventHandler(self.sync_queue)
+        self.event_handler = ReMarkableEventHandler(self.sync_queue, self.config)
 
         watch_dir = str(source_dir)
         print(f'Scheduling observer for: {watch_dir}')

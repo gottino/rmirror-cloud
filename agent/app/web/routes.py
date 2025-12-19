@@ -276,6 +276,59 @@ def register_routes(app: Flask) -> None:
             "clerk_frontend_api": config.api.clerk_frontend_api,
         })
 
+    @app.route("/api/notebooks/tree")
+    def api_notebooks_tree():
+        """Get folder tree structure from reMarkable metadata."""
+        from app.remarkable.metadata_scanner import MetadataScanner
+
+        config: Config = app.config["AGENT_CONFIG"]
+
+        try:
+            scanner = MetadataScanner(Path(config.remarkable.source_directory))
+            scanner.scan()
+            tree = scanner.to_dict()
+
+            # Get statistics
+            total_documents = len(scanner.get_all_document_uuids())
+            total_pages = scanner.count_total_pages()
+            selected_pages = scanner.count_total_pages(config.sync.selected_notebooks) if not config.sync.sync_all_notebooks else total_pages
+
+            return jsonify({
+                "tree": tree,
+                "stats": {
+                    "total_documents": total_documents,
+                    "total_pages": total_pages,
+                    "selected_pages": selected_pages,
+                },
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/notebooks/selection", methods=["GET", "POST"])
+    def api_notebooks_selection():
+        """Get or update notebook selection."""
+        config: Config = app.config["AGENT_CONFIG"]
+
+        if request.method == "GET":
+            return jsonify({
+                "sync_all_notebooks": config.sync.sync_all_notebooks,
+                "selected_notebooks": config.sync.selected_notebooks,
+            })
+
+        # POST - Update selection
+        data = request.json
+
+        if "sync_all_notebooks" in data:
+            config.sync.sync_all_notebooks = data["sync_all_notebooks"]
+
+        if "selected_notebooks" in data:
+            config.sync.selected_notebooks = data["selected_notebooks"]
+
+        # Save configuration
+        config.save()
+
+        return jsonify({"success": True, "message": "Notebook selection updated"})
+
     @app.route("/health")
     def health():
         """Health check endpoint."""
