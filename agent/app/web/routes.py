@@ -285,8 +285,8 @@ def register_routes(app: Flask) -> None:
 
         try:
             scanner = MetadataScanner(Path(config.remarkable.source_directory))
-            scanner.scan()
-            tree = scanner.to_dict()
+            tree_items = scanner.scan()
+            tree = scanner.to_dict(tree_items)
 
             # Get statistics
             total_documents = len(scanner.get_all_document_uuids())

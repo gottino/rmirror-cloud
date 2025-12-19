@@ -50,6 +50,9 @@ class MetadataScanner:
         """
         logger.info(f"Scanning reMarkable folder: {self.remarkable_folder}")
 
+        # Clear items dict to avoid duplicates on re-scan
+        self.items.clear()
+
         # Find all .metadata files
         metadata_files = list(self.remarkable_folder.glob("*.metadata"))
         logger.info(f"Found {len(metadata_files)} metadata files")
@@ -59,6 +62,8 @@ class MetadataScanner:
             try:
                 item = self._parse_metadata_file(metadata_file)
                 if item:
+                    if item.uuid in self.items:
+                        logger.warning(f"Duplicate UUID found: {item.uuid} ({item.name})")
                     self.items[item.uuid] = item
             except Exception as e:
                 logger.warning(f"Failed to parse {metadata_file.name}: {e}")
@@ -77,38 +82,55 @@ class MetadataScanner:
             metadata_file: Path to .metadata file
 
         Returns:
-            NotebookItem or None if parsing failed
+            NotebookItem or None if parsing failed or if it's a PDF/EPUB
         """
         try:
             with open(metadata_file, 'r') as f:
                 data = json.load(f)
 
             uuid = metadata_file.stem  # filename without .metadata extension
+            doc_type = data.get("type", "DocumentType")
 
-            # Parse last modified timestamp (milliseconds since epoch)
-            last_modified_ms = int(data.get("lastModified", "0"))
-            last_modified = datetime.fromtimestamp(last_modified_ms / 1000.0)
+            # Skip folders - we'll handle them separately
+            if doc_type == "CollectionType":
+                return NotebookItem(
+                    uuid=uuid,
+                    name=data.get("visibleName", "Untitled"),
+                    type=doc_type,
+                    parent=data.get("parent", ""),
+                    last_modified=datetime.fromtimestamp(int(data.get("lastModified", "0")) / 1000.0),
+                    children=[],
+                    page_count=None,
+                )
 
-            # Get page count for documents
+            # For DocumentType, check if it's a notebook (not PDF/EPUB)
+            # PDFs have .pdf files, EPUBs have .epub files, notebooks have folders with .rm files
+            pdf_file = metadata_file.with_suffix('.pdf')
+            epub_file = metadata_file.with_suffix('.epub')
+
+            # Skip if PDF or EPUB exists
+            if pdf_file.exists() or epub_file.exists():
+                logger.debug(f"Skipping PDF/EPUB: {data.get('visibleName', uuid)}")
+                return None
+
+            # Get page count for notebooks only
             page_count = None
-            if data.get("type") == "DocumentType":
-                # Try to get page count from .content file
-                content_file = metadata_file.with_suffix('.content')
-                if content_file.exists():
-                    try:
-                        with open(content_file, 'r') as f:
-                            content_data = json.load(f)
-                            pages = content_data.get("pages", [])
-                            page_count = len(pages) if pages else None
-                    except Exception:
-                        pass
+            content_file = metadata_file.with_suffix('.content')
+            if content_file.exists():
+                try:
+                    with open(content_file, 'r') as f:
+                        content_data = json.load(f)
+                        pages = content_data.get("pages", [])
+                        page_count = len(pages) if pages else None
+                except Exception:
+                    pass
 
             return NotebookItem(
                 uuid=uuid,
                 name=data.get("visibleName", "Untitled"),
-                type=data.get("type", "DocumentType"),
+                type=doc_type,
                 parent=data.get("parent", ""),
-                last_modified=last_modified,
+                last_modified=datetime.fromtimestamp(int(data.get("lastModified", "0")) / 1000.0),
                 children=[],
                 page_count=page_count,
             )
@@ -131,10 +153,12 @@ class MetadataScanner:
             if item.parent == "" or item.parent == "trash":
                 # Root level item
                 root_items.append(item)
+                logger.debug(f"Added root item: {item.name} ({item.uuid})")
             elif item.parent in self.items:
                 # Add as child to parent
                 parent = self.items[item.parent]
                 parent.children.append(item)
+                logger.debug(f"Added {item.name} as child of {parent.name}")
             else:
                 # Parent not found - treat as root level
                 logger.warning(

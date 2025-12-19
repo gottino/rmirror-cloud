@@ -497,6 +497,10 @@
 
                 notebookTree = data.tree;
 
+                // Debug: log tree structure
+                console.log('Loaded tree:', data.tree);
+                console.log('Root items:', data.tree.length);
+
                 // Update stats
                 document.getElementById('total-pages').textContent = data.stats.total_pages || '0';
                 document.getElementById('selected-pages').textContent = data.stats.selected_pages || '0';
@@ -531,52 +535,162 @@
         }
 
         // Render notebook tree
-        function renderNotebookTree(items, level = 0) {
-            const container = document.getElementById('notebook-tree');
+        function renderNotebookTree(items, level = 0, parentContainer = null) {
+            const container = parentContainer || document.getElementById('notebook-tree');
 
+            // Debug logging
             if (level === 0) {
+                console.log('Rendering tree - root level, items:', items.length);
+            }
+
+            // Only clear at root level, never clear when recursively rendering children
+            if (level === 0 && !parentContainer) {
                 container.innerHTML = '';
             }
 
             items.forEach(item => {
-                const div = document.createElement('div');
-                div.style.marginLeft = (level * 20) + 'px';
-                div.style.marginBottom = '8px';
-
                 const isFolder = item.type === 'CollectionType';
+                console.log(`Rendering at level ${level}: ${item.name} (${isFolder ? 'folder' : 'doc'}, ${item.children?.length || 0} children)`);
+
+                // Create container for this item
+                const itemDiv = document.createElement('div');
+                itemDiv.style.marginBottom = '4px';
+
+                // Create row with checkbox, icon, and label
+                const row = document.createElement('div');
+                row.style.display = 'flex';
+                row.style.alignItems = 'center';
+                row.style.marginLeft = (level * 20) + 'px';
+                row.style.padding = '4px';
+                row.style.cursor = 'pointer';
+                row.style.borderRadius = '4px';
+
+                // Hover effect
+                row.addEventListener('mouseenter', () => {
+                    row.style.backgroundColor = '#f0f0f0';
+                });
+                row.addEventListener('mouseleave', () => {
+                    row.style.backgroundColor = 'transparent';
+                });
+
+                // Expand/collapse arrow for folders
+                if (isFolder && item.children && item.children.length > 0) {
+                    const arrow = document.createElement('span');
+                    arrow.textContent = '▶';
+                    arrow.style.marginRight = '4px';
+                    arrow.style.fontSize = '10px';
+                    arrow.style.transition = 'transform 0.2s';
+                    arrow.style.transform = 'rotate(90deg)'; // Start rotated since folders start expanded
+                    arrow.id = 'arrow-' + item.uuid;
+                    row.appendChild(arrow);
+                } else {
+                    // Spacer for items without arrows
+                    const spacer = document.createElement('span');
+                    spacer.style.width = '14px';
+                    spacer.style.display = 'inline-block';
+                    row.appendChild(spacer);
+                }
+
+                // Checkbox
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = 'nb-' + item.uuid;
+                checkbox.checked = syncAll || (isFolder ? isFolderSelected(item) : selectedNotebooks.has(item.uuid));
+                checkbox.disabled = syncAll;
+                checkbox.style.marginRight = '8px';
+                checkbox.addEventListener('change', (e) => {
+                    e.stopPropagation();
+                    if (isFolder) {
+                        toggleFolder(item, checkbox.checked);
+                    } else {
+                        toggleNotebook(item.uuid);
+                    }
+                });
+                row.appendChild(checkbox);
+
+                // Icon and label
                 const icon = isFolder ? '📁' : '📄';
                 const pageInfo = item.pageCount ? ` (${item.pageCount} pages)` : '';
-
-                // Only add checkbox for documents (not folders)
-                if (!isFolder) {
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.id = 'nb-' + item.uuid;
-                    checkbox.checked = syncAll || selectedNotebooks.has(item.uuid);
-                    checkbox.disabled = syncAll;
-                    checkbox.style.marginRight = '8px';
-                    checkbox.addEventListener('change', () => toggleNotebook(item.uuid));
-                    div.appendChild(checkbox);
-                }
-
-                const label = document.createElement('label');
-                label.htmlFor = 'nb-' + item.uuid;
-                label.style.cursor = isFolder ? 'default' : 'pointer';
-                label.textContent = icon + ' ' + item.name + pageInfo;
-
+                const labelSpan = document.createElement('span');
+                labelSpan.textContent = icon + ' ' + item.name + pageInfo;
                 if (isFolder) {
-                    label.style.fontWeight = 'bold';
-                    label.style.marginLeft = '8px';
+                    labelSpan.style.fontWeight = 'bold';
+                }
+                row.appendChild(labelSpan);
+
+                // Click to expand/collapse folders
+                if (isFolder) {
+                    row.addEventListener('click', (e) => {
+                        if (e.target !== checkbox) {
+                            const childrenDiv = document.getElementById('children-' + item.uuid);
+                            const arrow = document.getElementById('arrow-' + item.uuid);
+                            if (childrenDiv) {
+                                const isExpanded = childrenDiv.style.display !== 'none';
+                                childrenDiv.style.display = isExpanded ? 'none' : 'block';
+                                arrow.style.transform = isExpanded ? '' : 'rotate(90deg)';
+                            }
+                        }
+                    });
                 }
 
-                div.appendChild(label);
-                container.appendChild(div);
+                itemDiv.appendChild(row);
 
-                // Recursively render children
-                if (item.children && item.children.length > 0) {
-                    renderNotebookTree(item.children, level + 1);
+                // Children container (for folders)
+                if (isFolder && item.children && item.children.length > 0) {
+                    const childrenDiv = document.createElement('div');
+                    childrenDiv.id = 'children-' + item.uuid;
+                    childrenDiv.style.display = 'block'; // Start expanded
+                    itemDiv.appendChild(childrenDiv);
+                    // Render children into this div
+                    renderNotebookTree(item.children, level + 1, childrenDiv);
                 }
+
+                container.appendChild(itemDiv);
             });
+        }
+
+        // Check if all documents in a folder are selected
+        function isFolderSelected(folder) {
+            let allSelected = true;
+            function checkChildren(items) {
+                for (const item of items) {
+                    if (item.type === 'DocumentType') {
+                        if (!selectedNotebooks.has(item.uuid)) {
+                            allSelected = false;
+                            return;
+                        }
+                    }
+                    if (item.children) {
+                        checkChildren(item.children);
+                    }
+                }
+            }
+            checkChildren(folder.children || []);
+            return allSelected;
+        }
+
+        // Toggle all documents in a folder
+        function toggleFolder(folder, checked) {
+            function toggleChildren(items) {
+                items.forEach(item => {
+                    if (item.type === 'DocumentType') {
+                        if (checked) {
+                            selectedNotebooks.add(item.uuid);
+                        } else {
+                            selectedNotebooks.delete(item.uuid);
+                        }
+                        const checkbox = document.getElementById('nb-' + item.uuid);
+                        if (checkbox) {
+                            checkbox.checked = checked;
+                        }
+                    }
+                    if (item.children) {
+                        toggleChildren(item.children);
+                    }
+                });
+            }
+            toggleChildren(folder.children || []);
+            updateSelectedPagesCount();
         }
 
         // Update tree checkboxes based on sync mode
