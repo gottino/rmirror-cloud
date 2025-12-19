@@ -29,7 +29,7 @@ class APIConfig(BaseSettings):
         description="Use Clerk OAuth instead of email/password"
     )
 
-    model_config = SettingsConfigDict(env_prefix="RMIRROR_API_")
+    model_config = SettingsConfigDict(env_prefix="RMIRROR_API_", extra="ignore")
 
     @property
     def token(self) -> Optional[str]:
@@ -69,7 +69,7 @@ class ReMarkableConfig(BaseSettings):
     )
     watch_enabled: bool = Field(default=True, description="Enable file watching")
 
-    model_config = SettingsConfigDict(env_prefix="RMIRROR_REMARKABLE_")
+    model_config = SettingsConfigDict(env_prefix="RMIRROR_REMARKABLE_", extra="ignore")
 
     @field_validator("source_directory")
     @classmethod
@@ -87,7 +87,7 @@ class WebConfig(BaseSettings):
     auto_launch_browser: bool = Field(default=True, description="Auto-launch browser on startup")
     app_mode: bool = Field(default=True, description="Launch browser in app mode (no browser chrome)")
 
-    model_config = SettingsConfigDict(env_prefix="RMIRROR_WEB_")
+    model_config = SettingsConfigDict(env_prefix="RMIRROR_WEB_", extra="ignore")
 
 
 class TrayConfig(BaseSettings):
@@ -96,7 +96,7 @@ class TrayConfig(BaseSettings):
     enabled: bool = Field(default=True, description="Enable system tray icon")
     show_notifications: bool = Field(default=True, description="Show desktop notifications")
 
-    model_config = SettingsConfigDict(env_prefix="RMIRROR_TRAY_")
+    model_config = SettingsConfigDict(env_prefix="RMIRROR_TRAY_", extra="ignore")
 
 
 class SyncConfig(BaseSettings):
@@ -110,7 +110,7 @@ class SyncConfig(BaseSettings):
         default=5, description="Cooldown period to deduplicate file events"
     )
 
-    model_config = SettingsConfigDict(env_prefix="RMIRROR_SYNC_")
+    model_config = SettingsConfigDict(env_prefix="RMIRROR_SYNC_", extra="ignore")
 
 
 class Config(BaseSettings):

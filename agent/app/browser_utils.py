@@ -26,17 +26,29 @@ def launch_browser_app_mode(url: str, app_mode: bool = True) -> None:
 
     try:
         if system == "Darwin":  # macOS
-            # Try Chrome first (most common)
-            chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-            if Path(chrome_path).exists():
-                subprocess.Popen([chrome_path, f"--app={url}"],
-                               stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL)
-                logger.info(f"Launched Chrome in app mode: {url}")
-                return
+            if app_mode:
+                # Try to detect if default browser is Chrome and use app mode
+                chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+                if Path(chrome_path).exists():
+                    # Check if Chrome is default browser (best effort)
+                    try:
+                        result = subprocess.run(
+                            ["defaults", "read", "com.apple.LaunchServices/com.apple.launchservices.secure", "LSHandlers"],
+                            capture_output=True,
+                            text=True,
+                            timeout=1
+                        )
+                        # If Chrome is mentioned as handler for http, use app mode
+                        if "chrome" in result.stdout.lower():
+                            subprocess.Popen([chrome_path, f"--app={url}"],
+                                           stdout=subprocess.DEVNULL,
+                                           stderr=subprocess.DEVNULL)
+                            logger.info(f"Launched Chrome (default) in app mode: {url}")
+                            return
+                    except Exception:
+                        pass  # Fall through to default browser
 
-            # Try Safari (always available on macOS, but no app mode support)
-            # Fall back to default browser
+            # Use default browser (Safari, Chrome, Firefox, etc.)
             webbrowser.open(url)
             logger.info(f"Launched default browser: {url}")
 
