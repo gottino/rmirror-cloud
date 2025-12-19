@@ -48,6 +48,7 @@ a = Analysis(
         'app.config',
         'app.logging_config',
         'app.auth.keychain',
+        'app.browser_utils',
         # Keyring backends
         'keyring.backends',
         'keyring.backends.macOS',
@@ -108,8 +109,8 @@ app = BUNDLE(
     bundle_identifier='io.rmirror.agent',
     info_plist={
         'CFBundleDisplayName': 'rMirror',
-        'CFBundleShortVersionString': '1.0.0',
-        'CFBundleVersion': '1',
+        'CFBundleShortVersionString': '1.1.0',
+        'CFBundleVersion': '2',
         'LSMinimumSystemVersion': '12.0',
         'LSUIElement': True,  # Run as background app (no Dock icon)
         'NSHighResolutionCapable': True,

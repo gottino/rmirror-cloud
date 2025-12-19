@@ -18,7 +18,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 APP_NAME="rMirror"
-VERSION="1.0.0"
+VERSION="1.1.0"
 BUNDLE_ID="io.rmirror.agent"
 
 # Directories
