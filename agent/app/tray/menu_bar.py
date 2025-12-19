@@ -2,12 +2,12 @@
 
 import asyncio
 import threading
-import webbrowser
 from pathlib import Path
 from typing import Optional
 
 import rumps
 
+from app.browser_utils import launch_browser_app_mode
 from app.config import Config
 
 
@@ -56,12 +56,12 @@ class TrayApp(rumps.App):
     def open_web_ui(self, sender: rumps.MenuItem) -> None:
         """Open the web UI in browser."""
         url = f"http://{self.config.web.host}:{self.config.web.port}"
-        webbrowser.open(url)
-        
+        launch_browser_app_mode(url, app_mode=self.config.web.app_mode)
+
     def open_settings(self, sender: rumps.MenuItem) -> None:
         """Open settings page in browser."""
         url = f"http://{self.config.web.host}:{self.config.web.port}"
-        webbrowser.open(url)
+        launch_browser_app_mode(url, app_mode=self.config.web.app_mode)
         
     def quit_app(self, sender: rumps.MenuItem) -> None:
         """Quit the application."""

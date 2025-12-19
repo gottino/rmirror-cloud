@@ -84,6 +84,8 @@ class WebConfig(BaseSettings):
     enabled: bool = Field(default=True, description="Enable web UI")
     port: int = Field(default=5555, description="Web UI port")
     host: str = Field(default="127.0.0.1", description="Web UI host")
+    auto_launch_browser: bool = Field(default=True, description="Auto-launch browser on startup")
+    app_mode: bool = Field(default=True, description="Launch browser in app mode (no browser chrome)")
 
     model_config = SettingsConfigDict(env_prefix="RMIRROR_WEB_")
 

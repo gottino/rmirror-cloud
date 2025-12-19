@@ -14,6 +14,7 @@ from typing import Optional
 
 import click
 
+from app.browser_utils import launch_browser_app_mode
 from app.config import Config
 from app.logging_config import setup_logging
 
@@ -60,6 +61,12 @@ class Agent:
                 web_thread.start()
                 # Give the web server a moment to start
                 await asyncio.sleep(0.5)
+
+                # Auto-launch browser if configured
+                if self.config.web.auto_launch_browser:
+                    url = f"http://{self.config.web.host}:{self.config.web.port}"
+                    launch_browser_app_mode(url, app_mode=self.config.web.app_mode)
+                    print(f"Opened web UI in browser: {url}")
 
             # Try to authenticate
             try:
