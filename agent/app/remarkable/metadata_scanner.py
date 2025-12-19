@@ -17,19 +17,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class NotebookItem:
-    """A notebook or folder in the reMarkable filesystem."""
+    """A notebook in the reMarkable filesystem."""
 
     uuid: str
     name: str
-    type: str  # "CollectionType" (folder) or "DocumentType" (notebook/PDF)
-    parent: str  # UUID of parent folder, or "" for root
-    last_modified: datetime
-    children: List['NotebookItem']  # For folders
-    page_count: Optional[int] = None  # For notebooks
+    last_opened: datetime
+    page_count: Optional[int] = None
 
 
 class MetadataScanner:
-    """Scanner for building folder structure from reMarkable metadata files."""
+    """Scanner for reading reMarkable notebooks and grouping them by last opened date."""
 
     def __init__(self, remarkable_folder: Path):
         """
@@ -43,10 +40,10 @@ class MetadataScanner:
 
     def scan(self) -> List[NotebookItem]:
         """
-        Scan the reMarkable folder and build the folder tree.
+        Scan the reMarkable folder and get all notebooks sorted by last opened.
 
         Returns:
-            List of root-level items (folders and notebooks with no parent)
+            List of notebooks sorted by last opened (newest first)
         """
         logger.info(f"Scanning reMarkable folder: {self.remarkable_folder}")
 
@@ -57,63 +54,56 @@ class MetadataScanner:
         metadata_files = list(self.remarkable_folder.glob("*.metadata"))
         logger.info(f"Found {len(metadata_files)} metadata files")
 
-        # Parse all metadata files first
+        # Parse all metadata files (only notebooks, skip folders and PDFs)
+        notebooks = []
         for metadata_file in metadata_files:
             try:
                 item = self._parse_metadata_file(metadata_file)
                 if item:
-                    if item.uuid in self.items:
-                        logger.warning(f"Duplicate UUID found: {item.uuid} ({item.name})")
+                    notebooks.append(item)
                     self.items[item.uuid] = item
             except Exception as e:
                 logger.warning(f"Failed to parse {metadata_file.name}: {e}")
 
-        # Build the tree structure
-        tree = self._build_tree()
-        logger.info(f"Built tree with {len(tree)} root items")
+        # Sort by last opened (newest first)
+        notebooks.sort(key=lambda x: x.last_opened, reverse=True)
+        logger.info(f"Found {len(notebooks)} notebooks")
 
-        return tree
+        return notebooks
 
     def _parse_metadata_file(self, metadata_file: Path) -> Optional[NotebookItem]:
         """
-        Parse a .metadata file.
+        Parse a .metadata file and return notebook info.
 
         Args:
             metadata_file: Path to .metadata file
 
         Returns:
-            NotebookItem or None if parsing failed or if it's a PDF/EPUB
+            NotebookItem or None if it's not a notebook (folder, PDF, EPUB)
         """
         try:
             with open(metadata_file, 'r') as f:
                 data = json.load(f)
 
-            uuid = metadata_file.stem  # filename without .metadata extension
+            uuid = metadata_file.stem
             doc_type = data.get("type", "DocumentType")
 
-            # Skip folders - we'll handle them separately
+            # Skip folders entirely
             if doc_type == "CollectionType":
-                return NotebookItem(
-                    uuid=uuid,
-                    name=data.get("visibleName", "Untitled"),
-                    type=doc_type,
-                    parent=data.get("parent", ""),
-                    last_modified=datetime.fromtimestamp(int(data.get("lastModified", "0")) / 1000.0),
-                    children=[],
-                    page_count=None,
-                )
+                return None
 
-            # For DocumentType, check if it's a notebook (not PDF/EPUB)
-            # PDFs have .pdf files, EPUBs have .epub files, notebooks have folders with .rm files
+            # Skip PDFs and EPUBs (they have .pdf or .epub files)
             pdf_file = metadata_file.with_suffix('.pdf')
             epub_file = metadata_file.with_suffix('.epub')
-
-            # Skip if PDF or EPUB exists
             if pdf_file.exists() or epub_file.exists():
                 logger.debug(f"Skipping PDF/EPUB: {data.get('visibleName', uuid)}")
                 return None
 
-            # Get page count for notebooks only
+            # Get lastOpened timestamp (fallback to lastModified if not available)
+            last_opened_ms = int(data.get("lastOpened", data.get("lastModified", "0")))
+            last_opened = datetime.fromtimestamp(last_opened_ms / 1000.0)
+
+            # Get page count
             page_count = None
             content_file = metadata_file.with_suffix('.content')
             if content_file.exists():
@@ -128,10 +118,7 @@ class MetadataScanner:
             return NotebookItem(
                 uuid=uuid,
                 name=data.get("visibleName", "Untitled"),
-                type=doc_type,
-                parent=data.get("parent", ""),
-                last_modified=datetime.fromtimestamp(int(data.get("lastModified", "0")) / 1000.0),
-                children=[],
+                last_opened=last_opened,
                 page_count=page_count,
             )
 
@@ -139,92 +126,80 @@ class MetadataScanner:
             logger.error(f"Error parsing {metadata_file}: {e}")
             return None
 
-    def _build_tree(self) -> List[NotebookItem]:
+    def _get_date_group(self, date: datetime) -> str:
         """
-        Build the tree structure by organizing items by parent-child relationships.
+        Get the date group for a notebook based on its last opened date.
+
+        Args:
+            date: Last opened datetime
 
         Returns:
-            List of root-level items
+            Date group label: "Today", "Last Week", "Last Month", "Last Year", or "Older"
         """
-        root_items = []
+        now = datetime.now()
+        diff = now - date
 
-        # First pass: organize children under parents
-        for item in self.items.values():
-            if item.parent == "" or item.parent == "trash":
-                # Root level item
-                root_items.append(item)
-                logger.debug(f"Added root item: {item.name} ({item.uuid})")
-            elif item.parent in self.items:
-                # Add as child to parent
-                parent = self.items[item.parent]
-                parent.children.append(item)
-                logger.debug(f"Added {item.name} as child of {parent.name}")
-            else:
-                # Parent not found - treat as root level
-                logger.warning(
-                    f"Parent {item.parent} not found for {item.name} ({item.uuid}), "
-                    f"treating as root level"
-                )
-                root_items.append(item)
-
-        # Sort root items by name
-        root_items.sort(key=lambda x: x.name.lower())
-
-        # Recursively sort children
-        def sort_children(item: NotebookItem):
-            # Sort folders first, then notebooks
-            item.children.sort(key=lambda x: (x.type != "CollectionType", x.name.lower()))
-            for child in item.children:
-                sort_children(child)
-
-        for item in root_items:
-            sort_children(item)
-
-        return root_items
+        if diff.days == 0:
+            return "Today"
+        elif diff.days <= 7:
+            return "Last Week"
+        elif diff.days <= 30:
+            return "Last Month"
+        elif diff.days <= 365:
+            return "Last Year"
+        else:
+            return "Older"
 
     def to_dict(self, items: Optional[List[NotebookItem]] = None) -> List[dict]:
         """
-        Convert tree structure to dictionary format for JSON serialization.
+        Convert notebooks to grouped dictionary format for JSON serialization.
 
         Args:
-            items: List of items to convert (defaults to root items)
+            items: List of notebooks sorted by last opened (from scan())
 
         Returns:
-            List of dictionaries representing the tree
+            List of date groups with notebooks
         """
         if items is None:
-            items = self._build_tree()
+            return []
 
-        def item_to_dict(item: NotebookItem) -> dict:
-            result = {
+        # Group notebooks by date range
+        groups = {
+            "Today": [],
+            "Last Week": [],
+            "Last Month": [],
+            "Last Year": [],
+            "Older": []
+        }
+
+        for item in items:
+            group = self._get_date_group(item.last_opened)
+            groups[group].append({
                 "uuid": item.uuid,
                 "name": item.name,
-                "type": item.type,
-                "lastModified": item.last_modified.isoformat(),
-            }
+                "lastOpened": item.last_opened.isoformat(),
+                "pageCount": item.page_count or 0,
+            })
 
-            if item.page_count is not None:
-                result["pageCount"] = item.page_count
+        # Build result with only non-empty groups (in order)
+        result = []
+        for group_name in ["Today", "Last Week", "Last Month", "Last Year", "Older"]:
+            if groups[group_name]:
+                result.append({
+                    "group": group_name,
+                    "notebooks": groups[group_name]
+                })
 
-            if item.children:
-                result["children"] = [item_to_dict(child) for child in item.children]
-
-            return result
-
-        return [item_to_dict(item) for item in items]
+        return result
 
     def get_all_document_uuids(self) -> List[str]:
         """
-        Get all document UUIDs (not folders).
+        Get all notebook UUIDs.
 
         Returns:
-            List of UUIDs for all notebooks/PDFs/EPUBs
+            List of UUIDs for all notebooks
         """
-        uuids = []
-        for item in self.items.values():
-            if item.type == "DocumentType":
-                uuids.append(item.uuid)
-        return uuids
+        return list(self.items.keys())
 
     def count_total_pages(self, selected_uuids: Optional[List[str]] = None) -> int:
         """
@@ -238,13 +213,9 @@ class MetadataScanner:
         """
         total = 0
 
-        for item in self.items.values():
-            # Only count documents (not folders)
-            if item.type != "DocumentType":
-                continue
-
+        for uuid, item in self.items.items():
             # If selection provided, only count selected items
-            if selected_uuids is not None and item.uuid not in selected_uuids:
+            if selected_uuids is not None and uuid not in selected_uuids:
                 continue
 
             if item.page_count:

@@ -534,162 +534,158 @@
             }
         }
 
-        // Render notebook tree
-        function renderNotebookTree(items, level = 0, parentContainer = null) {
-            const container = parentContainer || document.getElementById('notebook-tree');
+        // Render notebook groups by date
+        function renderNotebookTree(groups) {
+            const container = document.getElementById('notebook-tree');
+            container.innerHTML = '';
 
-            // Debug logging
-            if (level === 0) {
-                console.log('Rendering tree - root level, items:', items.length);
-            }
+            console.log('Rendering date groups:', groups.length);
 
-            // Only clear at root level, never clear when recursively rendering children
-            if (level === 0 && !parentContainer) {
-                container.innerHTML = '';
-            }
+            groups.forEach(dateGroup => {
+                // Create group container
+                const groupDiv = document.createElement('div');
+                groupDiv.style.marginBottom = '12px';
 
-            items.forEach(item => {
-                const isFolder = item.type === 'CollectionType';
-                console.log(`Rendering at level ${level}: ${item.name} (${isFolder ? 'folder' : 'doc'}, ${item.children?.length || 0} children)`);
-
-                // Create container for this item
-                const itemDiv = document.createElement('div');
-                itemDiv.style.marginBottom = '4px';
-
-                // Create row with checkbox, icon, and label
-                const row = document.createElement('div');
-                row.style.display = 'flex';
-                row.style.alignItems = 'center';
-                row.style.marginLeft = (level * 20) + 'px';
-                row.style.padding = '4px';
-                row.style.cursor = 'pointer';
-                row.style.borderRadius = '4px';
+                // Create group header
+                const header = document.createElement('div');
+                header.style.display = 'flex';
+                header.style.alignItems = 'center';
+                header.style.padding = '8px';
+                header.style.cursor = 'pointer';
+                header.style.borderRadius = '4px';
+                header.style.backgroundColor = '#f5f5f5';
+                header.style.fontWeight = 'bold';
 
                 // Hover effect
-                row.addEventListener('mouseenter', () => {
-                    row.style.backgroundColor = '#f0f0f0';
+                header.addEventListener('mouseenter', () => {
+                    header.style.backgroundColor = '#e8e8e8';
                 });
-                row.addEventListener('mouseleave', () => {
-                    row.style.backgroundColor = 'transparent';
+                header.addEventListener('mouseleave', () => {
+                    header.style.backgroundColor = '#f5f5f5';
                 });
 
-                // Expand/collapse arrow for folders
-                if (isFolder && item.children && item.children.length > 0) {
-                    const arrow = document.createElement('span');
-                    arrow.textContent = '▶';
-                    arrow.style.marginRight = '4px';
-                    arrow.style.fontSize = '10px';
-                    arrow.style.transition = 'transform 0.2s';
-                    arrow.style.transform = 'rotate(90deg)'; // Start rotated since folders start expanded
-                    arrow.id = 'arrow-' + item.uuid;
-                    row.appendChild(arrow);
-                } else {
-                    // Spacer for items without arrows
-                    const spacer = document.createElement('span');
-                    spacer.style.width = '14px';
-                    spacer.style.display = 'inline-block';
-                    row.appendChild(spacer);
-                }
+                // Arrow for expand/collapse
+                const arrow = document.createElement('span');
+                arrow.textContent = '▶';
+                arrow.style.marginRight = '8px';
+                arrow.style.fontSize = '12px';
+                arrow.style.transition = 'transform 0.2s';
+                arrow.style.transform = 'rotate(90deg)'; // Start expanded
+                arrow.id = 'arrow-' + dateGroup.group;
+                header.appendChild(arrow);
 
-                // Checkbox
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                checkbox.id = 'nb-' + item.uuid;
-                checkbox.checked = syncAll || (isFolder ? isFolderSelected(item) : selectedNotebooks.has(item.uuid));
-                checkbox.disabled = syncAll;
-                checkbox.style.marginRight = '8px';
-                checkbox.addEventListener('change', (e) => {
+                // Group checkbox (to select all in group)
+                const groupCheckbox = document.createElement('input');
+                groupCheckbox.type = 'checkbox';
+                groupCheckbox.disabled = syncAll;
+                groupCheckbox.style.marginRight = '8px';
+                groupCheckbox.checked = isGroupSelected(dateGroup.notebooks);
+                groupCheckbox.addEventListener('change', (e) => {
                     e.stopPropagation();
-                    if (isFolder) {
-                        toggleFolder(item, checkbox.checked);
-                    } else {
-                        toggleNotebook(item.uuid);
+                    toggleGroup(dateGroup.notebooks, groupCheckbox.checked);
+                });
+                header.appendChild(groupCheckbox);
+
+                // Group label
+                const label = document.createElement('span');
+                label.textContent = `${dateGroup.group} (${dateGroup.notebooks.length})`;
+                header.appendChild(label);
+
+                // Click to expand/collapse
+                header.addEventListener('click', (e) => {
+                    if (e.target !== groupCheckbox) {
+                        const notebooksDiv = document.getElementById('notebooks-' + dateGroup.group);
+                        const isExpanded = notebooksDiv.style.display !== 'none';
+                        notebooksDiv.style.display = isExpanded ? 'none' : 'block';
+                        arrow.style.transform = isExpanded ? '' : 'rotate(90deg)';
                     }
                 });
-                row.appendChild(checkbox);
 
-                // Icon and label
-                const icon = isFolder ? '📁' : '📄';
-                const pageInfo = item.pageCount ? ` (${item.pageCount} pages)` : '';
-                const labelSpan = document.createElement('span');
-                labelSpan.textContent = icon + ' ' + item.name + pageInfo;
-                if (isFolder) {
-                    labelSpan.style.fontWeight = 'bold';
-                }
-                row.appendChild(labelSpan);
+                groupDiv.appendChild(header);
 
-                // Click to expand/collapse folders
-                if (isFolder) {
-                    row.addEventListener('click', (e) => {
-                        if (e.target !== checkbox) {
-                            const childrenDiv = document.getElementById('children-' + item.uuid);
-                            const arrow = document.getElementById('arrow-' + item.uuid);
-                            if (childrenDiv) {
-                                const isExpanded = childrenDiv.style.display !== 'none';
-                                childrenDiv.style.display = isExpanded ? 'none' : 'block';
-                                arrow.style.transform = isExpanded ? '' : 'rotate(90deg)';
-                            }
-                        }
+                // Create notebooks container
+                const notebooksDiv = document.createElement('div');
+                notebooksDiv.id = 'notebooks-' + dateGroup.group;
+                notebooksDiv.style.display = 'block'; // Start expanded
+                notebooksDiv.style.marginLeft = '20px';
+                notebooksDiv.style.marginTop = '4px';
+
+                // Render each notebook
+                dateGroup.notebooks.forEach(notebook => {
+                    const row = document.createElement('div');
+                    row.style.display = 'flex';
+                    row.style.alignItems = 'center';
+                    row.style.padding = '4px';
+                    row.style.cursor = 'pointer';
+                    row.style.borderRadius = '4px';
+
+                    // Hover effect
+                    row.addEventListener('mouseenter', () => {
+                        row.style.backgroundColor = '#f0f0f0';
                     });
-                }
+                    row.addEventListener('mouseleave', () => {
+                        row.style.backgroundColor = 'transparent';
+                    });
 
-                itemDiv.appendChild(row);
+                    // Checkbox
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.id = 'nb-' + notebook.uuid;
+                    checkbox.checked = syncAll || selectedNotebooks.has(notebook.uuid);
+                    checkbox.disabled = syncAll;
+                    checkbox.style.marginRight = '8px';
+                    checkbox.addEventListener('change', () => toggleNotebook(notebook.uuid));
+                    row.appendChild(checkbox);
 
-                // Children container (for folders)
-                if (isFolder && item.children && item.children.length > 0) {
-                    const childrenDiv = document.createElement('div');
-                    childrenDiv.id = 'children-' + item.uuid;
-                    childrenDiv.style.display = 'block'; // Start expanded
-                    itemDiv.appendChild(childrenDiv);
-                    // Render children into this div
-                    renderNotebookTree(item.children, level + 1, childrenDiv);
-                }
+                    // Icon and label
+                    const pageInfo = notebook.pageCount ? ` (${notebook.pageCount} pages)` : '';
 
-                container.appendChild(itemDiv);
+                    // Format last opened date
+                    const lastOpenedDate = new Date(notebook.lastOpened);
+                    const dateStr = lastOpenedDate.toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric'
+                    });
+
+                    const labelSpan = document.createElement('span');
+                    labelSpan.textContent = '📄 ' + notebook.name + pageInfo + ' ';
+
+                    // Add date in smaller gray font
+                    const dateSpan = document.createElement('span');
+                    dateSpan.textContent = `(${dateStr})`;
+                    dateSpan.style.fontSize = '0.85em';
+                    dateSpan.style.color = '#666';
+                    labelSpan.appendChild(dateSpan);
+
+                    row.appendChild(labelSpan);
+
+                    notebooksDiv.appendChild(row);
+                });
+
+                groupDiv.appendChild(notebooksDiv);
+                container.appendChild(groupDiv);
             });
         }
 
-        // Check if all documents in a folder are selected
-        function isFolderSelected(folder) {
-            let allSelected = true;
-            function checkChildren(items) {
-                for (const item of items) {
-                    if (item.type === 'DocumentType') {
-                        if (!selectedNotebooks.has(item.uuid)) {
-                            allSelected = false;
-                            return;
-                        }
-                    }
-                    if (item.children) {
-                        checkChildren(item.children);
-                    }
-                }
-            }
-            checkChildren(folder.children || []);
-            return allSelected;
+        // Check if all notebooks in a group are selected
+        function isGroupSelected(notebooks) {
+            return notebooks.every(nb => selectedNotebooks.has(nb.uuid));
         }
 
-        // Toggle all documents in a folder
-        function toggleFolder(folder, checked) {
-            function toggleChildren(items) {
-                items.forEach(item => {
-                    if (item.type === 'DocumentType') {
-                        if (checked) {
-                            selectedNotebooks.add(item.uuid);
-                        } else {
-                            selectedNotebooks.delete(item.uuid);
-                        }
-                        const checkbox = document.getElementById('nb-' + item.uuid);
-                        if (checkbox) {
-                            checkbox.checked = checked;
-                        }
-                    }
-                    if (item.children) {
-                        toggleChildren(item.children);
-                    }
-                });
-            }
-            toggleChildren(folder.children || []);
+        // Toggle all notebooks in a group
+        function toggleGroup(notebooks, checked) {
+            notebooks.forEach(notebook => {
+                if (checked) {
+                    selectedNotebooks.add(notebook.uuid);
+                } else {
+                    selectedNotebooks.delete(notebook.uuid);
+                }
+                const checkbox = document.getElementById('nb-' + notebook.uuid);
+                if (checkbox) {
+                    checkbox.checked = checked;
+                }
+            });
             updateSelectedPagesCount();
         }
 
@@ -726,17 +722,13 @@
             } else {
                 // Calculate from selected notebooks
                 let totalPages = 0;
-                function countPages(items) {
-                    items.forEach(item => {
-                        if (item.type === 'DocumentType' && selectedNotebooks.has(item.uuid) && item.pageCount) {
-                            totalPages += item.pageCount;
-                        }
-                        if (item.children) {
-                            countPages(item.children);
+                notebookTree.forEach(group => {
+                    group.notebooks.forEach(notebook => {
+                        if (selectedNotebooks.has(notebook.uuid) && notebook.pageCount) {
+                            totalPages += notebook.pageCount;
                         }
                     });
-                }
-                countPages(notebookTree);
+                });
                 document.getElementById('selected-pages').textContent = totalPages;
             }
         }
