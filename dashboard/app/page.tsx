@@ -2,37 +2,82 @@
 
 import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import Image from 'next/image';
-import { Search, X } from 'lucide-react';
+import Link from 'next/link';
+import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Settings, CreditCard } from 'lucide-react';
 import { getNotebooksTree, trackAgentDownload, getAgentStatus, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus } from '@/lib/api';
-import FolderSidebar from '@/components/FolderSidebar';
-import Breadcrumb from '@/components/Breadcrumb';
-import MainContentArea from '@/components/MainContentArea';
+
+// Group notebooks by date
+function groupNotebooksByDate(notebooks: NotebookTreeNode[]) {
+  const now = new Date();
+  const groups: Record<string, NotebookTreeNode[]> = {
+    'Today': [],
+    'Last Week': [],
+    'Last Month': [],
+    'Last Year': [],
+    'Older': []
+  };
+
+  notebooks.forEach((notebook) => {
+    if (!notebook.last_synced_at) {
+      groups['Older'].push(notebook);
+      return;
+    }
+
+    const syncedDate = new Date(notebook.last_synced_at);
+    const diffInMs = now.getTime() - syncedDate.getTime();
+    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+
+    if (diffInDays === 0) {
+      groups['Today'].push(notebook);
+    } else if (diffInDays <= 7) {
+      groups['Last Week'].push(notebook);
+    } else if (diffInDays <= 30) {
+      groups['Last Month'].push(notebook);
+    } else if (diffInDays <= 365) {
+      groups['Last Year'].push(notebook);
+    } else {
+      groups['Older'].push(notebook);
+    }
+  });
+
+  return groups;
+}
+
+// Flatten tree and extract only notebooks (no folders, PDFs, or EPUBs)
+function flattenNotebooks(nodes: NotebookTreeNode[]): NotebookTreeNode[] {
+  const results: NotebookTreeNode[] = [];
+
+  for (const node of nodes) {
+    // Only include notebooks (not folders, PDFs, or EPUBs)
+    if (!node.is_folder && node.document_type === 'notebook') {
+      results.push(node);
+    }
+    // Recursively process children
+    if (node.children && node.children.length > 0) {
+      results.push(...flattenNotebooks(node.children));
+    }
+  }
+
+  return results;
+}
 
 export default function Home() {
   const { getToken, isSignedIn } = useAuth();
-  const [notebookTree, setNotebookTree] = useState<NotebookTreeData | null>(null);
+  const [notebooks, setNotebooks] = useState<NotebookTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
-  const [currentFolder, setCurrentFolder] = useState<NotebookTreeNode | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<'notebook' | 'epub' | 'pdf' | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
 
   const handleDownloadClick = async () => {
-    // Track the download
     if (isSignedIn) {
       const token = await getToken();
       if (token) {
         await trackAgentDownload(token);
       }
     }
-
-    // Open the download link
     window.location.href = 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.0.0/rMirror-1.0.0.dmg';
   };
 
@@ -50,7 +95,8 @@ export default function Home() {
       }
 
       const data = await getNotebooksTree(token);
-      setNotebookTree(data);
+      const flatNotebooks = flattenNotebooks(data.tree);
+      setNotebooks(flatNotebooks);
     } catch (err) {
       console.error('Error fetching notebooks:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch notebooks');
@@ -58,11 +104,6 @@ export default function Home() {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    fetchNotebooks();
-    fetchAgentStatus();
-  }, [isSignedIn, getToken]);
 
   const fetchAgentStatus = async () => {
     if (!isSignedIn) return;
@@ -78,132 +119,119 @@ export default function Home() {
     }
   };
 
-  // Find a node by UUID in the tree
-  const findNodeByUuid = (nodes: NotebookTreeNode[], uuid: string): NotebookTreeNode | null => {
-    for (const node of nodes) {
-      if (node.notebook_uuid === uuid) {
-        return node;
-      }
-      if (node.children && node.children.length > 0) {
-        const found = findNodeByUuid(node.children, uuid);
-        if (found) return found;
-      }
-    }
-    return null;
-  };
+  useEffect(() => {
+    fetchNotebooks();
+    fetchAgentStatus();
+  }, [isSignedIn]);
 
-  // Search through all nodes recursively
-  const searchNodes = (nodes: NotebookTreeNode[], query: string): NotebookTreeNode[] => {
-    const results: NotebookTreeNode[] = [];
-    const lowerQuery = query.toLowerCase();
+  // Filter notebooks by search query
+  const filteredNotebooks = notebooks.filter((notebook) =>
+    notebook.visible_name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-    for (const node of nodes) {
-      // Check if current node matches
-      if (node.visible_name.toLowerCase().includes(lowerQuery)) {
-        results.push(node);
-      }
-      // Search children recursively
-      if (node.children && node.children.length > 0) {
-        results.push(...searchNodes(node.children, query));
-      }
-    }
+  const groupedNotebooks = groupNotebooksByDate(filteredNotebooks);
 
-    return results;
-  };
+  // Sidebar
+  const Sidebar = () => (
+    <aside className="w-64 border-r flex flex-col h-screen" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--card)' }}>
+      {/* Logo */}
+      <div className="p-6 border-b" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex items-center space-x-2">
+          <Image src="/rm-icon.png" alt="rMirror" width={28} height={28} />
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
+        </div>
+        <p style={{ fontSize: '0.875em', color: 'var(--warm-gray)', marginTop: '0.25rem' }}>Cloud Sync</p>
+      </div>
 
-  // Flatten tree and get all items of a specific document type
-  const getItemsByType = (nodes: NotebookTreeNode[], docType: string): NotebookTreeNode[] => {
-    const results: NotebookTreeNode[] = [];
+      {/* Navigation */}
+      <nav className="flex-1 p-4 space-y-1">
+        <Link
+          href="/"
+          className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
+          style={{
+            backgroundColor: 'var(--primary)',
+            color: 'var(--primary-foreground)',
+            fontSize: '0.925em',
+            fontWeight: 500
+          }}
+        >
+          <BookOpen className="w-5 h-5" />
+          Notebooks
+        </Link>
+        <Link
+          href="/settings"
+          className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
+          style={{
+            color: 'var(--warm-charcoal)',
+            fontSize: '0.925em',
+            fontWeight: 500
+          }}
+        >
+          <Settings className="w-5 h-5" />
+          Settings
+        </Link>
+        <Link
+          href="/billing"
+          className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
+          style={{
+            color: 'var(--warm-charcoal)',
+            fontSize: '0.925em',
+            fontWeight: 500
+          }}
+        >
+          <CreditCard className="w-5 h-5" />
+          Billing
+        </Link>
+      </nav>
 
-    for (const node of nodes) {
-      // Only include non-folder items that match the type
-      if (!node.is_folder && node.document_type === docType) {
-        results.push(node);
-      }
-      // Recursively search children
-      if (node.children && node.children.length > 0) {
-        results.push(...getItemsByType(node.children, docType));
-      }
-    }
-
-    // Sort by last_synced_at (most recent first)
-    return results.sort((a, b) => {
-      const dateA = a.last_synced_at ? new Date(a.last_synced_at).getTime() : 0;
-      const dateB = b.last_synced_at ? new Date(b.last_synced_at).getTime() : 0;
-      return dateB - dateA; // descending order
-    });
-  };
-
-  // Get items to display in the main content area
-  const getCurrentItems = (): NotebookTreeNode[] => {
-    if (!notebookTree) return [];
-
-    // If filtering by type, return all items of that type
-    if (activeFilter) {
-      return getItemsByType(notebookTree.tree, activeFilter);
-    }
-
-    // If searching, return search results
-    if (searchQuery.trim()) {
-      return searchNodes(notebookTree.tree, searchQuery.trim());
-    }
-
-    if (currentFolderId === null) {
-      // Show root level items
-      return notebookTree.tree;
-    }
-
-    // Find the current folder and return its children
-    const folder = findNodeByUuid(notebookTree.tree, currentFolderId);
-    return folder?.children || [];
-  };
-
-  const handleFolderSelect = (folderId: string | null, node: NotebookTreeNode | null) => {
-    setCurrentFolderId(folderId);
-    setCurrentFolder(node);
-    // Close sidebar on mobile when folder is selected
-    if (window.innerWidth < 1024) {
-      setSidebarOpen(false);
-    }
-  };
-
-  // Header component that's always visible
-  const Header = () => (
-    <header className="bg-white shadow-sm sticky top-0 z-30">
-      <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="lg:hidden text-gray-600 hover:text-gray-900 p-2"
-              aria-label="Toggle sidebar"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-            <div className="flex items-center space-x-2">
-              <Image src="/rm-icon.png" alt="rMirror" width={32} height={32} className="inline-block" />
-              <h1 className="text-2xl font-bold text-gray-900">rMirror</h1>
-            </div>
+      {/* Status Footer */}
+      {agentStatus && (
+        <div className="p-4 border-t space-y-3" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex items-center space-x-2">
+            <div
+              className="w-2 h-2 rounded-full"
+              style={{ backgroundColor: agentStatus.has_agent_connected ? 'var(--sage-green)' : 'var(--warm-gray)' }}
+            />
+            <span style={{ fontSize: '0.875em', color: 'var(--foreground)', fontWeight: 500 }}>
+              {agentStatus.has_agent_connected ? 'Agent Connected' : 'No Agent'}
+            </span>
           </div>
+          {agentStatus.has_agent_connected && (
+            <div style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
+              Last sync: a few moments ago
+            </div>
+          )}
+        </div>
+      )}
+    </aside>
+  );
 
-          {/* Search bar */}
-          <div className="flex-1 max-w-md hidden sm:block">
+  // Header component
+  const Header = () => (
+    <header className="bg-white shadow-sm sticky top-0 z-30" style={{ borderBottom: '1px solid var(--border)' }}>
+      <div className="max-w-full mx-auto px-6 lg:px-8 py-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex-1 max-w-md">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
               <input
                 type="text"
-                placeholder="Search notebooks and folders..."
+                placeholder="Search notebooks..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent"
+                className="w-full pl-10 pr-10 py-2 rounded-lg"
+                style={{
+                  border: '1px solid var(--border)',
+                  fontSize: '0.925em',
+                  backgroundColor: 'var(--card)',
+                  color: 'var(--foreground)'
+                }}
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  aria-label="Clear search"
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                  style={{ color: 'var(--warm-gray)' }}
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -212,271 +240,237 @@ export default function Home() {
           </div>
 
           <div className="flex items-center space-x-4">
-            {/* Agent status indicator */}
-            {agentStatus && (
-              <div className="hidden md:flex items-center space-x-2 px-3 py-1.5 rounded-full bg-gray-100">
-                <div className={`w-2 h-2 rounded-full ${agentStatus.has_agent_connected ? 'bg-green-500' : 'bg-gray-400'}`} />
-                <span className="text-sm text-gray-700">
-                  {agentStatus.has_agent_connected ? 'Agent Connected' : 'No Agent'}
-                </span>
-              </div>
-            )}
-
-            {/* Mobile search icon */}
-            <button
-              onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
-              className="sm:hidden p-2 text-gray-600 hover:text-gray-900"
-              aria-label="Toggle search"
-            >
-              {mobileSearchOpen ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
-            </button>
             {isSignedIn && <UserButton afterSignOutUrl="/" />}
           </div>
         </div>
-
-        {/* Mobile search bar */}
-        {mobileSearchOpen && (
-          <div className="sm:hidden px-4 pb-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="Search notebooks and folders..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent"
-                autoFocus
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  aria-label="Clear search"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </header>
   );
 
   if (loading) {
     return (
-      <>
-        <Header />
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="flex h-screen">
+        <Sidebar />
+        <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading notebooks...</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--terracotta)' }}></div>
+            <p className="mt-4" style={{ color: 'var(--warm-gray)' }}>Loading notebooks...</p>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
   if (error) {
     return (
-      <>
-        <Header />
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="flex h-screen">
+        <Sidebar />
+        <div className="flex-1 flex items-center justify-center px-4">
           <div className="text-center max-w-md">
-            <div className="text-red-600 text-5xl mb-4">✗</div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Error</h2>
-            <p className="text-gray-600 mb-6">{error}</p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <button
-                onClick={() => fetchNotebooks()}
-                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-              >
-                Try Again
-              </button>
-              <Link
-                href="/"
-                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-              >
-                Go Home
-              </Link>
-            </div>
+            <div style={{ color: 'var(--destructive)', fontSize: '3rem', marginBottom: '1rem' }}>✗</div>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>Error</h2>
+            <p style={{ color: 'var(--warm-gray)', marginBottom: '1.5rem' }}>{error}</p>
+            <button
+              onClick={() => fetchNotebooks()}
+              className="px-6 py-2 rounded-lg transition-colors"
+              style={{
+                backgroundColor: 'var(--primary)',
+                color: 'var(--primary-foreground)'
+              }}
+            >
+              Try Again
+            </button>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
-  const currentItems = getCurrentItems();
-
   return (
-    <>
-      <Header />
-      <div className="flex h-screen overflow-hidden bg-gray-50">
-        {/* Sidebar */}
-        {notebookTree && (
-          <FolderSidebar
-            nodes={notebookTree.tree}
-            selectedFolderId={currentFolderId}
-            onFolderSelect={handleFolderSelect}
-            isOpen={sidebarOpen}
-            onToggle={() => setSidebarOpen(!sidebarOpen)}
-          />
-        )}
-
-        {/* Main content area */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            {!notebookTree || notebookTree.total === 0 ? (
-              <div className="text-center py-12 bg-white rounded-lg border border-gray-200 max-w-2xl mx-auto">
-                <div className="text-gray-400 text-6xl mb-4">📚</div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                  No notebooks yet
-                </h3>
-                <p className="text-gray-600 mb-6">
-                  Download and install the rMirror Agent to sync your reMarkable notebooks.
-                  <br />
-                  <span className="text-sm text-gray-500">Free tier includes 30 pages of OCR transcription per month</span>
-                </p>
-                <div className="space-y-4">
+    <div className="flex h-screen">
+      <Sidebar />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <Header />
+        <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
+          {notebooks.length === 0 ? (
+            <div className="text-center py-12 rounded-lg max-w-2xl mx-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>📚</div>
+              <h3 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+                No notebooks yet
+              </h3>
+              <p style={{ color: 'var(--warm-gray)', marginBottom: '1.5rem' }}>
+                Download and install the rMirror Agent to sync your reMarkable notebooks.
+                <br />
+                <span style={{ fontSize: '0.875em' }}>Free tier includes 30 pages of OCR transcription per month</span>
+              </p>
+              <button
+                onClick={handleDownloadClick}
+                className="px-6 py-3 rounded-lg transition-colors font-semibold cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--primary)',
+                  color: 'var(--primary-foreground)'
+                }}
+              >
+                Download rMirror Agent for macOS
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* View toggle */}
+              <div className="flex items-center justify-between mb-6">
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 600, margin: 0 }}>Your Notebooks</h2>
+                <div className="flex gap-2">
                   <button
-                    onClick={handleDownloadClick}
-                    className="inline-block px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold cursor-pointer"
+                    onClick={() => setViewMode('list')}
+                    className="px-3 py-2 rounded-lg flex items-center gap-2 transition-all"
+                    style={{
+                      backgroundColor: viewMode === 'list' ? 'var(--primary)' : 'transparent',
+                      color: viewMode === 'list' ? 'var(--primary-foreground)' : 'var(--warm-gray)',
+                      border: '1px solid var(--border)'
+                    }}
                   >
-                    Download rMirror Agent for macOS
+                    <List className="w-4 h-4" />
+                    <span style={{ fontSize: '0.875em' }}>List</span>
                   </button>
-                  <div className="text-sm text-gray-500">
-                    Version 1.0.0 • macOS 12.0 or later • 18 MB
-                  </div>
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <h4 className="text-sm font-semibold text-gray-900 mb-3">Getting Started:</h4>
-                    <ol className="text-sm text-gray-600 text-left space-y-2 max-w-md mx-auto">
-                      <li className="flex items-start">
-                        <span className="font-semibold mr-2">1.</span>
-                        <span>Download and install the agent on your Mac</span>
-                      </li>
-                      <li className="flex items-start">
-                        <span className="font-semibold mr-2">2.</span>
-                        <span>Make sure reMarkable Desktop app is installed and synced</span>
-                      </li>
-                      <li className="flex items-start">
-                        <span className="font-semibold mr-2">3.</span>
-                        <span>Launch rMirror Agent and sign in with your account</span>
-                      </li>
-                      <li className="flex items-start">
-                        <span className="font-semibold mr-2">4.</span>
-                        <span>Your notebooks will automatically sync to the cloud</span>
-                      </li>
-                    </ol>
-                  </div>
+                  <button
+                    onClick={() => setViewMode('grid')}
+                    className="px-3 py-2 rounded-lg flex items-center gap-2 transition-all"
+                    style={{
+                      backgroundColor: viewMode === 'grid' ? 'var(--primary)' : 'transparent',
+                      color: viewMode === 'grid' ? 'var(--primary-foreground)' : 'var(--warm-gray)',
+                      border: '1px solid var(--border)'
+                    }}
+                  >
+                    <Grid3x3 className="w-4 h-4" />
+                    <span style={{ fontSize: '0.875em' }}>Grid</span>
+                  </button>
                 </div>
               </div>
-            ) : (
-              <>
-                {/* Filters */}
-                <div className="mb-4 flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => setActiveFilter(activeFilter === 'notebook' ? null : 'notebook')}
-                    className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                      activeFilter === 'notebook'
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Notebooks
-                  </button>
-                  <button
-                    onClick={() => setActiveFilter(activeFilter === 'pdf' ? null : 'pdf')}
-                    className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                      activeFilter === 'pdf'
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    PDFs
-                  </button>
-                  <button
-                    onClick={() => setActiveFilter(activeFilter === 'epub' ? null : 'epub')}
-                    className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                      activeFilter === 'epub'
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    EPubs
-                  </button>
+
+              {/* Notebooks by date group */}
+              <div className="space-y-8">
+                {Object.entries(groupedNotebooks).map(([groupName, groupNotebooks]) => {
+                  if (groupNotebooks.length === 0) return null;
+
+                  return (
+                    <div key={groupName}>
+                      <h3 style={{
+                        fontSize: '0.8em',
+                        fontWeight: 600,
+                        color: 'var(--warm-gray)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        marginBottom: '1rem',
+                        paddingLeft: '0.75rem'
+                      }}>
+                        {groupName}
+                      </h3>
+
+                      {viewMode === 'grid' ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                          {groupNotebooks.map((notebook) => (
+                            <Link
+                              key={notebook.notebook_uuid}
+                              href={`/notebooks/${notebook.id}`}
+                              className="p-4 rounded-lg transition-all hover:shadow-md group"
+                              style={{
+                                backgroundColor: 'var(--card)',
+                                border: '1px solid var(--border)',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <div className="aspect-[3/4] rounded mb-3 flex items-center justify-center"
+                                style={{ backgroundColor: 'var(--soft-cream)' }}
+                              >
+                                <span style={{ fontSize: '2rem' }}>📓</span>
+                              </div>
+                              <h4 style={{
+                                fontSize: '0.875em',
+                                fontWeight: 500,
+                                color: 'var(--warm-charcoal)',
+                                marginBottom: '0.25rem',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                              }} className="group-hover:text-[var(--terracotta)]">
+                                {notebook.visible_name}
+                              </h4>
+                              <p style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
+                                {notebook.last_synced_at ? new Date(notebook.last_synced_at).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric'
+                                }) : 'Never synced'}
+                              </p>
+                            </Link>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {groupNotebooks.map((notebook) => (
+                            <Link
+                              key={notebook.notebook_uuid}
+                              href={`/notebooks/${notebook.id}`}
+                              className="flex items-center justify-between p-4 rounded-lg transition-all hover:bg-[var(--soft-cream)] group"
+                              style={{
+                                backgroundColor: 'var(--card)',
+                                border: '1px solid var(--border)',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <span style={{ fontSize: '1.5rem' }}>📓</span>
+                                <div className="flex-1 min-w-0">
+                                  <h4 style={{
+                                    fontSize: '0.925em',
+                                    fontWeight: 500,
+                                    color: 'var(--warm-charcoal)',
+                                    marginBottom: '0.125rem',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                  }} className="group-hover:text-[var(--terracotta)]">
+                                    {notebook.visible_name}
+                                  </h4>
+                                  <p style={{ fontSize: '0.8em', color: 'var(--warm-gray)' }}>
+                                    {notebook.last_synced_at ? new Date(notebook.last_synced_at).toLocaleDateString('en-US', {
+                                      year: 'numeric',
+                                      month: 'short',
+                                      day: 'numeric'
+                                    }) : 'Never synced'}
+                                  </p>
+                                </div>
+                              </div>
+                              <ChevronRight className="w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {filteredNotebooks.length === 0 && searchQuery && (
+                <div className="text-center py-12 rounded-lg" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+                  <Search className="w-16 h-16 mx-auto mb-4" style={{ color: 'var(--warm-gray)' }} />
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+                    No results found
+                  </h3>
+                  <p style={{ color: 'var(--warm-gray)' }}>
+                    Try adjusting your search terms or{' '}
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      style={{ color: 'var(--terracotta)', textDecoration: 'underline' }}
+                    >
+                      clear the search
+                    </button>
+                  </p>
                 </div>
-
-                {/* Filter results header, Search results header, or Breadcrumb */}
-                {activeFilter ? (
-                  <div className="mb-6">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        {activeFilter === 'notebook' ? 'All Notebooks' : activeFilter === 'pdf' ? 'All PDFs' : 'All EPubs'}
-                      </h2>
-                      <button
-                        onClick={() => setActiveFilter(null)}
-                        className="text-sm text-purple-600 hover:text-purple-700"
-                      >
-                        Clear filter
-                      </button>
-                    </div>
-                    <p className="text-sm text-gray-600 mt-1">
-                      {currentItems.length} {currentItems.length === 1 ? 'item' : 'items'} · Sorted by most recent
-                    </p>
-                  </div>
-                ) : searchQuery.trim() ? (
-                  <div className="mb-6">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Search results for &quot;{searchQuery}&quot;
-                      </h2>
-                      <button
-                        onClick={() => setSearchQuery('')}
-                        className="text-sm text-purple-600 hover:text-purple-700"
-                      >
-                        Clear search
-                      </button>
-                    </div>
-                    <p className="text-sm text-gray-600 mt-1">
-                      {currentItems.length} {currentItems.length === 1 ? 'result' : 'results'} found
-                    </p>
-                  </div>
-                ) : (
-                  <Breadcrumb
-                    currentFolder={currentFolder}
-                    onNavigate={handleFolderSelect}
-                  />
-                )}
-
-                {/* Content grid or empty search results */}
-                {currentItems.length === 0 && searchQuery.trim() ? (
-                  <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-                    <Search className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                      No results found
-                    </h3>
-                    <p className="text-gray-600">
-                      Try adjusting your search terms or{' '}
-                      <button
-                        onClick={() => setSearchQuery('')}
-                        className="text-purple-600 hover:text-purple-700 underline"
-                      >
-                        clear the search
-                      </button>
-                    </p>
-                  </div>
-                ) : (
-                  <MainContentArea
-                    items={currentItems}
-                    onFolderClick={handleFolderSelect}
-                    skipSort={activeFilter !== null}
-                  />
-                )}
-              </>
-            )}
-          </div>
+              )}
+            </>
+          )}
         </main>
       </div>
-    </>
+    </div>
   );
 }
