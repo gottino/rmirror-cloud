@@ -5,6 +5,47 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>rMirror Agent</title>
     <style>
+        /* rMirror Design System - CSS Variables */
+        :root {
+            /* Color Palette - Warm, sophisticated palette inspired by Moleskine */
+            --warm-charcoal: #2d2a2e;
+            --soft-cream: #faf8f5;
+            --terracotta: #c85a54;
+            --warm-gray: #8b8680;
+            --amber-gold: #d4a574;
+            --sage-green: #7a9c89;
+
+            /* Semantic Design Tokens */
+            --background: #faf8f5;
+            --foreground: #2d2a2e;
+            --card: #ffffff;
+            --card-foreground: #2d2a2e;
+            --primary: #c85a54;
+            --primary-foreground: #ffffff;
+            --secondary: #d4a574;
+            --secondary-foreground: #2d2a2e;
+            --muted: #faf8f5;
+            --muted-foreground: #8b8680;
+            --accent: #c85a54;
+            --success: #7a9c89;
+            --success-foreground: #ffffff;
+            --destructive: #dc2626;
+            --destructive-foreground: #ffffff;
+            --border: #e8e4df;
+            --input: #e8e4df;
+            --ring: #c85a54;
+
+            /* Border Radius */
+            --radius-sm: 6px;
+            --radius: 8px;
+            --radius-lg: 12px;
+
+            /* Shadows */
+            --shadow-sm: 0 2px 8px rgba(45, 42, 46, 0.06);
+            --shadow-md: 0 4px 12px rgba(45, 42, 46, 0.08);
+            --shadow-lg: 0 8px 20px rgba(45, 42, 46, 0.12);
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -12,90 +53,147 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f7;
-            color: #1d1d1f;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+            background: var(--background);
+            color: var(--foreground);
             line-height: 1.6;
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Subtle paper texture for backgrounds */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0.03;
+            pointer-events: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' /%3E%3C/svg%3E");
+            z-index: -1;
         }
 
         .container {
             max-width: 900px;
             margin: 0 auto;
-            padding: 40px 20px;
+            padding: 40px 24px;
         }
 
         header {
-            text-align: center;
-            margin-bottom: 40px;
+            margin-bottom: 24px;
         }
 
         h1 {
             font-size: 2.5em;
             font-weight: 600;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
+            color: var(--warm-charcoal);
+        }
+
+        h2 {
+            font-size: 1.5em;
+            font-weight: 600;
+            color: var(--warm-charcoal);
+        }
+
+        h3 {
+            font-size: 1.25em;
+            font-weight: 600;
+            color: var(--warm-charcoal);
         }
 
         .subtitle {
-            color: #86868b;
-            font-size: 1.1em;
+            color: var(--warm-gray);
+            font-size: 1.05em;
+            line-height: 1.5;
+        }
+
+        /* Elastic band divider (Moleskine-inspired) */
+        .elastic-divider {
+            position: relative;
+            width: 100%;
+            height: 1px;
+            margin: 24px 0;
+        }
+
+        .elastic-divider::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: var(--border);
+        }
+
+        .elastic-divider::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 64px;
+            height: 100%;
+            background: var(--terracotta);
+            opacity: 0.3;
         }
 
         .card {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            background: var(--card);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border);
         }
 
         .card h2 {
-            font-size: 1.5em;
             margin-bottom: 20px;
-            font-weight: 600;
         }
 
         .status-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
         }
 
         .status-item {
-            padding: 15px;
-            background: #f5f5f7;
-            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
 
         .status-label {
-            color: #86868b;
-            font-size: 0.9em;
-            margin-bottom: 5px;
+            color: var(--warm-gray);
+            font-size: 0.875em;
+            font-weight: 500;
         }
 
         .status-value {
-            font-size: 1.2em;
-            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.875em;
+            font-weight: 500;
+            color: var(--foreground);
         }
 
         .status-indicator {
             display: inline-block;
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
-            margin-right: 8px;
         }
 
         .status-indicator.green {
-            background: #34c759;
+            background: var(--sage-green);
         }
 
         .status-indicator.red {
-            background: #ff3b30;
+            background: var(--destructive);
         }
 
         .status-indicator.yellow {
-            background: #ffcc00;
+            background: var(--amber-gold);
         }
 
         .form-group {
@@ -106,7 +204,8 @@
             display: block;
             margin-bottom: 8px;
             font-weight: 500;
-            color: #1d1d1f;
+            color: var(--foreground);
+            font-size: 0.925em;
         }
 
         input[type="text"],
@@ -114,44 +213,65 @@
         input[type="password"],
         input[type="number"] {
             width: 100%;
-            padding: 12px 16px;
-            border: 1px solid #d2d2d7;
-            border-radius: 8px;
-            font-size: 1em;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.925em;
             font-family: inherit;
+            background: var(--card);
+            color: var(--foreground);
+            transition: all 0.15s;
         }
 
         input:focus {
             outline: none;
-            border-color: #0071e3;
+            border-color: var(--ring);
+            box-shadow: 0 0 0 3px rgba(200, 90, 84, 0.1);
         }
 
         button {
-            background: #0071e3;
-            color: white;
+            background: var(--primary);
+            color: var(--primary-foreground);
             border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 1em;
+            padding: 10px 20px;
+            border-radius: var(--radius);
+            font-size: 0.925em;
             font-weight: 500;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
 
         button:hover {
-            background: #0077ed;
+            background: #b34e49;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(200, 90, 84, 0.2);
         }
 
         button:active {
-            background: #006edb;
+            background: #a3443f;
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
         }
 
         button.secondary {
-            background: #86868b;
+            background: var(--secondary);
+            color: var(--secondary-foreground);
         }
 
         button.secondary:hover {
-            background: #6e6e73;
+            background: #c9995d;
+        }
+
+        button.secondary:active {
+            background: #b88d52;
         }
 
         .button-group {
@@ -161,24 +281,29 @@
         }
 
         .alert {
-            padding: 15px;
-            border-radius: 8px;
+            padding: 14px 16px;
+            border-radius: var(--radius);
             margin-bottom: 20px;
+            font-size: 0.925em;
+            border: 1px solid;
         }
 
         .alert.success {
-            background: #d1f2eb;
-            color: #0e6655;
+            background: rgba(122, 156, 137, 0.1);
+            color: var(--sage-green);
+            border-color: var(--sage-green);
         }
 
         .alert.error {
-            background: #f8d7da;
-            color: #721c24;
+            background: rgba(220, 38, 38, 0.1);
+            color: var(--destructive);
+            border-color: var(--destructive);
         }
 
         .alert.info {
-            background: #d1ecf1;
-            color: #0c5460;
+            background: rgba(200, 90, 84, 0.1);
+            color: var(--primary);
+            border-color: var(--primary);
         }
 
         #message {
@@ -195,31 +320,243 @@
             width: auto;
             margin-right: 10px;
         }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .card-header h2 {
+            margin-bottom: 0;
+        }
+
+        .settings-button {
+            background: transparent;
+            color: var(--warm-gray);
+            border: 1px solid var(--border);
+            padding: 8px 14px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.85em;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.15s;
+            font-weight: 500;
+        }
+
+        .settings-button:hover {
+            background: var(--soft-cream);
+            border-color: var(--warm-gray);
+            color: var(--warm-charcoal);
+            transform: translateY(-1px);
+        }
+
+        .settings-button:active {
+            transform: translateY(0);
+        }
+
+        .sign-in-button {
+            background: var(--primary);
+            color: var(--primary-foreground);
+            border: none;
+            padding: 8px 16px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 0.85em;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 2px 4px rgba(200, 90, 84, 0.2);
+            transition: all 0.15s;
+            font-weight: 500;
+            margin-right: 8px;
+        }
+
+        .sign-in-button:hover {
+            background: #b34e49;
+            box-shadow: 0 3px 6px rgba(200, 90, 84, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .sign-in-button:active {
+            background: #a3443f;
+            box-shadow: 0 1px 2px rgba(200, 90, 84, 0.2);
+            transform: translateY(0);
+        }
+
+        .settings-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(45, 42, 46, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            overflow-y: auto;
+            padding: 40px 20px;
+        }
+
+        .settings-overlay.active {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+
+        .settings-content {
+            background: var(--card);
+            border-radius: var(--radius-lg);
+            padding: 32px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: var(--shadow-lg);
+            position: relative;
+            border: 1px solid var(--border);
+        }
+
+        .settings-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .settings-header h2 {
+            margin: 0;
+        }
+
+        .close-button {
+            background: transparent;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--warm-gray);
+            border-radius: 50%;
+            transition: all 0.15s;
+        }
+
+        .close-button:hover {
+            color: var(--warm-charcoal);
+            background: var(--soft-cream);
+        }
+
+        .notebook-table-header {
+            display: grid;
+            grid-template-columns: 30px 1fr 150px 80px;
+            gap: 12px;
+            padding: 10px 12px;
+            background: var(--soft-cream);
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.8em;
+            color: var(--warm-gray);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .notebook-row {
+            display: grid;
+            grid-template-columns: 30px 1fr 150px 80px;
+            gap: 12px;
+            padding: 10px 12px;
+            align-items: center;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .notebook-row:hover {
+            background: var(--soft-cream);
+        }
+
+        .notebook-row:hover .notebook-name {
+            color: var(--terracotta);
+        }
+
+        .notebook-name {
+            font-weight: 500;
+            color: var(--warm-charcoal);
+            font-size: 0.875em;
+            transition: color 0.15s;
+        }
+
+        .notebook-date {
+            font-size: 0.8em;
+            color: var(--warm-gray);
+        }
+
+        .notebook-pages {
+            font-size: 0.8em;
+            color: var(--warm-gray);
+            text-align: right;
+        }
+
+        /* Date group styles */
+        .date-group {
+            margin-bottom: 20px;
+        }
+
+        .date-group-header {
+            font-size: 0.8em;
+            font-weight: 600;
+            color: var(--warm-gray);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 10px;
+            padding: 0 12px;
+        }
+
+        /* Settings modal section headers */
+        .settings-content h3 {
+            margin-top: 24px;
+            margin-bottom: 16px;
+            font-size: 1.1em;
+        }
+
+        .settings-content h3:first-of-type {
+            margin-top: 0;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
             <h1>rMirror Agent</h1>
-            <p class="subtitle">Sync your reMarkable tablets to the cloud</p>
+            <p class="subtitle">Seamless cloud sync for your reMarkable notebooks</p>
         </header>
+
+        <!-- Elastic band divider -->
+        <div class="elastic-divider"></div>
 
         <div id="message" class="alert"></div>
 
-        <!-- Authentication Card (shown when not authenticated with Clerk) -->
-        <div class="card" id="auth-card" style="display: {% if use_clerk_auth and not authenticated %}block{% else %}none{% endif %};">
-            <h2>Authentication Required</h2>
-            <p style="margin-bottom: 20px; color: #86868b;">
-                Sign in with your rMirror account to start syncing your notebooks to the cloud.
-            </p>
-            <button onclick="openAuthPage()" style="background: #667eea;">
-                Sign in with Google
-            </button>
-        </div>
-
         <!-- Status Card -->
         <div class="card">
-            <h2>Status</h2>
+            <div class="card-header">
+                <h2>Status</h2>
+                <div style="display: flex; align-items: center;">
+                    <button class="sign-in-button" id="sign-in-btn" onclick="openAuth()" style="display: none;">
+                        Sign In
+                    </button>
+                    <button class="settings-button" onclick="openSettings()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
+                        </svg>
+                        Settings
+                    </button>
+                </div>
+            </div>
             <div class="status-grid">
                 <div class="status-item">
                     <div class="status-label">Agent</div>
@@ -252,9 +589,59 @@
             </div>
         </div>
 
-        <!-- Configuration Card -->
+        <!-- Notebook Selection Card -->
         <div class="card">
-            <h2>Configuration</h2>
+            <h2>Notebook Selection</h2>
+            <p style="color: #666; margin-bottom: 20px;">Choose which notebooks to sync to stay within your plan limits.</p>
+
+            <div class="status-grid" style="margin-bottom: 20px;">
+                <div class="status-item">
+                    <div class="status-label">Total Pages</div>
+                    <div class="status-value" id="total-pages">-</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Selected Pages</div>
+                    <div class="status-value" id="selected-pages">-</div>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="sync-all" style="margin-right: 10px;">
+                    <span>Sync all notebooks</span>
+                </label>
+            </div>
+
+            <div id="notebook-tree" style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 10px; background: #f9f9f9;">
+                <div style="text-align: center; padding: 20px; color: #999;">
+                    Loading notebooks...
+                </div>
+            </div>
+
+            <div class="button-group" style="margin-top: 15px;">
+                <button onclick="saveNotebookSelection()">Save Selection</button>
+                <button class="secondary" onclick="loadNotebookTree()">Refresh</button>
+            </div>
+        </div>
+
+        <!-- Actions Card -->
+        <div class="card">
+            <h2>Actions</h2>
+            <div class="button-group">
+                <button onclick="triggerSync()">Sync Now</button>
+                <button class="secondary" onclick="refreshStatus()">Refresh Status</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Overlay (Modal) -->
+    <div class="settings-overlay" id="settings-overlay" onclick="closeSettingsIfClickedOutside(event)">
+        <div class="settings-content" onclick="event.stopPropagation()">
+            <div class="settings-header">
+                <h2>Account Settings</h2>
+                <button class="close-button" onclick="closeSettings()">&times;</button>
+            </div>
+
             <form id="config-form">
                 <h3 style="margin-bottom: 15px; font-size: 1.2em;">API Settings</h3>
 
@@ -295,53 +682,114 @@
                 </div>
             </form>
         </div>
+    </div>
 
-        <!-- Notebook Selection Card -->
-        <div class="card">
-            <h2>Notebook Selection</h2>
-            <p style="color: #666; margin-bottom: 20px;">Choose which notebooks to sync to stay within your plan limits.</p>
+    <!-- Auth Overlay (Modal) -->
+    <div class="settings-overlay" id="auth-overlay" onclick="closeAuthIfClickedOutside(event)">
+        <div class="settings-content" onclick="event.stopPropagation()">
+            <div class="settings-header">
+                <h2>Sign In</h2>
+                <button class="close-button" onclick="closeAuth()">&times;</button>
+            </div>
 
-            <div class="status-group" style="margin-bottom: 20px;">
-                <div class="status-item">
-                    <div class="status-label">Total Pages:</div>
-                    <div class="status-value" id="total-pages">-</div>
+            {% if use_clerk_auth %}
+            <!-- Clerk Authentication -->
+            <div style="text-align: center; padding: 20px 0;">
+                <p style="margin-bottom: 30px; color: #666; font-size: 1.05em;">
+                    Sign in with your rMirror account to start syncing your notebooks to the cloud.
+                </p>
+                <button onclick="openAuthPage()" style="background: #667eea; font-size: 1.1em; padding: 14px 28px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: middle; margin-right: 8px;">
+                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                    </svg>
+                    Sign in with Google
+                </button>
+            </div>
+            {% else %}
+            <!-- Password Authentication -->
+            <form id="auth-form" onsubmit="handlePasswordAuth(event)">
+                <div class="form-group">
+                    <label for="auth-email">Email</label>
+                    <input type="email" id="auth-email" name="email" required autofocus>
                 </div>
-                <div class="status-item">
-                    <div class="status-label">Selected Pages:</div>
-                    <div class="status-value" id="selected-pages">-</div>
+
+                <div class="form-group">
+                    <label for="auth-password">Password</label>
+                    <input type="password" id="auth-password" name="password" required>
                 </div>
-            </div>
 
-            <div style="margin-bottom: 15px;">
-                <label style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="sync-all" style="margin-right: 10px;">
-                    <span>Sync all notebooks</span>
-                </label>
-            </div>
-
-            <div id="notebook-tree" style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 10px; background: #f9f9f9;">
-                <div style="text-align: center; padding: 20px; color: #999;">
-                    Loading notebooks...
+                <div class="button-group">
+                    <button type="submit">Sign In</button>
                 </div>
-            </div>
-
-            <div class="button-group" style="margin-top: 15px;">
-                <button onclick="saveNotebookSelection()">Save Selection</button>
-                <button class="secondary" onclick="loadNotebookTree()">Refresh</button>
-            </div>
-        </div>
-
-        <!-- Actions Card -->
-        <div class="card">
-            <h2>Actions</h2>
-            <div class="button-group">
-                <button onclick="triggerSync()">Sync Now</button>
-                <button class="secondary" onclick="refreshStatus()">Refresh Status</button>
-            </div>
+            </form>
+            {% endif %}
         </div>
     </div>
 
     <script>
+        // Auth modal functions
+        function openAuth() {
+            document.getElementById('auth-overlay').classList.add('active');
+        }
+
+        function closeAuth() {
+            document.getElementById('auth-overlay').classList.remove('active');
+        }
+
+        function closeAuthIfClickedOutside(event) {
+            if (event.target.id === 'auth-overlay') {
+                closeAuth();
+            }
+        }
+
+        async function handlePasswordAuth(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+
+            try {
+                const response = await fetch('/api/test-connection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: formData.get('email'),
+                        password: formData.get('password'),
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showMessage('Successfully authenticated!', 'success');
+                    closeAuth();
+                    refreshStatus();
+                } else {
+                    showMessage(data.message || 'Authentication failed', 'error');
+                }
+            } catch (error) {
+                showMessage('Authentication failed: ' + error.message, 'error');
+            }
+        }
+
+        // Settings modal functions
+        function openSettings() {
+            document.getElementById('settings-overlay').classList.add('active');
+        }
+
+        function closeSettings() {
+            document.getElementById('settings-overlay').classList.remove('active');
+        }
+
+        function closeSettingsIfClickedOutside(event) {
+            if (event.target.id === 'settings-overlay') {
+                closeSettings();
+            }
+        }
+
         // Show message
         function showMessage(text, type = 'info') {
             const messageEl = document.getElementById('message');
@@ -413,17 +861,16 @@
 
                 // Update authentication status
                 const authStatus = document.getElementById('auth-status');
-                const authCard = document.getElementById('auth-card');
+                const signInBtn = document.getElementById('sign-in-btn');
 
-                if (statusData.authentication.authenticated || authData.authenticated) {
+                const isAuthenticated = statusData.authentication.authenticated || authData.authenticated;
+
+                if (isAuthenticated) {
                     authStatus.innerHTML = '<span class="status-indicator green"></span>Authenticated';
-                    authCard.style.display = 'none';
+                    signInBtn.style.display = 'none'; // Hide sign-in button
                 } else {
                     authStatus.innerHTML = '<span class="status-indicator red"></span>Not Authenticated';
-                    // Show auth card if using Clerk
-                    if (authData.use_clerk_auth) {
-                        authCard.style.display = 'block';
-                    }
+                    signInBtn.style.display = 'flex'; // Show sign-in button
                 }
 
                 showMessage('Status refreshed', 'success');
@@ -471,6 +918,8 @@
                     showMessage(data.message, 'success');
                     // Clear password field
                     document.getElementById('password').value = '';
+                    // Close settings modal
+                    closeSettings();
                 } else {
                     showMessage('Configuration save failed', 'error');
                 }
@@ -610,55 +1059,66 @@
                 notebooksDiv.style.marginLeft = '20px';
                 notebooksDiv.style.marginTop = '4px';
 
+                // Add table header
+                const tableHeader = document.createElement('div');
+                tableHeader.className = 'notebook-table-header';
+                tableHeader.innerHTML = `
+                    <div></div>
+                    <div>Name</div>
+                    <div>Last Opened</div>
+                    <div style="text-align: right;">Pages</div>
+                `;
+                notebooksDiv.appendChild(tableHeader);
+
                 // Render each notebook
                 dateGroup.notebooks.forEach(notebook => {
                     const row = document.createElement('div');
-                    row.style.display = 'flex';
-                    row.style.alignItems = 'center';
-                    row.style.padding = '4px';
-                    row.style.cursor = 'pointer';
-                    row.style.borderRadius = '4px';
-
-                    // Hover effect
-                    row.addEventListener('mouseenter', () => {
-                        row.style.backgroundColor = '#f0f0f0';
-                    });
-                    row.addEventListener('mouseleave', () => {
-                        row.style.backgroundColor = 'transparent';
-                    });
+                    row.className = 'notebook-row';
 
                     // Checkbox
+                    const checkboxCell = document.createElement('div');
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
                     checkbox.id = 'nb-' + notebook.uuid;
                     checkbox.checked = syncAll || selectedNotebooks.has(notebook.uuid);
                     checkbox.disabled = syncAll;
-                    checkbox.style.marginRight = '8px';
-                    checkbox.addEventListener('change', () => toggleNotebook(notebook.uuid));
-                    row.appendChild(checkbox);
+                    checkbox.addEventListener('change', (e) => {
+                        e.stopPropagation();
+                        toggleNotebook(notebook.uuid);
+                    });
+                    checkboxCell.appendChild(checkbox);
+                    row.appendChild(checkboxCell);
 
-                    // Icon and label
-                    const pageInfo = notebook.pageCount ? ` (${notebook.pageCount} pages)` : '';
+                    // Name
+                    const nameCell = document.createElement('div');
+                    nameCell.className = 'notebook-name';
+                    nameCell.textContent = notebook.name;
+                    row.appendChild(nameCell);
 
-                    // Format last opened date
+                    // Date
+                    const dateCell = document.createElement('div');
+                    dateCell.className = 'notebook-date';
                     const lastOpenedDate = new Date(notebook.lastOpened);
-                    const dateStr = lastOpenedDate.toLocaleDateString('en-US', {
+                    dateCell.textContent = lastOpenedDate.toLocaleDateString('en-US', {
                         year: 'numeric',
                         month: 'short',
                         day: 'numeric'
                     });
+                    row.appendChild(dateCell);
 
-                    const labelSpan = document.createElement('span');
-                    labelSpan.textContent = '📄 ' + notebook.name + pageInfo + ' ';
+                    // Pages
+                    const pagesCell = document.createElement('div');
+                    pagesCell.className = 'notebook-pages';
+                    pagesCell.textContent = notebook.pageCount || 0;
+                    row.appendChild(pagesCell);
 
-                    // Add date in smaller gray font
-                    const dateSpan = document.createElement('span');
-                    dateSpan.textContent = `(${dateStr})`;
-                    dateSpan.style.fontSize = '0.85em';
-                    dateSpan.style.color = '#666';
-                    labelSpan.appendChild(dateSpan);
-
-                    row.appendChild(labelSpan);
+                    // Click row to toggle checkbox
+                    row.addEventListener('click', (e) => {
+                        if (e.target !== checkbox) {
+                            checkbox.checked = !checkbox.checked;
+                            toggleNotebook(notebook.uuid);
+                        }
+                    });
 
                     notebooksDiv.appendChild(row);
                 });

@@ -103,17 +103,18 @@ class MetadataScanner:
             last_opened_ms = int(data.get("lastOpened", data.get("lastModified", "0")))
             last_opened = datetime.fromtimestamp(last_opened_ms / 1000.0)
 
-            # Get page count
-            page_count = None
+            # Get page count from .content file
+            page_count = 0
             content_file = metadata_file.with_suffix('.content')
             if content_file.exists():
                 try:
                     with open(content_file, 'r') as f:
                         content_data = json.load(f)
-                        pages = content_data.get("pages", [])
-                        page_count = len(pages) if pages else None
-                except Exception:
-                    pass
+                        # Use PageCount property if available, otherwise count pages array
+                        page_count = content_data.get("pageCount", len(content_data.get("pages", [])))
+                except Exception as e:
+                    logger.warning(f"Failed to read page count from {content_file.name}: {e}")
+                    page_count = 0
 
             return NotebookItem(
                 uuid=uuid,
