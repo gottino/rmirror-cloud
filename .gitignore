@@ -101,3 +101,4 @@ test_data/
 backend/dumps/
 backend/migrate_to_production*.py
 scripts/
+rm-irror-design-system/
