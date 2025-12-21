@@ -49,11 +49,11 @@ export default function NotebookPage() {
 
   // Header component that's always visible
   const Header = () => (
-    <header className="bg-white shadow-sm sticky top-0 z-50">
+    <header className="bg-white shadow-sm sticky top-0 z-50" style={{ borderBottom: '1px solid var(--border)' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex items-center justify-between">
           <Link href="/" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
-            <h1 className="text-2xl font-bold text-gray-900">📓 rMirror</h1>
+            <h1 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
           </Link>
           <div className="flex items-center space-x-4">
             {isSignedIn && <UserButton afterSignOutUrl="/" />}
@@ -67,10 +67,10 @@ export default function NotebookPage() {
     return (
       <>
         <Header />
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading notebook...</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--terracotta)' }}></div>
+            <p className="mt-4" style={{ color: 'var(--warm-gray)' }}>Loading notebook...</p>
           </div>
         </div>
       </>
@@ -81,14 +81,18 @@ export default function NotebookPage() {
     return (
       <>
         <Header />
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: 'var(--background)' }}>
           <div className="text-center max-w-md">
-            <div className="text-red-600 text-5xl mb-4">✗</div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Error</h2>
-            <p className="text-gray-600 mb-6">{error || 'Notebook not found'}</p>
+            <div style={{ color: 'var(--destructive)', fontSize: '3rem', marginBottom: '1rem' }}>✗</div>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>Error</h2>
+            <p style={{ color: 'var(--warm-gray)', marginBottom: '1.5rem' }}>{error || 'Notebook not found'}</p>
             <Link
               href="/"
-              className="inline-block bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition-colors"
+              className="inline-block px-6 py-2 rounded-lg transition-colors"
+              style={{
+                backgroundColor: 'var(--primary)',
+                color: 'var(--primary-foreground)'
+              }}
             >
               ← Back to notebooks
             </Link>
@@ -104,44 +108,44 @@ export default function NotebookPage() {
   return (
     <>
       <Header />
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen" style={{ backgroundColor: 'var(--background)' }}>
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           {/* Back link and notebook header */}
           <div className="mb-8">
             <Link
               href="/"
-              className="inline-flex items-center text-purple-600 hover:text-purple-700 mb-4"
+              className="inline-flex items-center mb-4 hover:opacity-80 transition-opacity"
+              style={{ color: 'var(--terracotta)', fontSize: '0.925em', fontWeight: 500 }}
             >
               ← Back to notebooks
             </Link>
 
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          <h1 style={{ fontSize: '2rem', fontWeight: 600, color: 'var(--warm-charcoal)', marginBottom: '0.5rem' }}>
             {notebook.visible_name || notebook.title || 'Untitled'}
           </h1>
 
-          <div className="flex items-center gap-4 text-sm text-gray-600">
+          <div className="flex items-center gap-4" style={{ fontSize: '0.875em', color: 'var(--warm-gray)' }}>
             {notebook.author && (
               <span>
-                <span className="font-medium">Author:</span> {notebook.author}
+                <span style={{ fontWeight: 500 }}>Author:</span> {notebook.author}
               </span>
             )}
             <span>
-              <span className="font-medium">Type:</span> {notebook.document_type.toUpperCase()}
+              <span style={{ fontWeight: 500 }}>Type:</span> {notebook.document_type.toUpperCase()}
             </span>
             <span>
-              <span className="font-medium">Pages:</span> {notebook.pages.length}
+              <span style={{ fontWeight: 500 }}>Pages:</span> {notebook.pages.length}
             </span>
           </div>
         </div>
 
         {/* Pages */}
         {sortedPages.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-lg shadow">
-            <div className="text-gray-400 text-6xl mb-4">📄</div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">
+          <div className="text-center py-12 rounded-lg" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>
               No pages found
             </h3>
-            <p className="text-gray-600">
+            <p style={{ color: 'var(--warm-gray)' }}>
               This notebook doesn't have any pages yet.
             </p>
           </div>
@@ -159,10 +163,11 @@ export default function NotebookPage() {
               return (
                 <div
                   key={page.id}
-                  className="bg-white rounded-lg shadow-md p-6 relative"
+                  className="rounded-lg p-6 relative"
+                  style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
                 >
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">
+                    <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--warm-charcoal)' }}>
                       Page {page.page_number}
                     </h3>
 
@@ -170,11 +175,12 @@ export default function NotebookPage() {
                       {page.ocr_status === 'completed' && page.ocr_text && (
                         <button
                           onClick={handleCopy}
-                          className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+                          className="p-2 rounded transition-colors hover:bg-[var(--soft-cream)]"
+                          style={{ color: 'var(--warm-gray)' }}
                           title="Copy markdown"
                         >
                           {copiedPageId === page.id ? (
-                            <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: 'var(--sage-green)' }}>
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
                           ) : (
@@ -186,15 +192,25 @@ export default function NotebookPage() {
                       )}
 
                       <span
-                        className={`px-3 py-1 rounded-full text-sm font-medium ${
-                          page.ocr_status === 'completed'
-                            ? 'bg-green-100 text-green-800'
+                        className="px-3 py-1 rounded-full"
+                        style={{
+                          fontSize: '0.875em',
+                          fontWeight: 500,
+                          backgroundColor: page.ocr_status === 'completed'
+                            ? 'rgba(122, 156, 137, 0.15)'
                             : page.ocr_status === 'processing'
-                            ? 'bg-blue-100 text-blue-800'
+                            ? 'rgba(212, 165, 116, 0.15)'
                             : page.ocr_status === 'failed'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}
+                            ? 'rgba(220, 38, 38, 0.15)'
+                            : 'var(--soft-cream)',
+                          color: page.ocr_status === 'completed'
+                            ? 'var(--sage-green)'
+                            : page.ocr_status === 'processing'
+                            ? 'var(--amber-gold)'
+                            : page.ocr_status === 'failed'
+                            ? 'var(--destructive)'
+                            : 'var(--warm-gray)'
+                        }}
                       >
                         {page.ocr_status}
                       </span>
@@ -202,22 +218,22 @@ export default function NotebookPage() {
                   </div>
 
                   {page.ocr_status === 'completed' && page.ocr_text ? (
-                    <div className="prose prose-sm sm:prose max-w-none prose-headings:font-semibold prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg prose-p:text-gray-700 prose-ul:text-gray-700 prose-ol:text-gray-700 prose-li:text-gray-700 prose-strong:text-gray-900 prose-a:text-purple-600 hover:prose-a:text-purple-700">
+                    <div className="prose prose-sm sm:prose max-w-none prose-headings:font-semibold prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg prose-p:text-[var(--warm-charcoal)] prose-ul:text-[var(--warm-charcoal)] prose-ol:text-[var(--warm-charcoal)] prose-li:text-[var(--warm-charcoal)] prose-strong:text-[var(--warm-charcoal)] prose-a:text-[var(--terracotta)] hover:prose-a:opacity-80">
                       <ReactMarkdown>{page.ocr_text}</ReactMarkdown>
                     </div>
                   ) : page.ocr_status === 'failed' && page.ocr_error ? (
-                    <div className="bg-red-50 border border-red-200 rounded p-4">
-                      <p className="text-red-800 font-medium mb-2">OCR Failed</p>
-                      <p className="text-red-600 text-sm">{page.ocr_error}</p>
+                    <div className="rounded p-4" style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.2)' }}>
+                      <p style={{ color: 'var(--destructive)', fontWeight: 500, marginBottom: '0.5rem' }}>OCR Failed</p>
+                      <p style={{ color: 'var(--destructive)', fontSize: '0.875em', opacity: 0.8 }}>{page.ocr_error}</p>
                     </div>
                   ) : page.ocr_status === 'processing' ? (
-                    <div className="bg-blue-50 border border-blue-200 rounded p-4 flex items-center">
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mr-3"></div>
-                      <p className="text-blue-800">Processing OCR...</p>
+                    <div className="rounded p-4 flex items-center" style={{ backgroundColor: 'rgba(212, 165, 116, 0.1)', border: '1px solid rgba(212, 165, 116, 0.2)' }}>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 mr-3" style={{ borderColor: 'var(--amber-gold)' }}></div>
+                      <p style={{ color: 'var(--amber-gold)', fontWeight: 500 }}>Processing OCR...</p>
                     </div>
                   ) : (
-                    <div className="bg-gray-50 border border-gray-200 rounded p-4">
-                      <p className="text-gray-600">OCR pending</p>
+                    <div className="rounded p-4" style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}>
+                      <p style={{ color: 'var(--warm-gray)' }}>OCR pending</p>
                     </div>
                   )}
                 </div>
