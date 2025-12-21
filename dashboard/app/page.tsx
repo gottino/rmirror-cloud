@@ -115,9 +115,13 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentFolderPath, setCurrentFolderPath] = useState<string[]>([]); // Array of folder UUIDs
 
+  // Development mode bypass
+  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
+
   const handleDownloadClick = async () => {
-    if (isSignedIn) {
-      const token = await getToken();
+    if (effectiveIsSignedIn) {
+      const token = isDevelopmentMode ? 'dev-mode-bypass' : await getToken();
       if (token) {
         await trackAgentDownload(token);
       }
@@ -126,14 +130,15 @@ export default function Home() {
   };
 
   const fetchNotebooks = async () => {
-    if (!isSignedIn) {
+    if (!effectiveIsSignedIn) {
       setLoading(false);
       return;
     }
 
     try {
       setError(null);
-      const token = await getToken();
+      // In dev mode, use a mock token that bypasses Clerk
+      const token = isDevelopmentMode ? 'dev-mode-bypass' : await getToken();
       if (!token) {
         throw new Error('Failed to get authentication token');
       }
@@ -149,10 +154,10 @@ export default function Home() {
   };
 
   const fetchAgentStatus = async () => {
-    if (!isSignedIn) return;
+    if (!effectiveIsSignedIn) return;
 
     try {
-      const token = await getToken();
+      const token = isDevelopmentMode ? 'dev-mode-bypass' : await getToken();
       if (!token) return;
 
       const status = await getAgentStatus(token);
@@ -165,7 +170,7 @@ export default function Home() {
   useEffect(() => {
     fetchNotebooks();
     fetchAgentStatus();
-  }, [isSignedIn]);
+  }, [effectiveIsSignedIn]);
 
   // Get current folder node and its contents
   const getCurrentFolderNode = (): NotebookTreeNode[] => {
@@ -437,7 +442,20 @@ export default function Home() {
           </div>
 
           <div className="flex items-center space-x-4">
-            {isSignedIn && <UserButton afterSignOutUrl="/" />}
+            {isDevelopmentMode ? (
+              <div style={{
+                fontSize: '0.75em',
+                color: 'var(--warm-gray)',
+                padding: '0.5rem',
+                backgroundColor: 'var(--soft-cream)',
+                borderRadius: 'var(--radius)',
+                border: '1px solid var(--border)'
+              }}>
+                DEV MODE
+              </div>
+            ) : (
+              isSignedIn && <UserButton afterSignOutUrl="/" />
+            )}
           </div>
         </div>
       </div>

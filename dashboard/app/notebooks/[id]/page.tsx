@@ -16,15 +16,20 @@ export default function NotebookPage() {
   const [error, setError] = useState<string | null>(null);
   const [copiedPageId, setCopiedPageId] = useState<number | null>(null);
 
+  // Development mode bypass
+  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
+
   useEffect(() => {
-    if (!isSignedIn) {
+    if (!effectiveIsSignedIn) {
       router.push('/');
       return;
     }
 
     const fetchNotebook = async () => {
       try {
-        const token = await getToken();
+        // In dev mode, use a mock token that bypasses Clerk
+        const token = isDevelopmentMode ? 'dev-mode-bypass' : await getToken();
         if (!token) {
           throw new Error('Failed to get authentication token');
         }
@@ -45,7 +50,7 @@ export default function NotebookPage() {
     };
 
     fetchNotebook();
-  }, [params.id, isSignedIn, getToken, router]);
+  }, [params.id, effectiveIsSignedIn, getToken, router, isDevelopmentMode]);
 
   // Header component that's always visible
   const Header = () => (
@@ -56,7 +61,20 @@ export default function NotebookPage() {
             <h1 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
           </Link>
           <div className="flex items-center space-x-4">
-            {isSignedIn && <UserButton afterSignOutUrl="/" />}
+            {isDevelopmentMode ? (
+              <div style={{
+                fontSize: '0.75em',
+                color: 'var(--warm-gray)',
+                padding: '0.5rem',
+                backgroundColor: 'var(--soft-cream)',
+                borderRadius: 'var(--radius)',
+                border: '1px solid var(--border)'
+              }}>
+                DEV MODE
+              </div>
+            ) : (
+              isSignedIn && <UserButton afterSignOutUrl="/" />
+            )}
           </div>
         </div>
       </div>

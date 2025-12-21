@@ -63,6 +63,18 @@ async def get_clerk_user(
 
     token = credentials.credentials
 
+    # Development mode bypass - ONLY allowed when DEBUG=true in .env
+    settings = get_settings()
+    if token == "dev-mode-bypass" and settings.debug:
+        # Get the first active user for development
+        user = db.query(User).filter(User.is_active == True).first()
+        if user:
+            return user
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active user found in development database",
+        )
+
     try:
         # Decode JWT token without verification to get the user ID
         # In production, you should verify the JWT signature using Clerk's JWKS
