@@ -45,6 +45,7 @@ export interface NotebookTreeNode {
   created_at: string | null;
   last_synced_at: string | null;
   is_folder: boolean;
+  preview: string | null;
   children: NotebookTreeNode[];
 }
 

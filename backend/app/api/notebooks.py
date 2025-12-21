@@ -169,6 +169,26 @@ async def get_notebooks_tree(
         if nb.parent_uuid:
             has_children.add(nb.parent_uuid)
 
+    # Get preview text for each notebook (most recent OCR'd page)
+    preview_map = {}
+    for nb in all_notebooks:
+        if nb.document_type == "notebook":
+            # Get most recent page with OCR text
+            recent_page = (
+                db.query(Page)
+                .filter(
+                    Page.notebook_id == nb.id,
+                    Page.ocr_text.isnot(None),
+                    Page.ocr_text != "",
+                )
+                .order_by(Page.page_number.desc())
+                .first()
+            )
+            if recent_page and recent_page.ocr_text:
+                # Get first 100 characters
+                preview_text = recent_page.ocr_text.strip()
+                preview_map[nb.notebook_uuid] = preview_text[:100] + ("..." if len(preview_text) > 100 else "")
+
     # Build tree structure
     def build_tree_node(notebook):
         """Convert a notebook to a tree node with children."""
@@ -182,6 +202,7 @@ async def get_notebooks_tree(
             "created_at": notebook.created_at.isoformat() if notebook.created_at else None,
             "last_synced_at": notebook.last_synced_at.isoformat() if notebook.last_synced_at else None,
             "is_folder": notebook.notebook_uuid in has_children,
+            "preview": preview_map.get(notebook.notebook_uuid),
             "children": [],
         }
         return node

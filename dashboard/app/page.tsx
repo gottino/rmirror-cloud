@@ -4,7 +4,7 @@ import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Settings, CreditCard } from 'lucide-react';
+import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Settings, CreditCard, Menu } from 'lucide-react';
 import { getNotebooksTree, trackAgentDownload, getAgentStatus, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus } from '@/lib/api';
 
 // Group notebooks by date
@@ -70,6 +70,7 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const handleDownloadClick = async () => {
     if (isSignedIn) {
@@ -133,15 +134,42 @@ export default function Home() {
 
   // Sidebar
   const Sidebar = () => (
-    <aside className="w-64 border-r flex flex-col h-screen" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--card)' }}>
-      {/* Logo */}
-      <div className="p-6 border-b" style={{ borderColor: 'var(--border)' }}>
-        <div className="flex items-center space-x-2">
-          <Image src="/rm-icon.png" alt="rMirror" width={28} height={28} />
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
+    <>
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`
+          fixed lg:static inset-y-0 left-0 z-50
+          w-64 border-r flex flex-col h-screen
+          transform transition-transform duration-200 ease-in-out
+          lg:transform-none
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        `}
+        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--card)' }}
+      >
+        {/* Logo */}
+        <div className="p-6 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Image src="/rm-icon.png" alt="rMirror" width={28} height={28} />
+              <h1 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
+            </div>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="lg:hidden p-2"
+              style={{ color: 'var(--warm-gray)' }}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <p style={{ fontSize: '0.875em', color: 'var(--warm-gray)', marginTop: '0.25rem' }}>Cloud Sync</p>
         </div>
-        <p style={{ fontSize: '0.875em', color: 'var(--warm-gray)', marginTop: '0.25rem' }}>Cloud Sync</p>
-      </div>
 
       {/* Navigation */}
       <nav className="flex-1 p-4 space-y-1">
@@ -203,7 +231,8 @@ export default function Home() {
           )}
         </div>
       )}
-    </aside>
+      </aside>
+    </>
   );
 
   // Header component
@@ -211,6 +240,15 @@ export default function Home() {
     <header className="bg-white shadow-sm sticky top-0 z-30" style={{ borderBottom: '1px solid var(--border)' }}>
       <div className="max-w-full mx-auto px-6 lg:px-8 py-4">
         <div className="flex items-center justify-between gap-4">
+          {/* Hamburger menu button for mobile */}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="lg:hidden p-2 -ml-2"
+            style={{ color: 'var(--warm-charcoal)' }}
+          >
+            <Menu className="w-6 h-6" />
+          </button>
+
           <div className="flex-1 max-w-md">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
@@ -294,7 +332,7 @@ export default function Home() {
         <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
           {notebooks.length === 0 ? (
             <div className="text-center py-12 rounded-lg max-w-2xl mx-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>📚</div>
+              <BookOpen className="w-20 h-20 mx-auto mb-4" style={{ color: 'var(--warm-gray)', opacity: 0.3 }} />
               <h3 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>
                 No notebooks yet
               </h3>
@@ -379,10 +417,30 @@ export default function Home() {
                                 cursor: 'pointer'
                               }}
                             >
-                              <div className="aspect-[3/4] rounded mb-3 flex items-center justify-center"
-                                style={{ backgroundColor: 'var(--soft-cream)' }}
+                              <div className="aspect-[3/4] rounded mb-3 flex items-start p-3 overflow-hidden"
+                                style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
                               >
-                                <span style={{ fontSize: '2rem' }}>📓</span>
+                                {notebook.preview ? (
+                                  <p style={{
+                                    fontSize: '0.7em',
+                                    color: 'var(--warm-charcoal)',
+                                    lineHeight: '1.4',
+                                    margin: 0,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    display: '-webkit-box',
+                                    WebkitLineClamp: 6,
+                                    WebkitBoxOrient: 'vertical'
+                                  }}>
+                                    {notebook.preview}
+                                  </p>
+                                ) : (
+                                  <div className="flex items-center justify-center w-full h-full">
+                                    <span style={{ fontSize: '0.75em', color: 'var(--warm-gray)', textAlign: 'center' }}>
+                                      No preview available
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                               <h4 style={{
                                 fontSize: '0.875em',
@@ -418,7 +476,29 @@ export default function Home() {
                               }}
                             >
                               <div className="flex items-center gap-3 flex-1 min-w-0">
-                                <span style={{ fontSize: '1.5rem' }}>📓</span>
+                                <div className="w-12 h-16 rounded flex items-start p-2 flex-shrink-0 overflow-hidden"
+                                  style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
+                                >
+                                  {notebook.preview ? (
+                                    <p style={{
+                                      fontSize: '0.5em',
+                                      color: 'var(--warm-charcoal)',
+                                      lineHeight: '1.3',
+                                      margin: 0,
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      display: '-webkit-box',
+                                      WebkitLineClamp: 4,
+                                      WebkitBoxOrient: 'vertical'
+                                    }}>
+                                      {notebook.preview}
+                                    </p>
+                                  ) : (
+                                    <div className="flex items-center justify-center w-full h-full">
+                                      <BookOpen className="w-6 h-6" style={{ color: 'var(--warm-gray)' }} />
+                                    </div>
+                                  )}
+                                </div>
                                 <div className="flex-1 min-w-0">
                                   <h4 style={{
                                     fontSize: '0.925em',
