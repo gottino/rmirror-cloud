@@ -4,7 +4,7 @@ import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Settings, CreditCard, Menu } from 'lucide-react';
+import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Settings, CreditCard, Menu, Home, Folder } from 'lucide-react';
 import { getNotebooksTree, trackAgentDownload, getAgentStatus, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus } from '@/lib/api';
 
 // Group notebooks by date
@@ -44,33 +44,76 @@ function groupNotebooksByDate(notebooks: NotebookTreeNode[]) {
   return groups;
 }
 
-// Flatten tree and extract only notebooks (no folders, PDFs, or EPUBs)
-function flattenNotebooks(nodes: NotebookTreeNode[]): NotebookTreeNode[] {
+// Check if a folder contains any notebooks in its hierarchy
+function folderHasNotebooks(node: NotebookTreeNode): boolean {
+  // If this is a notebook itself
+  if (!node.is_folder && node.document_type === 'notebook') {
+    return true;
+  }
+
+  // Check children recursively
+  if (node.children && node.children.length > 0) {
+    return node.children.some(child => folderHasNotebooks(child));
+  }
+
+  return false;
+}
+
+// Get all notebooks from a node and its descendants
+function getNotebooksFromNode(node: NotebookTreeNode): NotebookTreeNode[] {
   const results: NotebookTreeNode[] = [];
 
-  for (const node of nodes) {
-    // Only include notebooks (not folders, PDFs, or EPUBs)
-    if (!node.is_folder && node.document_type === 'notebook') {
-      results.push(node);
-    }
-    // Recursively process children
-    if (node.children && node.children.length > 0) {
-      results.push(...flattenNotebooks(node.children));
+  if (!node.is_folder && node.document_type === 'notebook') {
+    results.push(node);
+  }
+
+  if (node.children && node.children.length > 0) {
+    for (const child of node.children) {
+      results.push(...getNotebooksFromNode(child));
     }
   }
 
   return results;
 }
 
+// Get all notebooks from an array of nodes
+function getAllNotebooks(nodes: NotebookTreeNode[]): NotebookTreeNode[] {
+  const results: NotebookTreeNode[] = [];
+  for (const node of nodes) {
+    results.push(...getNotebooksFromNode(node));
+  }
+  return results;
+}
+
+// Get folders at a specific level that contain notebooks
+function getFoldersWithNotebooks(nodes: NotebookTreeNode[]): NotebookTreeNode[] {
+  return nodes.filter(node => node.is_folder && folderHasNotebooks(node));
+}
+
+// Find a node by UUID in the tree
+function findNodeByUuid(nodes: NotebookTreeNode[], uuid: string): NotebookTreeNode | null {
+  for (const node of nodes) {
+    if (node.notebook_uuid === uuid) {
+      return node;
+    }
+    if (node.children && node.children.length > 0) {
+      const found = findNodeByUuid(node.children, uuid);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 export default function Home() {
   const { getToken, isSignedIn } = useAuth();
-  const [notebooks, setNotebooks] = useState<NotebookTreeNode[]>([]);
+  const [tree, setTree] = useState<NotebookTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [currentFolderPath, setCurrentFolderPath] = useState<string[]>([]); // Array of folder UUIDs
 
   const handleDownloadClick = async () => {
     if (isSignedIn) {
@@ -96,8 +139,7 @@ export default function Home() {
       }
 
       const data = await getNotebooksTree(token);
-      const flatNotebooks = flattenNotebooks(data.tree);
-      setNotebooks(flatNotebooks);
+      setTree(data.tree);
     } catch (err) {
       console.error('Error fetching notebooks:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch notebooks');
@@ -125,12 +167,55 @@ export default function Home() {
     fetchAgentStatus();
   }, [isSignedIn]);
 
+  // Get current folder node and its contents
+  const getCurrentFolderNode = (): NotebookTreeNode[] => {
+    if (currentFolderPath.length === 0) {
+      // At root level
+      return tree;
+    }
+
+    // Navigate to current folder
+    let currentNodes = tree;
+    for (const folderUuid of currentFolderPath) {
+      const found = findNodeByUuid(currentNodes, folderUuid);
+      if (found && found.children) {
+        currentNodes = found.children;
+      } else {
+        return [];
+      }
+    }
+    return currentNodes;
+  };
+
+  const currentNode = getCurrentFolderNode();
+
+  // Get all notebooks in current scope (current folder + all subfolders)
+  const notebooks = getAllNotebooks(currentNode);
+
+  // Get folders at current level that contain notebooks
+  const currentFolders = getFoldersWithNotebooks(currentNode);
+
   // Filter notebooks by search query
   const filteredNotebooks = notebooks.filter((notebook) =>
     notebook.visible_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const groupedNotebooks = groupNotebooksByDate(filteredNotebooks);
+
+  // Build breadcrumb path
+  const breadcrumbs: { name: string; uuid: string | null }[] = [{ name: 'Home', uuid: null }];
+  if (currentFolderPath.length > 0) {
+    let currentNodes = tree;
+    for (const folderUuid of currentFolderPath) {
+      const found = findNodeByUuid(currentNodes, folderUuid);
+      if (found) {
+        breadcrumbs.push({ name: found.visible_name, uuid: found.notebook_uuid });
+        if (found.children) {
+          currentNodes = found.children;
+        }
+      }
+    }
+  }
 
   // Sidebar
   const Sidebar = () => (
@@ -171,46 +256,120 @@ export default function Home() {
           <p style={{ fontSize: '0.875em', color: 'var(--warm-gray)', marginTop: '0.25rem' }}>Cloud Sync</p>
         </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-1">
-        <Link
-          href="/"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
-          style={{
-            backgroundColor: 'var(--primary)',
-            color: 'var(--primary-foreground)',
-            fontSize: '0.925em',
-            fontWeight: 500
-          }}
-        >
-          <BookOpen className="w-5 h-5" />
-          Notebooks
-        </Link>
-        <Link
-          href="/settings"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
-          style={{
-            color: 'var(--warm-charcoal)',
-            fontSize: '0.925em',
-            fontWeight: 500
-          }}
-        >
-          <Settings className="w-5 h-5" />
-          Settings
-        </Link>
-        <Link
-          href="/billing"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
-          style={{
-            color: 'var(--warm-charcoal)',
-            fontSize: '0.925em',
-            fontWeight: 500
-          }}
-        >
-          <CreditCard className="w-5 h-5" />
-          Billing
-        </Link>
-      </nav>
+      {/* Folder Navigation */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Home button - always visible */}
+        <div className="p-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <button
+            onClick={() => setCurrentFolderPath([])}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
+            style={{
+              backgroundColor: currentFolderPath.length === 0 ? 'var(--primary)' : 'transparent',
+              color: currentFolderPath.length === 0 ? 'var(--primary-foreground)' : 'var(--warm-charcoal)',
+              fontSize: '0.925em',
+              fontWeight: 500
+            }}
+          >
+            <Home className="w-5 h-5" />
+            All Notebooks
+          </button>
+        </div>
+
+        {/* Breadcrumbs */}
+        {breadcrumbs.length > 1 && (
+          <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
+            <div className="flex items-center flex-wrap gap-1" style={{ fontSize: '0.8em', color: 'var(--warm-gray)' }}>
+              {breadcrumbs.map((crumb, index) => (
+                <div key={index} className="flex items-center gap-1">
+                  {index > 0 && <ChevronRight className="w-3 h-3" />}
+                  <button
+                    onClick={() => {
+                      if (crumb.uuid === null) {
+                        setCurrentFolderPath([]);
+                      } else {
+                        setCurrentFolderPath(currentFolderPath.slice(0, index));
+                      }
+                    }}
+                    className="hover:opacity-60 transition-opacity"
+                    style={{
+                      color: index === breadcrumbs.length - 1 ? 'var(--terracotta)' : 'var(--warm-gray)',
+                      fontWeight: index === breadcrumbs.length - 1 ? 500 : 400
+                    }}
+                  >
+                    {crumb.name}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Folder list */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {currentFolders.length > 0 ? (
+            <div className="space-y-1">
+              <div style={{ fontSize: '0.7em', fontWeight: 600, color: 'var(--warm-gray)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', paddingLeft: '0.75rem' }}>
+                Folders
+              </div>
+              {currentFolders.map((folder) => {
+                const notebookCount = getNotebooksFromNode(folder).length;
+                return (
+                  <button
+                    key={folder.notebook_uuid}
+                    onClick={() => setCurrentFolderPath([...currentFolderPath, folder.notebook_uuid])}
+                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)] group"
+                    style={{
+                      fontSize: '0.925em',
+                      fontWeight: 500,
+                      color: 'var(--warm-charcoal)'
+                    }}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Folder className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--terracotta)' }} />
+                      <span className="truncate">{folder.visible_name}</span>
+                    </div>
+                    <span style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
+                      {notebookCount}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : currentFolderPath.length > 0 ? (
+            <div className="text-center py-8" style={{ color: 'var(--warm-gray)', fontSize: '0.875em' }}>
+              No subfolders
+            </div>
+          ) : null}
+        </div>
+
+        {/* Settings and Billing links */}
+        <div className="border-t p-4 space-y-1" style={{ borderColor: 'var(--border)' }}>
+          <Link
+            href="/settings"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
+            style={{
+              color: 'var(--warm-charcoal)',
+              fontSize: '0.925em',
+              fontWeight: 500
+            }}
+          >
+            <Settings className="w-5 h-5" />
+            Settings
+          </Link>
+          <Link
+            href="/billing"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
+            style={{
+              color: 'var(--warm-charcoal)',
+              fontSize: '0.925em',
+              fontWeight: 500
+            }}
+          >
+            <CreditCard className="w-5 h-5" />
+            Billing
+          </Link>
+        </div>
+      </div>
 
       {/* Status Footer */}
       {agentStatus && (
@@ -356,7 +515,9 @@ export default function Home() {
             <>
               {/* View toggle */}
               <div className="flex items-center justify-between mb-6">
-                <h2 style={{ fontSize: '1.5rem', fontWeight: 600, margin: 0 }}>Your Notebooks</h2>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 600, margin: 0 }}>
+                  {currentFolderPath.length > 0 ? breadcrumbs[breadcrumbs.length - 1].name : 'All Notebooks'}
+                </h2>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setViewMode('list')}
