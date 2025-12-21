@@ -4,7 +4,7 @@ import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Settings, CreditCard, Menu, Home, Folder } from 'lucide-react';
+import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Settings, CreditCard, Menu, Home as HomeIcon, Folder } from 'lucide-react';
 import { getNotebooksTree, trackAgentDownload, getAgentStatus, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus } from '@/lib/api';
 
 // Group notebooks by date
@@ -270,7 +270,7 @@ export default function Home() {
               fontWeight: 500
             }}
           >
-            <Home className="w-5 h-5" />
+            <HomeIcon className="w-5 h-5" />
             All Notebooks
           </button>
         </div>
