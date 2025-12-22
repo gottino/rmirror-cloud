@@ -64,10 +64,10 @@ if ! systemctl is-active --quiet postgresql; then
 fi
 echo -e "${GREEN}✓ PostgreSQL is running${NC}"
 
-# Check if poetry is available
-cd "$BACKEND_DIR"
-if ! command -v poetry &> /dev/null; then
-    echo -e "${RED}✗ Poetry not found${NC}"
+# Set Poetry path (it's in deploy user's home)
+POETRY_PATH="/home/deploy/.local/bin/poetry"
+if [ ! -f "$POETRY_PATH" ]; then
+    echo -e "${RED}✗ Poetry not found at $POETRY_PATH${NC}"
     exit 1
 fi
 echo -e "${GREEN}✓ Poetry is available${NC}"
@@ -167,14 +167,14 @@ echo -e "${GREEN}✓ Service stopped${NC}"
 
 # Run Alembic migrations as deploy user
 echo "Running Alembic migrations..."
-sudo -u deploy bash -c "cd $BACKEND_DIR && poetry run alembic upgrade head"
+sudo -u deploy bash -c "cd $BACKEND_DIR && $POETRY_PATH run alembic upgrade head"
 echo -e "${GREEN}✓ Database schema created${NC}"
 
 echo ""
 echo -e "${BLUE}═══ Step 6/7: Migrating data from SQLite to PostgreSQL ═══${NC}"
 
 # Run migration script as deploy user
-sudo -u deploy bash -c "cd $BACKEND_DIR && poetry run python scripts/migrate_sqlite_to_postgres.py --sqlite-path $SQLITE_DB --postgres-url '$POSTGRES_URL'"
+sudo -u deploy bash -c "cd $BACKEND_DIR && $POETRY_PATH run python scripts/migrate_sqlite_to_postgres.py --sqlite-path $SQLITE_DB --postgres-url '$POSTGRES_URL'"
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ Data migration completed successfully${NC}"
