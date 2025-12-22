@@ -2,6 +2,34 @@
 
 This guide walks you through migrating your rMirror Cloud production database from SQLite to PostgreSQL.
 
+## Quick Start (Automated)
+
+**For a fully automated migration, just run:**
+
+```bash
+# SSH to production
+ssh deploy@167.235.74.51
+cd /var/www/rmirror-cloud/backend
+
+# Pull latest code
+git pull
+
+# Run automated migration
+sudo -E ./scripts/migrate_to_postgres.sh
+```
+
+The script handles everything automatically:
+- Creates PostgreSQL database and user
+- Backs up SQLite database
+- Updates .env configuration
+- Runs database migrations
+- Migrates all data
+- Restarts service
+
+**That's it!** The script will guide you through with colored output and confirmations.
+
+---
+
 ## Overview
 
 The migration process involves:
@@ -10,17 +38,16 @@ The migration process involves:
 3. Migrating data from SQLite to PostgreSQL
 4. Updating configuration and restarting services
 
-**Estimated time:** 15-30 minutes
+**Estimated time:** 5-10 minutes (automated)
 **Downtime required:** Yes (5-10 minutes)
 
 ## Prerequisites
 
 - SSH access to production server
 - PostgreSQL 16 installed (already done ✓)
-- Backup of current SQLite database
 - Root/sudo access on production server
 
-## Step-by-Step Migration
+## Manual Step-by-Step Migration (Advanced)
 
 ### 1. Backup Current Database
 
