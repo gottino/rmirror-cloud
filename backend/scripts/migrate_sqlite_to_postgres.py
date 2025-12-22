@@ -73,6 +73,18 @@ def migrate_table(sqlite_engine, postgres_engine, table_name):
             # Insert rows
             for row in rows:
                 row_dict = dict(zip(columns, row))
+
+                # Convert SQLite integers to PostgreSQL booleans
+                # SQLite stores booleans as 0/1, PostgreSQL needs True/False
+                for key, value in row_dict.items():
+                    if isinstance(value, int) and value in (0, 1):
+                        # Check if this column is a boolean type in PostgreSQL
+                        pg_columns = pg_inspector.get_columns(table_name)
+                        for col in pg_columns:
+                            if col['name'] == key and str(col['type']).lower() == 'boolean':
+                                row_dict[key] = bool(value)
+                                break
+
                 pg_conn.execute(text(insert_sql), row_dict)
 
             pg_conn.commit()
