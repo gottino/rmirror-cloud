@@ -246,9 +246,9 @@ export default function Home() {
         {/* Logo */}
         <div className="p-6 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Image src="/rm-icon.png" alt="rMirror" width={28} height={28} />
-              <h1 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
+            <div className="flex items-center">
+              <Image src="/rm-icon.png" alt="rMirror" width={32} height={32} style={{ marginRight: '8px', marginTop: '3px'}} />
+              <h1 style={{ fontSize: '1.375rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
