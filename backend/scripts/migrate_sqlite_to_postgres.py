@@ -26,6 +26,10 @@ def get_table_order():
         "connectors",
         "processing_jobs",
         "sync_events",
+        "sync_records",
+        "integration_configs",
+        "page_sync_records",
+        "highlights",
         "todos",
         "waitlist",
     ]
@@ -97,7 +101,7 @@ def reset_sequences(postgres_engine):
     """Reset PostgreSQL sequences to match the max ID in each table."""
     print("\nResetting PostgreSQL sequences...")
 
-    tables_with_ids = ["users", "notebooks", "pages", "connectors", "processing_jobs", "sync_events", "todos", "waitlist"]
+    tables_with_ids = ["users", "notebooks", "pages", "connectors", "processing_jobs", "sync_events", "sync_records", "integration_configs", "page_sync_records", "highlights", "todos", "waitlist"]
 
     with postgres_engine.connect() as conn:
         inspector = inspect(postgres_engine)
