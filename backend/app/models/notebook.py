@@ -51,6 +51,7 @@ class Notebook(Base):
 
     # Metadata
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # .content file data
 
     # reMarkable state
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -72,6 +73,9 @@ class Notebook(Base):
     user: Mapped["User"] = relationship("User", back_populates="notebooks")
     pages: Mapped[list["Page"]] = relationship(
         "Page", back_populates="notebook", cascade="all, delete-orphan"
+    )
+    notebook_pages: Mapped[list["NotebookPage"]] = relationship(
+        "NotebookPage", back_populates="notebook", cascade="all, delete-orphan"
     )
     highlights: Mapped[list["Highlight"]] = relationship(
         "Highlight", back_populates="notebook", cascade="all, delete-orphan"

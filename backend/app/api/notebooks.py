@@ -1,5 +1,6 @@
 """Notebook management endpoints."""
 
+import json
 import uuid
 from datetime import datetime
 from typing import Annotated
@@ -11,6 +12,7 @@ from app.auth.clerk import get_clerk_active_user
 from app.database import get_db
 from app.dependencies import get_storage_service
 from app.models.notebook import Notebook
+from app.models.notebook_page import NotebookPage
 from app.models.page import Page
 from app.models.user import User
 from app.schemas.notebook import Notebook as NotebookSchema
@@ -286,19 +288,19 @@ async def get_notebook(
     """
     Get a specific notebook by ID with its pages.
 
+    Uses the notebook_pages mapping table to determine page order.
+
     Args:
         notebook_id: Notebook ID
         current_user: Current authenticated user
         db: Database session
 
     Returns:
-        Notebook record with pages
+        Notebook record with pages in correct order
     """
-    from sqlalchemy.orm import joinedload
-
+    # Get the notebook
     notebook = (
         db.query(Notebook)
-        .options(joinedload(Notebook.pages))
         .filter(
             Notebook.id == notebook_id,
             Notebook.user_id == current_user.id,
@@ -306,15 +308,23 @@ async def get_notebook(
         .first()
     )
 
-    # Sort pages by page_number after loading
-    if notebook and notebook.pages:
-        notebook.pages.sort(key=lambda p: p.page_number)
-
     if not notebook:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Notebook not found",
         )
+
+    # Get pages through the mapping table (source of truth for order)
+    notebook_pages = (
+        db.query(NotebookPage, Page)
+        .join(Page, NotebookPage.page_id == Page.id)
+        .filter(NotebookPage.notebook_id == notebook.id)
+        .order_by(NotebookPage.page_number)
+        .all()
+    )
+
+    # Attach pages to notebook in correct order
+    notebook.pages = [page for _, page in notebook_pages]
 
     return notebook
 
@@ -359,3 +369,123 @@ async def delete_notebook(
     db.commit()
 
     return None
+
+
+@router.post("/{notebook_uuid}/content", status_code=status.HTTP_200_OK)
+async def upload_content_file(
+    notebook_uuid: str,
+    content_file: UploadFile = File(...),
+    current_user: Annotated[User, Depends(get_clerk_active_user)] = None,
+    db: Annotated[Session, Depends(get_db)] = None,
+):
+    """
+    Upload and parse a .content file to update the notebook_pages mapping table.
+
+    This endpoint:
+    1. Accepts a .content JSON file for a notebook
+    2. Parses the pages array (handles both old and new formats)
+    3. Updates the notebook_pages mapping table with correct page order
+    4. Stores the .content JSON in the notebooks table
+
+    Args:
+        notebook_uuid: UUID of the notebook
+        content_file: The .content JSON file
+        current_user: Authenticated user
+        db: Database session
+
+    Returns:
+        Success message with page count
+    """
+    # Validate file type
+    if not content_file.filename or not content_file.filename.endswith(".content"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file type. Expected .content file.",
+        )
+
+    # Find the notebook
+    notebook = (
+        db.query(Notebook)
+        .filter(
+            Notebook.notebook_uuid == notebook_uuid,
+            Notebook.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not notebook:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notebook not found",
+        )
+
+    try:
+        # Read and parse the .content file
+        content_data = await content_file.read()
+        content_json = json.loads(content_data)
+
+        # Store the raw content JSON
+        notebook.content_json = json.dumps(content_json)
+
+        # Extract pages array (handle both old and new formats)
+        pages_array = content_json.get("pages", [])
+
+        # If pages is empty, try cPages.pages (newer format)
+        if not pages_array and "cPages" in content_json:
+            c_pages = content_json["cPages"].get("pages", [])
+            # Extract page IDs from cPages format
+            pages_array = [
+                p["id"] for p in c_pages if isinstance(p, dict) and "id" in p
+            ]
+
+        # Delete existing mappings for this notebook
+        db.query(NotebookPage).filter(
+            NotebookPage.notebook_id == notebook.id
+        ).delete()
+
+        # Create new mappings from .content file
+        pages_added = 0
+        for index, page_uuid in enumerate(pages_array):
+            page_number = index + 1  # 1-indexed
+
+            # Find the page by UUID
+            page = (
+                db.query(Page)
+                .filter(
+                    Page.page_uuid == page_uuid,
+                    Page.notebook_id == notebook.id,  # Ensure it belongs to this user
+                )
+                .first()
+            )
+
+            if page:
+                # Create mapping
+                notebook_page = NotebookPage(
+                    notebook_id=notebook.id,
+                    page_id=page.id,
+                    page_number=page_number,
+                )
+                db.add(notebook_page)
+                pages_added += 1
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Content file processed successfully",
+            "notebook_uuid": notebook_uuid,
+            "pages_in_content": len(pages_array),
+            "pages_mapped": pages_added,
+        }
+
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON in .content file",
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing .content file: {str(e)}",
+        )

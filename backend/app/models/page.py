@@ -56,6 +56,9 @@ class Page(Base):
 
     # Relationships
     notebook: Mapped["Notebook"] = relationship("Notebook", back_populates="pages")
+    notebook_pages: Mapped[list["NotebookPage"]] = relationship(
+        "NotebookPage", back_populates="page", cascade="all, delete-orphan"
+    )
     todos: Mapped[list["Todo"]] = relationship(
         "Todo", back_populates="page", cascade="all, delete-orphan"
     )

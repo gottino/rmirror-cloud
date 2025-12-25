@@ -205,7 +205,45 @@ class CloudSync:
                 print(f"✓ Uploaded: {file_path.name}")
                 return response_data
 
-            # For other file types (metadata, content), we currently skip them
+            # For .content files, upload to the content endpoint
+            elif file_type == "content":
+                logger.info(f"📤 Starting upload of .content file: {file_path.name}")
+
+                try:
+                    with open(file_path, "rb") as f:
+                        files_to_upload = {
+                            "content_file": (file_path.name, f, "application/json")
+                        }
+
+                        logger.debug(f"POST {self.config.api.url}/notebooks/{notebook_uuid}/content")
+
+                        response = await self.client.post(
+                            f"{self.config.api.url}/notebooks/{notebook_uuid}/content",
+                            files=files_to_upload,
+                            headers=self._get_headers(),
+                        )
+
+                        logger.debug(f"Response status: {response.status_code}")
+                        response.raise_for_status()
+
+                        response_data = response.json()
+                        logger.debug(f"Response data: {response_data}")
+
+                        if response_data.get('success'):
+                            pages_mapped = response_data.get('pages_mapped', 0)
+                            logger.info(f"✓ Content file processed: {pages_mapped} pages mapped")
+                            print(f"✓ Content file uploaded: {pages_mapped} pages mapped")
+
+                        return response_data
+
+                except httpx.HTTPStatusError as e:
+                    # If 404, the notebook doesn't exist yet - this is OK, skip silently
+                    if e.response.status_code == 404:
+                        logger.debug(f"Notebook not found for .content file (will be created when pages are uploaded)")
+                        return {"success": True, "skipped": True, "reason": "notebook_not_found"}
+                    raise
+
+            # For other file types (metadata, pagedata), we currently skip them
             # as they'll be included with the .rm file upload
             else:
                 logger.debug(f"Skipping {file_type} file (handled with .rm upload)")
@@ -258,21 +296,41 @@ class CloudSync:
             "skipped": 0,
         }
 
-        # File patterns to sync
-        patterns = {
-            "*.content": "content",
-            "*.metadata": "metadata",
+        # File patterns to sync - separated into pages and metadata
+        # We'll upload pages first, then the .content file to map them
+        page_patterns = {
             "*.rm": "rm",
             "*.pagedata": "pagedata",
         }
 
-        files_to_upload = []
-        for pattern, file_type in patterns.items():
-            for file_path in notebook_dir.glob(pattern):
-                files_to_upload.append((file_path, file_type))
+        metadata_patterns = {
+            "*.metadata": "metadata",
+            "*.content": "content",
+        }
 
-        # Upload files
-        for file_path, file_type in files_to_upload:
+        # Collect page files
+        page_files = []
+        for pattern, file_type in page_patterns.items():
+            for file_path in notebook_dir.glob(pattern):
+                page_files.append((file_path, file_type))
+
+        # Collect metadata files
+        metadata_files = []
+        for pattern, file_type in metadata_patterns.items():
+            for file_path in notebook_dir.glob(pattern):
+                metadata_files.append((file_path, file_type))
+
+        # Upload page files first
+        for file_path, file_type in page_files:
+            try:
+                await self.upload_file(file_path, notebook_uuid, file_type)
+                stats["uploaded"] += 1
+            except CloudSyncError as e:
+                print(f"✗ Failed to upload {file_path.name}: {e}")
+                stats["failed"] += 1
+
+        # Then upload metadata files (.content must come after pages are uploaded)
+        for file_path, file_type in metadata_files:
             try:
                 await self.upload_file(file_path, notebook_uuid, file_type)
                 stats["uploaded"] += 1
