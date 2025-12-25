@@ -33,6 +33,7 @@ notion-client = "^2.7.0"
 clerk-backend-sdk = "^1.0.0"
 svix = "^1.17.0"
 resend = "^2.19.0"
+pypdf2 = "^3.0.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.4"

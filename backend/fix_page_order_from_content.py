@@ -58,12 +58,20 @@ def build_content_map(remarkable_dir: Path) -> dict:
             if file_type not in ['notebook', 'epub']:
                 continue
 
+            # Try both old format (pages array) and new format (cPages.pages array)
             content_pages = content_data.get('pages', [])
+
+            # If pages is empty, try cPages.pages (newer format)
+            if not content_pages and 'cPages' in content_data:
+                c_pages = content_data['cPages'].get('pages', [])
+                # Extract page IDs from cPages format
+                content_pages = [p['id'] for p in c_pages if isinstance(p, dict) and 'id' in p]
 
             for index, page_uuid in enumerate(content_pages):
                 page_number = index + 1
                 page_to_notebook[page_uuid] = (notebook_uuid, page_number)
-        except Exception:
+        except Exception as e:
+            print(f"  Error processing {content_file.name}: {e}")
             continue
 
     return page_to_notebook
@@ -88,10 +96,39 @@ def fix_notebook_pages(
         return
 
     # Get the pages array from .content file (source of truth)
+    # Try both old format (pages array) and new format (cPages.pages array)
     content_pages = content_data.get('pages', [])
 
+    # If pages is empty, try cPages.pages (newer format)
+    if not content_pages and 'cPages' in content_data:
+        c_pages = content_data['cPages'].get('pages', [])
+        # Extract page IDs from cPages format
+        content_pages = [p['id'] for p in c_pages if isinstance(p, dict) and 'id' in p]
+
     if not content_pages:
-        print(f"  ⚠️  No pages in .content file for {notebook.visible_name}")
+        page_count = content_data.get('pageCount', 0)
+        print(f"  ⚠️  No pages in .content file for {notebook.visible_name} (pageCount={page_count})")
+        # If there are pages in DB but none in .content, they're all orphans - move them
+        db_pages = db.query(Page).filter(Page.notebook_id == notebook.id).all()
+        if db_pages:
+            print(f"  📦 {len(db_pages)} pages don't belong to this notebook (will try to move them)")
+            moved = 0
+            for page in db_pages:
+                if page.page_uuid in page_to_notebook_map:
+                    correct_notebook_uuid, correct_page_number = page_to_notebook_map[page.page_uuid]
+                    correct_notebook = db.query(Notebook).filter(
+                        Notebook.notebook_uuid == correct_notebook_uuid
+                    ).first()
+
+                    if correct_notebook and correct_notebook.id != notebook.id:
+                        print(f"      → Moving {page.page_uuid[:8]}... to '{correct_notebook.visible_name}' (page {correct_page_number})")
+                        if not dry_run:
+                            page.notebook_id = correct_notebook.id
+                            page.page_number = correct_page_number
+                            moved += 1
+            if not dry_run and moved > 0:
+                db.commit()
+                print(f"   ✅ Moved {moved} pages")
         return
 
     print(f"\n📓 {notebook.visible_name}")

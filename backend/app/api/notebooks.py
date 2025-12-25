@@ -295,17 +295,20 @@ async def get_notebook(
         Notebook record with pages
     """
     from sqlalchemy.orm import joinedload
-    from app.models.page import Page
 
     notebook = (
         db.query(Notebook)
-        .options(joinedload(Notebook.pages).order_by(Page.page_number))
+        .options(joinedload(Notebook.pages))
         .filter(
             Notebook.id == notebook_id,
             Notebook.user_id == current_user.id,
         )
         .first()
     )
+
+    # Sort pages by page_number after loading
+    if notebook and notebook.pages:
+        notebook.pages.sort(key=lambda p: p.page_number)
 
     if not notebook:
         raise HTTPException(

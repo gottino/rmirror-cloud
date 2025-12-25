@@ -102,3 +102,6 @@ backend/dumps/
 backend/migrate_to_production*.py
 scripts/
 rm-irror-design-system/
+
+# Security analysis system (private repo)
+security/

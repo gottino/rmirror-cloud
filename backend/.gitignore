@@ -10,3 +10,12 @@
 
 # Debug/temp files
 /pics/
+
+# Private scripts (not for repo)
+scripts/harden_security.sh
+scripts/migrate_to_postgres.sh
+scripts/migrate_sqlite_to_postgres.py
+scripts/setup_postgres.sh
+scripts/POSTGRES_MIGRATION.md
+scripts/deployment_checklist.md
+scripts/README.md

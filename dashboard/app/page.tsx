@@ -399,68 +399,6 @@ export default function Home() {
     </>
   );
 
-  // Header component
-  const Header = () => (
-    <header className="bg-white shadow-sm sticky top-0 z-30" style={{ borderBottom: '1px solid var(--border)' }}>
-      <div className="max-w-full mx-auto px-6 lg:px-8 py-4">
-        <div className="flex items-center justify-between gap-4">
-          {/* Hamburger menu button for mobile */}
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="lg:hidden p-2 -ml-2"
-            style={{ color: 'var(--warm-charcoal)' }}
-          >
-            <Menu className="w-6 h-6" />
-          </button>
-
-          <div className="flex-1 max-w-md">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
-              <input
-                type="text"
-                placeholder="Search notebooks..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-10 py-2 rounded-lg"
-                style={{
-                  border: '1px solid var(--border)',
-                  fontSize: '0.925em',
-                  backgroundColor: 'var(--card)',
-                  color: 'var(--foreground)'
-                }}
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2"
-                  style={{ color: 'var(--warm-gray)' }}
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-4">
-            {isDevelopmentMode ? (
-              <div style={{
-                fontSize: '0.75em',
-                color: 'var(--warm-gray)',
-                padding: '0.5rem',
-                backgroundColor: 'var(--soft-cream)',
-                borderRadius: 'var(--radius)',
-                border: '1px solid var(--border)'
-              }}>
-                DEV MODE
-              </div>
-            ) : (
-              isSignedIn && <UserButton afterSignOutUrl="/" />
-            )}
-          </div>
-        </div>
-      </div>
-    </header>
-  );
 
   if (loading) {
     return (
@@ -505,7 +443,66 @@ export default function Home() {
     <div className="flex h-screen">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Header />
+        {/* Header */}
+        <header className="bg-white shadow-sm sticky top-0 z-30" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="max-w-full mx-auto px-6 lg:px-8 py-4">
+            <div className="flex items-center justify-between gap-4">
+              {/* Hamburger menu button for mobile */}
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="lg:hidden p-2 -ml-2"
+                style={{ color: 'var(--warm-charcoal)' }}
+              >
+                <Menu className="w-6 h-6" />
+              </button>
+
+              <div className="flex-1 max-w-md">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search notebooks..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-10 py-2 rounded-lg"
+                    style={{
+                      border: '1px solid var(--border)',
+                      fontSize: '0.925em',
+                      backgroundColor: 'var(--card)',
+                      color: 'var(--foreground)'
+                    }}
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                      style={{ color: 'var(--warm-gray)' }}
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-4">
+                {isDevelopmentMode ? (
+                  <div style={{
+                    fontSize: '0.75em',
+                    color: 'var(--warm-gray)',
+                    padding: '0.5rem',
+                    backgroundColor: 'var(--soft-cream)',
+                    borderRadius: 'var(--radius)',
+                    border: '1px solid var(--border)'
+                  }}>
+                    DEV MODE
+                  </div>
+                ) : (
+                  isSignedIn && <UserButton afterSignOutUrl="/" />
+                )}
+              </div>
+            </div>
+          </div>
+        </header>
         <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
           {notebooks.length === 0 ? (
             <div className="text-center py-12 rounded-lg max-w-2xl mx-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
