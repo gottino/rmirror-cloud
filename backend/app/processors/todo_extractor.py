@@ -121,11 +121,20 @@ def process_page_todos(
             )
             return 0
 
+    # Get page_number from notebook_pages mapping table
+    from app.models.notebook_page import NotebookPage
+    notebook_page = (
+        db.query(NotebookPage)
+        .filter(NotebookPage.page_id == page.id)
+        .first()
+    )
+    page_number = notebook_page.page_number if notebook_page else 0
+
     # Extract todos from OCR text
     new_todos = extract_todos_from_text(
         text=page.ocr_text,
         notebook_id=page.notebook_id,
-        page_number=page.page_number,
+        page_number=page_number,
         page_id=page.id,
     )
 

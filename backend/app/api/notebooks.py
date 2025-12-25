@@ -324,10 +324,10 @@ async def get_notebook(
     )
 
     # Attach pages to notebook in correct order
-    # Override page_number with the value from the mapping table (source of truth)
+    # Set page_number from the mapping table (since it's no longer in the pages table)
     pages = []
     for notebook_page, page in notebook_pages:
-        # Override the page_number attribute with the correct value from mapping table
+        # Temporarily set page_number attribute for serialization
         page.page_number = notebook_page.page_number
         pages.append(page)
 

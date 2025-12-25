@@ -602,32 +602,35 @@ class UnifiedSyncManager:
             sync_items = []
 
             for notebook in notebooks:
-                # Get all pages for this notebook
-                pages = (
-                    self.db.query(Page)
+                # Get all pages for this notebook through the mapping table
+                from app.models.notebook_page import NotebookPage
+                notebook_pages = (
+                    self.db.query(NotebookPage, Page)
+                    .join(Page, NotebookPage.page_id == Page.id)
                     .filter(
                         and_(
-                            Page.notebook_id == notebook.id, Page.ocr_text.isnot(None)
+                            NotebookPage.notebook_id == notebook.id,
+                            Page.ocr_text.isnot(None)
                         )
                     )
-                    .order_by(Page.page_number)
+                    .order_by(NotebookPage.page_number)
                     .all()
                 )
 
-                if not pages:
+                if not notebook_pages:
                     self.logger.warning(f"Notebook {notebook.notebook_uuid} has no pages with OCR text")
                     continue
 
                 # Build page data (same format as get_notebooks_needing_sync)
                 pages_data = [
                     {
-                        "page_number": page.page_number,
+                        "page_number": notebook_page.page_number,
                         "text": page.ocr_text or "",
                         "confidence": 0.8,  # Default confidence
                         "page_uuid": page.page_uuid or "",
                         "updated_at": page.updated_at.isoformat(),
                     }
-                    for page in pages
+                    for notebook_page, page in notebook_pages
                 ]
 
                 # Create text content for fingerprint
@@ -703,30 +706,33 @@ class UnifiedSyncManager:
 
             for notebook in notebooks:
                 # Get all pages for this notebook
-                pages = (
-                    self.db.query(Page)
+                from app.models.notebook_page import NotebookPage
+                notebook_pages = (
+                    self.db.query(NotebookPage, Page)
+                    .join(Page, NotebookPage.page_id == Page.id)
                     .filter(
                         and_(
-                            Page.notebook_id == notebook.id, Page.ocr_text.isnot(None)
+                            NotebookPage.notebook_id == notebook.id,
+                            Page.ocr_text.isnot(None)
                         )
                     )
-                    .order_by(Page.page_number)
+                    .order_by(NotebookPage.page_number)
                     .all()
                 )
 
-                if not pages:
+                if not notebook_pages:
                     continue
 
                 # Build page data
                 pages_data = [
                     {
-                        "page_number": page.page_number,
+                        "page_number": notebook_page.page_number,
                         "text": page.ocr_text or "",
                         "confidence": 0.8,  # Default confidence
                         "page_uuid": page.page_uuid or "",
                         "updated_at": page.updated_at.isoformat(),
                     }
-                    for page in pages
+                    for notebook_page, page in notebook_pages
                 ]
 
                 # Create text content for fingerprint

@@ -30,7 +30,6 @@ class Page(Base):
     )
 
     # Page identification
-    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
     page_uuid: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Storage
@@ -64,4 +63,4 @@ class Page(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Page(id={self.id}, notebook_id={self.notebook_id}, page={self.page_number})>"
+        return f"<Page(id={self.id}, notebook_id={self.notebook_id}, uuid={self.page_uuid})>"
