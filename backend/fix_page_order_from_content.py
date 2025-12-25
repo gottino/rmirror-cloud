@@ -43,11 +43,37 @@ def parse_content_file(content_path: Path) -> dict:
         return json.load(f)
 
 
+def build_content_map(remarkable_dir: Path) -> dict:
+    """Build a map of page_uuid -> (notebook_uuid, page_number) from all .content files."""
+    page_to_notebook = {}
+
+    for content_file in remarkable_dir.glob("*.content"):
+        notebook_uuid = content_file.stem
+
+        try:
+            content_data = parse_content_file(content_file)
+            file_type = content_data.get('fileType', '')
+
+            # Only process notebooks and epubs
+            if file_type not in ['notebook', 'epub']:
+                continue
+
+            content_pages = content_data.get('pages', [])
+
+            for index, page_uuid in enumerate(content_pages):
+                page_number = index + 1
+                page_to_notebook[page_uuid] = (notebook_uuid, page_number)
+        except Exception:
+            continue
+
+    return page_to_notebook
+
+
 def fix_notebook_pages(
     db,
     notebook_uuid: str,
     content_data: dict,
-    remarkable_dir: Path,
+    page_to_notebook_map: dict,
     dry_run: bool = False
 ):
     """Fix page ordering for a single notebook based on its .content file."""
@@ -85,6 +111,7 @@ def fix_notebook_pages(
     # Track changes
     updates_count = 0
     missing_pages = []
+    moved_pages = 0
 
     # Update page numbers based on .content file order
     for correct_index, page_uuid in enumerate(content_pages):
@@ -111,20 +138,44 @@ def fix_notebook_pages(
         if len(missing_pages) > 5:
             print(f"      ... and {len(missing_pages) - 5} more")
 
-    # Report orphan pages (in database but not in .content)
+    # Handle orphan pages (in database but not in this notebook's .content)
     orphan_pages = [p for p in db_pages if p.page_uuid not in content_pages]
     if orphan_pages:
-        print(f"   ⚠️  {len(orphan_pages)} pages in database not found in .content:")
-        for page in orphan_pages[:5]:
-            print(f"      - Page {page.page_number}: {page.page_uuid}")
-        if len(orphan_pages) > 5:
-            print(f"      ... and {len(orphan_pages) - 5} more")
+        print(f"   📦 {len(orphan_pages)} pages don't belong to this notebook:")
+
+        for page in orphan_pages:
+            # Find correct notebook for this page
+            if page.page_uuid in page_to_notebook_map:
+                correct_notebook_uuid, correct_page_number = page_to_notebook_map[page.page_uuid]
+
+                # Find the correct notebook in database
+                correct_notebook = db.query(Notebook).filter(
+                    Notebook.notebook_uuid == correct_notebook_uuid
+                ).first()
+
+                if correct_notebook and correct_notebook.id != notebook.id:
+                    print(f"      → Moving {page.page_uuid[:8]}... to '{correct_notebook.visible_name}' (page {correct_page_number})")
+
+                    if not dry_run:
+                        page.notebook_id = correct_notebook.id
+                        page.page_number = correct_page_number
+                        moved_pages += 1
+                        updates_count += 1
+            else:
+                # Page not found in any .content file - it's truly orphaned
+                print(f"      ⚠️  {page.page_uuid[:8]}... not found in any .content file (keeping for now)")
 
     if not dry_run and updates_count > 0:
         db.commit()
-        print(f"   ✅ Updated {updates_count} pages")
+        msg = f"   ✅ Updated {updates_count} pages"
+        if moved_pages > 0:
+            msg += f" ({moved_pages} moved to correct notebooks)"
+        print(msg)
     elif dry_run and updates_count > 0:
-        print(f"   🔍 DRY RUN: Would update {updates_count} pages")
+        msg = f"   🔍 DRY RUN: Would update {updates_count} pages"
+        if moved_pages > 0:
+            msg += f" ({moved_pages} would be moved)"
+        print(msg)
     else:
         print(f"   ✓ All pages already in correct order")
 
@@ -178,6 +229,12 @@ def main():
         print(f"📁 Found {len(content_files)} .content files in {remarkable_dir}")
         print()
 
+        # Build a global map of page_uuid -> (notebook_uuid, page_number)
+        print("🗺️  Building page-to-notebook map from all .content files...")
+        page_to_notebook_map = build_content_map(remarkable_dir)
+        print(f"   Found {len(page_to_notebook_map)} pages across all notebooks")
+        print()
+
         if args.notebook_uuid:
             # Filter to specific notebook
             content_files = [
@@ -209,7 +266,7 @@ def main():
                     db,
                     notebook_uuid,
                     content_data,
-                    remarkable_dir,
+                    page_to_notebook_map,
                     dry_run=args.dry_run
                 )
                 total_fixed += 1
