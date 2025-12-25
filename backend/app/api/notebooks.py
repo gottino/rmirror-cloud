@@ -324,7 +324,14 @@ async def get_notebook(
     )
 
     # Attach pages to notebook in correct order
-    notebook.pages = [page for _, page in notebook_pages]
+    # Override page_number with the value from the mapping table (source of truth)
+    pages = []
+    for notebook_page, page in notebook_pages:
+        # Override the page_number attribute with the correct value from mapping table
+        page.page_number = notebook_page.page_number
+        pages.append(page)
+
+    notebook.pages = pages
 
     return notebook
 
