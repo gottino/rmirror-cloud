@@ -176,6 +176,48 @@ def register_routes(app: Flask) -> None:
         # TODO: Implement manual sync trigger
         return jsonify({"success": True, "message": "Manual sync triggered"})
 
+    @app.route("/api/sync/initial", methods=["POST"])
+    def api_sync_initial():
+        """
+        Trigger initial sync of all notebooks.
+
+        This uploads all pages and .content files for selected notebooks.
+        Useful for first-time setup or catching up after being offline.
+        """
+        import asyncio
+        from app.sync.initial_sync import InitialSync
+
+        config: Config = app.config["AGENT_CONFIG"]
+        cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+
+        if not cloud_sync or not cloud_sync.authenticated:
+            return jsonify({"success": False, "message": "Not authenticated"}), 401
+
+        try:
+            # Get selected notebooks
+            selected_uuids = None
+            if not config.sync.sync_all_notebooks:
+                selected_uuids = config.sync.selected_notebooks
+
+            # Run initial sync
+            initial_sync = InitialSync(config, cloud_sync)
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                stats = loop.run_until_complete(initial_sync.run(selected_uuids))
+                return jsonify({
+                    "success": True,
+                    "message": "Initial sync complete",
+                    "stats": stats,
+                })
+            finally:
+                loop.close()
+
+        except Exception as e:
+            app.logger.error(f"Initial sync failed: {e}", exc_info=True)
+            return jsonify({"success": False, "message": str(e)}), 500
+
     @app.route("/api/test-connection", methods=["POST"])
     def api_test_connection():
         """Test connection to backend API."""
