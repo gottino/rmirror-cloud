@@ -627,8 +627,19 @@
         <!-- Actions Card -->
         <div class="card">
             <h2>Actions</h2>
+            <p style="color: var(--warm-gray); margin-bottom: 20px; font-size: 0.925em;">
+                <strong>Initial Sync:</strong> Upload all pages and content for your selected notebooks. Use this for first-time setup or to catch up after being offline. Respects your notebook selection above.
+            </p>
             <div class="button-group">
-                <button onclick="triggerSync()">Sync Now</button>
+                <button onclick="triggerInitialSync()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Initial Sync
+                </button>
+                <button class="secondary" onclick="triggerSync()">Sync Now</button>
                 <button class="secondary" onclick="refreshStatus()">Refresh Status</button>
             </div>
         </div>
@@ -833,6 +844,57 @@
                 showMessage('Connection test failed: ' + error.message, 'error');
             }
         }
+
+        // Trigger initial sync
+        async function triggerInitialSync() {
+            const button = event.target.closest('button');
+            const originalText = button.innerHTML;
+
+            try {
+                // Disable button and show loading state
+                button.disabled = true;
+                button.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite;">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 2v4"/>
+                    </svg>
+                    Syncing...
+                `;
+
+                const response = await fetch('/api/sync/initial', {
+                    method: 'POST',
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    const stats = data.stats;
+                    const message = `Initial sync complete! Synced ${stats.notebooks} notebook(s) with ${stats.pages} page(s).`;
+                    showMessage(message, 'success');
+
+                    // Refresh status after sync
+                    await refreshStatus();
+                } else {
+                    showMessage(data.message || 'Initial sync failed', 'error');
+                }
+            } catch (error) {
+                showMessage('Initial sync failed: ' + error.message, 'error');
+            } finally {
+                // Re-enable button
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        }
+
+        // Add spinning animation for loading state
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+        `;
+        document.head.appendChild(style);
 
         // Trigger sync
         async function triggerSync() {
