@@ -12,6 +12,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from app.models.notebook import Notebook
+from app.models.notebook_page import NotebookPage
 from app.models.page import Page
 from app.models.todo import Todo
 from app.processors.intelligent_todo_deduplication import (
@@ -239,12 +240,13 @@ def process_notebook_todos(
     # Get all pages with OCR text
     pages = (
         db.query(Page)
+        .join(NotebookPage, NotebookPage.page_id == Page.id)
         .filter(
-            Page.notebook_id == notebook_id,
+            NotebookPage.notebook_id == notebook_id,
             Page.ocr_text.isnot(None),
             Page.ocr_text != "",
         )
-        .order_by(Page.page_number)
+        .order_by(NotebookPage.page_number)
         .all()
     )
 

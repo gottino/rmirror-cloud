@@ -176,14 +176,16 @@ async def get_notebooks_tree(
     for nb in all_notebooks:
         if nb.document_type == "notebook":
             # Get most recent page with OCR text
+            # Use notebook_pages mapping to get the last page
             recent_page = (
                 db.query(Page)
+                .join(NotebookPage, NotebookPage.page_id == Page.id)
                 .filter(
-                    Page.notebook_id == nb.id,
+                    NotebookPage.notebook_id == nb.id,
                     Page.ocr_text.isnot(None),
                     Page.ocr_text != "",
                 )
-                .order_by(Page.page_number.desc())
+                .order_by(NotebookPage.page_number.desc())
                 .first()
             )
             if recent_page and recent_page.ocr_text:

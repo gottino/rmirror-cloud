@@ -83,14 +83,22 @@ async def get_clerk_user(
         # Decode without verification for now (user ID is in 'sub' claim)
         decoded = jwt.decode(token, options={"verify_signature": False})
 
-        # Extract Clerk user ID from the token
-        clerk_user_id = decoded.get("sub")
+        # Extract user ID from the token (could be Clerk ID or regular user ID)
+        sub = decoded.get("sub")
 
-        if not clerk_user_id:
+        if not sub:
             raise credentials_exception
 
-        # Find user in database by Clerk user ID
-        user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
+        # Try to find user by Clerk user ID first (for Clerk auth)
+        user = db.query(User).filter(User.clerk_user_id == sub).first()
+
+        # If not found, try finding by regular user ID (for password auth)
+        if user is None:
+            try:
+                user_id = int(sub)
+                user = db.query(User).filter(User.id == user_id).first()
+            except (ValueError, TypeError):
+                pass  # Not a valid integer, was probably a Clerk ID
 
         if user is None:
             raise HTTPException(

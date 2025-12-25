@@ -21,6 +21,7 @@ from app.core.rm_metadata import RMMetadataParser
 from app.database import get_db
 from app.dependencies import get_storage_service
 from app.models.notebook import Notebook, DocumentType
+from app.models.notebook_page import NotebookPage
 from app.models.page import Page, OcrStatus
 from app.models.user import User
 from app.storage import StorageService
@@ -218,11 +219,9 @@ async def process_rm_file(
         ).first()
 
         if not page:
-            # Count existing pages to determine page number
-            page_count = db.query(Page).filter(Page.notebook_id == notebook.id).count()
+            # Create new page (page_number is managed in notebook_pages mapping table)
             page = Page(
                 notebook_id=notebook.id,
-                page_number=page_count + 1,
                 page_uuid=page_uuid,
                 s3_key=storage_key,
                 pdf_s3_key=pdf_storage_key,
@@ -249,10 +248,16 @@ async def process_rm_file(
         logger.info(f"Regenerating combined PDF for notebook {notebook.id}")
         try:
             # Get all pages for this notebook, sorted by page number
-            all_pages = db.query(Page).filter(
-                Page.notebook_id == notebook.id,
-                Page.pdf_s3_key.isnot(None)
-            ).order_by(Page.page_number).all()
+            all_pages = (
+                db.query(Page)
+                .join(NotebookPage, NotebookPage.page_id == Page.id)
+                .filter(
+                    NotebookPage.notebook_id == notebook.id,
+                    Page.pdf_s3_key.isnot(None)
+                )
+                .order_by(NotebookPage.page_number)
+                .all()
+            )
 
             if all_pages:
                 # Download all page PDFs
