@@ -184,13 +184,39 @@ async def process_rm_file(
                 page_id=None,
             )
 
-        # Convert .rm to PDF
-        logger.info(f"Converting {rm_file.filename} to PDF")
-        pdf_bytes = converter.rm_to_pdf_bytes(temp_rm_path)
+        # Find or create Page record (before expensive OCR operations)
+        page = db.query(Page).filter(
+            Page.notebook_id == notebook.id,
+            Page.page_uuid == page_uuid
+        ).first()
 
-        # Extract text via Claude Vision OCR
-        logger.info(f"Extracting text from {rm_file.filename} via OCR")
-        extracted_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
+        # Check if we need to process this file (new file or file hash changed)
+        needs_processing = (
+            page is None or
+            page.file_hash != file_hash or
+            page.ocr_status == OcrStatus.FAILED or
+            (page.ocr_status == OcrStatus.COMPLETED and not page.ocr_text)
+        )
+
+        extracted_text = ""
+        pdf_bytes = None
+
+        if needs_processing:
+            # Convert .rm to PDF
+            logger.info(f"Converting {rm_file.filename} to PDF (file hash changed or new file)")
+            pdf_bytes = converter.rm_to_pdf_bytes(temp_rm_path)
+
+            # Extract text via Claude Vision OCR
+            logger.info(f"Extracting text from {rm_file.filename} via OCR")
+            extracted_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
+        else:
+            logger.info(f"Skipping OCR for {rm_file.filename} - file unchanged (hash: {file_hash})")
+            # File unchanged - reuse existing OCR text and PDF
+            extracted_text = page.ocr_text or ""
+            # Still need to convert to PDF for storage if it doesn't exist
+            if not page.pdf_s3_key:
+                logger.info(f"Converting {rm_file.filename} to PDF (missing PDF)")
+                pdf_bytes = converter.rm_to_pdf_bytes(temp_rm_path)
 
         # Store .rm file in storage
         storage_key = f"users/{current_user.id}/notebooks/{notebook_uuid}/pages/{page_uuid}.rm"
@@ -202,22 +228,18 @@ async def process_rm_file(
         )
         logger.info(f"Stored .rm file at: {storage_key}")
 
-        # Store page PDF
+        # Store page PDF (if we generated one)
         pdf_storage_key = f"users/{current_user.id}/notebooks/{notebook_uuid}/pages/{page_uuid}.pdf"
-        pdf_stream = BytesIO(pdf_bytes)
-        await storage.upload_file(
-            pdf_stream,
-            pdf_storage_key,
-            content_type="application/pdf"
-        )
-        logger.info(f"Stored page PDF at: {pdf_storage_key}")
+        if pdf_bytes:
+            pdf_stream = BytesIO(pdf_bytes)
+            await storage.upload_file(
+                pdf_stream,
+                pdf_storage_key,
+                content_type="application/pdf"
+            )
+            logger.info(f"Stored page PDF at: {pdf_storage_key}")
 
-        # Find or create Page record
-        page = db.query(Page).filter(
-            Page.notebook_id == notebook.id,
-            Page.page_uuid == page_uuid
-        ).first()
-
+        # Create or update Page record
         if not page:
             # Create new page (page_number is managed in notebook_pages mapping table)
             page = Page(
@@ -226,20 +248,23 @@ async def process_rm_file(
                 s3_key=storage_key,
                 pdf_s3_key=pdf_storage_key,
                 file_hash=file_hash,
-                ocr_status=OcrStatus.PROCESSING,
+                ocr_status=OcrStatus.COMPLETED if needs_processing else OcrStatus.PENDING,
+                ocr_text=extracted_text,
+                ocr_completed_at=datetime.utcnow() if needs_processing else None,
             )
             db.add(page)
         else:
             # Update existing page
             page.s3_key = storage_key
-            page.pdf_s3_key = pdf_storage_key
+            if pdf_bytes:
+                page.pdf_s3_key = pdf_storage_key
             page.file_hash = file_hash
-            page.ocr_status = OcrStatus.PROCESSING
 
-        # Save OCR results
-        page.ocr_text = extracted_text
-        page.ocr_status = OcrStatus.COMPLETED
-        page.ocr_completed_at = datetime.utcnow()
+            # Only update OCR results if we actually processed the file
+            if needs_processing:
+                page.ocr_text = extracted_text
+                page.ocr_status = OcrStatus.COMPLETED
+                page.ocr_completed_at = datetime.utcnow()
 
         db.commit()
         db.refresh(page)
