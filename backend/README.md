@@ -6,10 +6,13 @@ FastAPI backend for rMirror Cloud - a cloud service that brings your reMarkable 
 
 - **Notebook Management** - Store and manage reMarkable notebooks in the cloud
 - **OCR Processing** - Extract text from handwritten notes using Claude Vision API
+- **OCR Deduplication** - SHA-256 file hashing to prevent re-processing unchanged files
 - **Todo Extraction** - Automatically detect and extract todo items from checkbox patterns
 - **Notion Integration** - Sync notebooks to Notion with markdown formatting
+- **Initial Sync** - Bulk upload functionality for catch-up scenarios
+- **PostgreSQL Support** - Automated migration from SQLite to PostgreSQL
 - **RESTful API** - Comprehensive API for all features
-- **User Authentication** - Secure JWT-based authentication
+- **OAuth Authentication** - Secure Clerk-based authentication with local development mode
 - **Database Migrations** - Alembic for schema version control
 
 ## Quick Start
@@ -90,11 +93,23 @@ S3_SECRET_KEY=your-secret-key
 
 ## Documentation
 
+### Quick References
 - **[📖 Complete Documentation](../docs/)** - Full project documentation
+- **[CHANGELOG](../CHANGELOG.md)** - Complete project changelog with all changes
+
+### New Features (December 2025)
+- **[OCR Deduplication Guide](OCR_DEDUPLICATION.md)** - Hash-based deduplication system
+- **[Utilities Guide](UTILITIES_GUIDE.md)** - Complete utilities documentation
+- **[Authentication & Security](AUTHENTICATION_SECURITY.md)** - OAuth and development mode
+- **[PostgreSQL Migration Guide](scripts/POSTGRES_MIGRATION.md)** - Automated PostgreSQL migration
+- **[Initial Sync Feature](../agent/INITIAL_SYNC_FEATURE.md)** - Bulk upload documentation
+
+### General Documentation
 - **[API Reference](../docs/api/backend-api.md)** - Complete API endpoint documentation
 - **[Setup Guide](../docs/development/setup.md)** - Detailed setup instructions
 - **[Deployment Guide](../docs/deployment/hetzner.md)** - Production deployment on Hetzner
 - **[GitHub Actions](../docs/deployment/github-actions.md)** - Automated deployment setup
+- **[Clerk Setup](CLERK_SETUP.md)** - Clerk authentication configuration
 
 ## Project Structure
 
@@ -157,6 +172,50 @@ backend/
 - `POST /v1/sync/notebook/{id}` - Sync notebook to Notion
 
 See [API_REFERENCE.md](API_REFERENCE.md) for complete endpoint documentation.
+
+## Utility Scripts
+
+### OCR Hash Management
+
+**Backfill file hashes for existing pages:**
+```bash
+# Basic hash backfilling
+poetry run python backfill_page_hashes.py /path/to/remarkable/source
+
+# Advanced metadata-based backfilling
+poetry run python backfill_by_metadata.py /path/to/remarkable/source
+
+# Targeted notebook backfilling
+poetry run python backfill_specific_notebooks.py
+```
+
+**Check hash coverage and sync integrity:**
+```bash
+# Generate hash coverage report
+poetry run python hash_coverage_report.py
+
+# Show missing pages summary
+poetry run python show_missing_pages_summary.py
+
+# Compare database with .content files
+poetry run python check_content_vs_db.py
+```
+
+See [OCR Deduplication Guide](OCR_DEDUPLICATION.md) for complete documentation.
+
+### PostgreSQL Migration
+
+**Automated migration from SQLite:**
+```bash
+# SSH to production
+ssh deploy@your-server.com
+cd /var/www/rmirror-cloud/backend
+
+# Run automated migration
+sudo -E ./scripts/migrate_to_postgres.sh
+```
+
+See [PostgreSQL Migration Guide](scripts/POSTGRES_MIGRATION.md) for details.
 
 ## Development
 

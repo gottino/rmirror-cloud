@@ -9,6 +9,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### OCR Deduplication System (2025-12-26)
+- **SHA-256 file hashing** for .rm files to track content changes
+- **Smart OCR deduplication** - skips OCR processing for unchanged files
+- **Hash backfilling utilities** for existing pages without hashes
+  - `backfill_page_hashes.py` - Backfill hashes from reMarkable source directory
+  - `backfill_by_metadata.py` - Advanced metadata-based backfilling
+  - `backfill_specific_notebooks.py` - Targeted notebook hash backfilling
+- **Hash coverage reporting** - `hash_coverage_report.py` to analyze coverage by notebook
+- **Missing pages detection** - `show_missing_pages_summary.py` utility
+- **Database comparison tool** - `check_content_vs_db.py` to verify sync integrity
+
+#### Initial Sync Feature (2025-12-25)
+- **Initial Sync API endpoint** for catch-up scenarios
+- **Web UI Initial Sync button** in agent interface at localhost:5555
+- **Bulk notebook upload** functionality
+- **Smart selective sync** respecting notebook selection configuration
+- Support for first-time setup and offline catch-up scenarios
+
+#### Page Ordering Improvements (2025-12-25)
+- **Use .content files as source of truth** for notebook page ordering
+- **Orphan page migration** - move pages to correct notebooks based on .content files
+- **cPages format support** for newer reMarkable firmware
+- **Automatic duplicate page removal** during sync
+- **Removed page_number column** from pages table (now in mapping table)
+- Pages ordered correctly in API responses
+
+#### PostgreSQL Migration (2025-12-22)
+- **Fully automated migration script** - `migrate_to_postgres.sh`
+- **Interactive setup** with colored output and confirmations
+- **Automatic data migration** from SQLite to PostgreSQL
+- **Boolean type conversion** handling for SQLite to PostgreSQL migration
+- **All tables migration** including agent_registrations
+- **Quick start guide** in `scripts/POSTGRES_MIGRATION.md`
+
+#### Dashboard Design System (2025-12-20 to 2025-12-21)
+- **Unified design system** with warm, sophisticated color palette
+- **Mobile-responsive sidebar** with collapsible navigation
+- **OCR content previews** in page listings
+- **Folder navigation with breadcrumbs** for notebook hierarchy
+- **Improved notebook detail view** aligned with design system
+- **Better logo spacing and alignment** in header
+
+#### Selective Notebook Sync (2025-12-19)
+- **Notebook selection UI** with collapsible folders
+- **Date-based notebook grouping** for easier selection
+- **Free tier sync limits** with selective sync configuration
+- **Standalone app mode** with auto-launch browser
+- **Default browser detection** on macOS
+
+#### Authentication & Security (2025-12-16 to 2025-12-21)
+- **Local development mode** with secure authentication bypass
+  - DEBUG-gated dev-mode-bypass token (backend only when DEBUG=true)
+  - NEXT_PUBLIC_DEV_MODE flag for dashboard development
+  - Production security remains unchanged with full Clerk authentication
+- **OAuth authentication** and onboarding tracking
+- **Clerk authentication** for all sync and processing endpoints
+- **Immediate file watcher start** after authentication
+- **Agent registration logging** for debugging
+
+#### Deployment & Infrastructure (2025-12-07 to 2025-12-08)
+- **Backblaze B2 storage configuration** for production file storage
+- **macOS installer build system** with automated deployment
+- **Beta page** with installer download functionality
+- **Automated nginx config deployment** with landing pages
+- **Production nginx configuration** with beta.html support
+- **Deployment workflow improvements** with git conflict resolution
+- **Test user cleanup utility** for development
+
+#### Email Notifications (2025-12-07)
+- **Resend email integration** for user communications
+- **Welcome email** sent on user registration
+- **Email monitoring** and notification system
+- **Secure API key management** via GitHub Secrets
+- **Webhook signature verification** using official Svix library
+
+#### UI/UX Improvements (2025-12-17)
+- **Improved notebook page UI** with better layout
+- **Next.js security update** to version 15.5.9
+- **React state management fixes** for better performance
+- **Home icon conflict resolution** with lucide-react
+
+### Changed
+
 #### Mac Agent (2025-11-19)
 - Python-based background service for automatic reMarkable sync
 - Real-time file watching with watchdog library
@@ -80,17 +163,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-#### Mac Agent (2025-11-21)
+#### Database & Schema (2025-12-25)
+- **Removed page_number column references** after migration to mapping table
+- **Fixed page_number retrieval** from notebook_pages mapping table
+- **Handle cPages format** correctly for newer reMarkable firmware
+- **Remove duplicate pages** automatically during sync
+- **Ensure correct page ordering** in API responses
+
+#### PostgreSQL Migration (2025-12-22 to 2025-12-23)
+- **Include all tables** in migration script (agent_registrations, etc.)
+- **Convert SQLite integers to PostgreSQL booleans** correctly
+- **Use full Poetry path** in migration script for reliability
+- Made database migration idempotent to handle partial failures
+
+#### Authentication & Security (2025-12-21)
+- **Removed hardcoded authentication bypass** from production
+- **Fixed development mode** to only work when DEBUG=true
+- **Clerk authentication** properly enforced on all endpoints
+
+#### Dashboard & UI (2025-12-17 to 2025-12-21)
+- **Resolve Home naming conflict** with lucide-react icons
+- **Fix useState placement** outside map function for React best practices
+- **Update Next.js** to 15.5.9 to patch security vulnerabilities
+- **Improve logo icon spacing** and alignment in header
+
+#### Deployment & Infrastructure (2025-12-08)
+- **Update last_synced_at** timestamp when syncing existing notebooks
+- **Resolve deployment workflow** git conflicts and shell escaping
+- **Correct Clerk redirect URLs** to /beta.html
+- **Fix env variable injection** in deployment scripts
+- **Use official Svix library** for webhook signature verification
+
+#### macOS Agent (2025-12-19)
+- **Use default browser** on macOS for opening web UI
+- **Fix config validation** for YAML settings
 - Removed redundant OCR trigger call causing 404 errors (OCR is automatic in /v1/processing/rm-file)
 - Fixed async function handling in Flask web UI routes
 
-- Made database migration idempotent to handle partial failures (2025-11-15)
-- Added server_default for boolean columns in migration (2025-11-15)
-- Fixed sudoers wildcards for systemctl flags (2025-11-10)
-- Added both `/usr/bin/systemctl` and `/bin/systemctl` paths to sudoers (2025-11-10)
-- Updated git pull to occur before deployment (2025-11-10)
-- Auto-detect Poetry installation path in deploy script (2025-11-10)
-- Updated Poetry install command for modern Poetry versions (2025-11-10)
+#### Older Fixes (2025-11-10 to 2025-11-15)
+- Added server_default for boolean columns in migration
+- Fixed sudoers wildcards for systemctl flags
+- Added both `/usr/bin/systemctl` and `/bin/systemctl` paths to sudoers
+- Updated git pull to occur before deployment
+- Auto-detect Poetry installation path in deploy script
+- Updated Poetry install command for modern Poetry versions
 
 ---
 

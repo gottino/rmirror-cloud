@@ -29,27 +29,38 @@ The rMirror Cloud platform consists of three main components:
 - **[Architecture Overview](architecture.md)** - System architecture and component relationships
 - **[Development Setup](development/setup.md)** - Set up your development environment
 - **[Quick Start Guide](#quick-start)** - Get up and running in 5 minutes
+- **[Documentation Index](development/DOCUMENTATION_INDEX.md)** - Complete documentation catalog
+
+### Development Guides
+
+- **[Development Setup](development/setup.md)** - Detailed development environment setup
+- **[OCR Deduplication Guide](development/OCR_DEDUPLICATION.md)** - SHA-256 file hashing system for OCR cost reduction
+- **[Utilities Guide](development/UTILITIES_GUIDE.md)** - Database utilities, hash backfilling, and maintenance tools
+- **[Authentication & Security](development/AUTHENTICATION_SECURITY.md)** - OAuth with Clerk, development mode, security best practices
+- **[Contributing Guidelines](../CONTRIBUTING.md)** - How to contribute to the project
 
 ### API Documentation
 
 - **[Backend API Reference](api/backend-api.md)** - Complete REST API endpoint documentation
   - Authentication endpoints
-  - Notebook management
+  - Notebook management (including Initial Sync)
+  - Processing & OCR (with deduplication)
   - Todo extraction and management
+  - Agent management
   - Integrations (Notion, etc.)
   - Sync operations
 
-### Deployment
+### Deployment Guides
 
 - **[Hetzner Deployment](deployment/hetzner.md)** - Production deployment on Hetzner Cloud
 - **[GitHub Actions CI/CD](deployment/github-actions.md)** - Automated deployment setup
+- **[Resend Email Setup](deployment/RESEND_SETUP.md)** - Configure Resend for transactional emails
 - **[Deployment Automation](deployment/automation.md)** - Scripts and automation tools
 
-### Development
+### Architecture
 
-- **[Development Setup](development/setup.md)** - Detailed development environment setup
-- **[Contributing Guidelines](../CONTRIBUTING.md)** - How to contribute to the project
-- **[Project Context](../CONTEXT.md)** - Project history and context
+- **[Architecture Overview](architecture.md)** - System design and component relationships
+- **[Project Context](../CONTEXT.md)** - Project history and background
 
 ---
 
@@ -326,9 +337,18 @@ DATABASE_URL=sqlite:///./rmirror.db
 # Security
 SECRET_KEY=your-dev-secret-key
 ACCESS_TOKEN_EXPIRE_MINUTES=10080
+DEBUG=true  # Enables development mode authentication
 
-# Claude API
+# Claude API (for OCR)
 CLAUDE_API_KEY=your-claude-api-key
+
+# Clerk Authentication
+CLERK_SECRET_KEY=your-dev-clerk-key
+CLERK_WEBHOOK_SECRET=your-webhook-secret
+
+# Email Service (Resend)
+RESEND_API_KEY=re_your_dev_api_key
+RESEND_FROM_EMAIL=onboarding@resend.dev  # Use this for testing
 
 # Notion (optional for testing)
 NOTION_CLIENT_ID=your-client-id
@@ -344,15 +364,28 @@ DATABASE_URL=postgresql://user:password@localhost:5432/rmirror
 # Security (use strong random key)
 SECRET_KEY=production-secret-key-min-32-chars
 ACCESS_TOKEN_EXPIRE_MINUTES=10080
+DEBUG=false  # CRITICAL: Must be false in production
 
-# Claude API
+# Claude API (for OCR)
 CLAUDE_API_KEY=your-production-claude-api-key
+
+# Clerk Authentication
+CLERK_SECRET_KEY=sk_live_your_production_key
+CLERK_WEBHOOK_SECRET=whsec_your_webhook_secret
+
+# Email Service (Resend)
+RESEND_API_KEY=re_your_production_api_key
+RESEND_FROM_EMAIL=noreply@yourdomain.com  # Use verified domain
 
 # Notion
 NOTION_CLIENT_ID=your-production-client-id
 NOTION_CLIENT_SECRET=your-production-client-secret
 NOTION_REDIRECT_URI=https://yourdomain.com/v1/integrations/notion/callback
 ```
+
+**See also:**
+- [Resend Setup Guide](deployment/RESEND_SETUP.md) - Complete Resend configuration
+- [Authentication & Security Guide](development/AUTHENTICATION_SECURITY.md) - Clerk setup and security
 
 ---
 
@@ -439,4 +472,4 @@ This project is proprietary software. All rights reserved.
 🟢 **Mac Agent** - Beta (core functionality complete)
 🔴 **Web Dashboard** - Planned
 
-Last updated: November 2025
+Last updated: December 2025

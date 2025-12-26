@@ -18,8 +18,9 @@ Authorization: Bearer <your_token>
 3. [Notebooks](#notebooks)
 4. [Processing & OCR](#processing--ocr)
 5. [Todos](#todos)
-6. [Integrations](#integrations)
-7. [Sync](#sync)
+6. [Agent Management](#agent-management)
+7. [Integrations](#integrations)
+8. [Sync](#sync)
 
 ---
 
@@ -225,9 +226,91 @@ Get the full notebook content in markdown format with OCR text.
 }
 ```
 
+### Upload Content File for Initial Sync
+
+Upload and parse a `.content` file to update the notebook_pages mapping table. This endpoint is used during Initial Sync to establish the correct page order for a notebook.
+
+**Endpoint:** `POST /notebooks/{notebook_uuid}/content`
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+- Form data with file field: `content_file` (the `.content` JSON file)
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Content file processed successfully",
+  "notebook_uuid": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+  "pages_in_content": 15,
+  "pages_mapped": 15
+}
+```
+
+**What it does:**
+1. Accepts a `.content` JSON file for a notebook
+2. Parses the pages array (handles both old and new reMarkable formats)
+3. Updates the `notebook_pages` mapping table with correct page order
+4. Stores the `.content` JSON in the notebooks table
+
+**Use cases:**
+- Initial Sync: Bulk uploading all pages for a notebook
+- Catch-up Sync: Syncing pages added while agent was offline
+- Re-ordering pages after reMarkable changes
+
 ---
 
 ## Processing & OCR
+
+### Process .rm File with OCR Deduplication
+
+Process a reMarkable `.rm` file: convert to PDF, extract text via OCR, and save to database. This endpoint uses SHA-256 file hashing to avoid re-processing unchanged files.
+
+**Endpoint:** `POST /processing/rm-file`
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+- Form data with file fields:
+  - `rm_file`: The `.rm` file from reMarkable tablet (required)
+  - `metadata_file`: Optional `.metadata` JSON file for notebook metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "extracted_text": "Your handwritten text here...",
+  "page_count": 1,
+  "metadata": {
+    "visible_name": "My Notebook",
+    "document_type": "DocumentType",
+    "last_modified": "2025-12-26T12:00:00"
+  },
+  "notebook_id": 123,
+  "page_id": 456
+}
+```
+
+**Behavior:**
+- **New file**: Calculates hash, runs OCR, stores hash and text
+- **Unchanged file**: Compares hash, skips OCR, returns cached text (90% cost reduction)
+- **Modified file**: Detects hash change, runs OCR, updates hash and text
+- **Failed OCR**: Retries OCR even if hash matches
+
+**What it does:**
+1. Accepts a `.rm` file (and optional `.metadata` file)
+2. Calculates SHA-256 hash and checks if file changed
+3. Converts .rm → SVG → PDF (if needed)
+4. Sends PDF to Claude Vision for OCR (if needed)
+5. Creates/updates Notebook and Page records in database
+6. Stores `.rm` file and PDF in storage
+7. Returns extracted text with database IDs
+
+**Performance benefits:**
+- Avoids redundant OCR for unchanged pages
+- 90-95% cost reduction for OCR API calls
+- 85-90% faster sync operations
 
 ### Trigger OCR Processing
 
@@ -419,6 +502,65 @@ Get statistics about todos for the current user.
 
 ---
 
+## Agent Management
+
+### Get Agent Status
+
+Get current agent connection status for the authenticated user.
+
+**Endpoint:** `GET /agents/status`
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response:**
+```json
+{
+  "has_agent_connected": true,
+  "first_connected_at": "2025-12-01T10:30:00Z",
+  "onboarding_state": "agent_connected"
+}
+```
+
+**Onboarding States:**
+- `signed_up`: User created account
+- `agent_downloaded`: User downloaded the macOS agent
+- `agent_connected`: Agent successfully connected to backend
+- `complete`: Onboarding completed
+
+### Mark Agent as Downloaded
+
+Track when a user downloads the macOS agent. Updates onboarding state and tracks download timestamp.
+
+**Endpoint:** `POST /agents/agent-downloaded`
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response:**
+```json
+{
+  "message": "Agent download tracked successfully"
+}
+```
+
+**What it does:**
+- Records agent download timestamp
+- Updates onboarding state from `signed_up` to `agent_downloaded`
+- Used by download page to track onboarding progress
+
+### Trigger Agent (Future)
+
+*Note: These endpoints are planned for future releases when agent triggering is implemented.*
+
+**Endpoint:** `POST /agents/{target_name}/trigger` (Planned)
+
+Trigger a specific agent operation (e.g., force sync).
+
+**Endpoint:** `GET /agents/{target_name}/test` (Planned)
+
+Test agent connectivity and configuration.
+
+---
+
 ## Integrations
 
 ### List Integrations
@@ -560,14 +702,75 @@ Get overall sync statistics for the user.
 **Response:**
 ```json
 {
+  "target_name": "notion",
+  "total_records": 50,
+  "status_counts": {
+    "synced": 48,
+    "pending": 2,
+    "failed": 0
+  },
+  "target_counts": {
+    "notion": 50
+  },
+  "type_counts": {
+    "notebook": 45,
+    "todo": 5
+  }
+}
+```
+
+### Get Sync Summary
+
+Get a summary of sync statistics across all integrations.
+
+**Endpoint:** `GET /sync/stats/summary`
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response:**
+```json
+{
   "total_notebooks": 393,
   "synced_notebooks": 25,
   "pending_notebooks": 368,
   "total_syncs": 50,
   "successful_syncs": 48,
-  "failed_syncs": 2
+  "failed_syncs": 2,
+  "last_sync_at": "2025-12-26T15:30:00Z"
 }
 ```
+
+### Update Sync Progress (Agent)
+
+Update sync progress from the macOS agent. This endpoint is called by the agent to report sync progress during bulk operations.
+
+**Endpoint:** `POST /sync/progress`
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "operation": "initial_sync",
+  "notebooks_total": 100,
+  "notebooks_completed": 25,
+  "pages_uploaded": 350,
+  "current_notebook": "Meeting Notes"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Progress updated successfully"
+}
+```
+
+**What it does:**
+- Receives progress updates from agent during long-running operations
+- Can be polled by frontend to show progress UI
+- Used during Initial Sync to show real-time progress
 
 ---
 
