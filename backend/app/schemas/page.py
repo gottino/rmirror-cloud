@@ -20,6 +20,7 @@ class Page(PageBase):
     ocr_status: str
     ocr_text: str | None = None
     ocr_error: str | None = None
+    pdf_s3_key: str | None = None
     created_at: datetime
     updated_at: datetime
 

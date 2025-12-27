@@ -5,7 +5,255 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
-import { getNotebook, type NotebookWithPages } from '@/lib/api';
+import { getNotebook, type NotebookWithPages, type Page } from '@/lib/api';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
+
+interface PageCardProps {
+  page: Page;
+  token: string;
+  copiedPageId: number | null;
+  setCopiedPageId: (id: number | null) => void;
+}
+
+function PageCard({ page, token, copiedPageId, setCopiedPageId }: PageCardProps) {
+  const [showPdf, setShowPdf] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfBlob, setPdfBlob] = useState<string | null>(null);
+  const [loadingPdf, setLoadingPdf] = useState(false);
+  const hasPdf = !!page.pdf_s3_key;
+
+  const handleCopy = async () => {
+    if (page.ocr_text) {
+      await navigator.clipboard.writeText(page.ocr_text);
+      setCopiedPageId(page.id);
+      setTimeout(() => setCopiedPageId(null), 2000);
+    }
+  };
+
+  const handleTogglePdf = async () => {
+    if (!hasPdf) return;
+
+    if (!showPdf && !pdfBlob) {
+      // Fetch PDF with authentication
+      setLoadingPdf(true);
+      try {
+        const url = `${API_URL}/pages/${page.id}/pdf`;
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to load PDF');
+        }
+
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        setPdfBlob(blobUrl);
+      } catch (error) {
+        console.error('Error loading PDF:', error);
+      } finally {
+        setLoadingPdf(false);
+      }
+    }
+
+    setShowPdf(!showPdf);
+  };
+
+  return (
+    <div
+      className="relative transition-all duration-500 ease-in-out"
+      style={{
+        perspective: '1000px',
+        marginBottom: showPdf ? '1.5rem' : '0',
+      }}
+    >
+      {/* Stack indicator - shows when PDF is available */}
+      {hasPdf && !showPdf && (
+        <>
+          <div
+            className="absolute inset-0 rounded-lg"
+            style={{
+              backgroundColor: 'var(--card)',
+              border: '1px solid var(--border)',
+              transform: 'translateY(-4px) translateX(4px)',
+              zIndex: -2,
+              opacity: 0.4,
+            }}
+          />
+          <div
+            className="absolute inset-0 rounded-lg"
+            style={{
+              backgroundColor: 'var(--card)',
+              border: '1px solid var(--border)',
+              transform: 'translateY(-2px) translateX(2px)',
+              zIndex: -1,
+              opacity: 0.7,
+            }}
+          />
+        </>
+      )}
+
+      {/* Main card with flip animation */}
+      <div
+        className="relative rounded-lg transition-all duration-500 ease-in-out"
+        style={{
+          backgroundColor: 'var(--card)',
+          border: '1px solid var(--border)',
+          transformStyle: 'preserve-3d',
+          transform: showPdf ? 'rotateY(180deg)' : 'rotateY(0deg)',
+          height: showPdf ? '800px' : 'auto',
+        }}
+      >
+        {/* Front: Text content */}
+        <div
+          className="rounded-lg"
+          style={{
+            backfaceVisibility: 'hidden',
+            backgroundColor: 'var(--card)',
+            position: showPdf ? 'absolute' : 'relative',
+            inset: showPdf ? '0' : 'auto',
+            overflow: showPdf ? 'auto' : 'visible',
+          }}
+        >
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-4">
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--warm-charcoal)' }}>
+              Page {page.page_number}
+            </h3>
+
+            <div className="flex items-center gap-3">
+              {hasPdf && (
+                <button
+                  onClick={handleTogglePdf}
+                  className="p-2 rounded transition-colors hover:bg-[var(--soft-cream)]"
+                  style={{ color: 'var(--terracotta)' }}
+                  title="View PDF"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                </button>
+              )}
+
+              {page.ocr_status === 'completed' && page.ocr_text && (
+                <button
+                  onClick={handleCopy}
+                  className="p-2 rounded transition-colors hover:bg-[var(--soft-cream)]"
+                  style={{ color: 'var(--warm-gray)' }}
+                  title="Copy markdown"
+                >
+                  {copiedPageId === page.id ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: 'var(--sage-green)' }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  )}
+                </button>
+              )}
+
+              <span
+                className="px-3 py-1 rounded-full"
+                style={{
+                  fontSize: '0.875em',
+                  fontWeight: 500,
+                  backgroundColor: page.ocr_status === 'completed'
+                    ? 'rgba(122, 156, 137, 0.15)'
+                    : page.ocr_status === 'processing'
+                    ? 'rgba(212, 165, 116, 0.15)'
+                    : page.ocr_status === 'failed'
+                    ? 'rgba(220, 38, 38, 0.15)'
+                    : 'var(--soft-cream)',
+                  color: page.ocr_status === 'completed'
+                    ? 'var(--sage-green)'
+                    : page.ocr_status === 'processing'
+                    ? 'var(--amber-gold)'
+                    : page.ocr_status === 'failed'
+                    ? 'var(--destructive)'
+                    : 'var(--warm-gray)'
+                }}
+              >
+                {page.ocr_status}
+              </span>
+            </div>
+          </div>
+
+          {page.ocr_status === 'completed' && page.ocr_text ? (
+            <div className="prose prose-sm sm:prose max-w-none prose-headings:font-semibold prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg prose-p:text-[var(--warm-charcoal)] prose-ul:text-[var(--warm-charcoal)] prose-ol:text-[var(--warm-charcoal)] prose-li:text-[var(--warm-charcoal)] prose-strong:text-[var(--warm-charcoal)] prose-a:text-[var(--terracotta)] hover:prose-a:opacity-80">
+              <ReactMarkdown>{page.ocr_text}</ReactMarkdown>
+            </div>
+          ) : page.ocr_status === 'failed' && page.ocr_error ? (
+            <div className="rounded p-4" style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.2)' }}>
+              <p style={{ color: 'var(--destructive)', fontWeight: 500, marginBottom: '0.5rem' }}>OCR Failed</p>
+              <p style={{ color: 'var(--destructive)', fontSize: '0.875em', opacity: 0.8 }}>{page.ocr_error}</p>
+            </div>
+          ) : page.ocr_status === 'processing' ? (
+            <div className="rounded p-4 flex items-center" style={{ backgroundColor: 'rgba(212, 165, 116, 0.1)', border: '1px solid rgba(212, 165, 116, 0.2)' }}>
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 mr-3" style={{ borderColor: 'var(--amber-gold)' }}></div>
+              <p style={{ color: 'var(--amber-gold)', fontWeight: 500 }}>Processing OCR...</p>
+            </div>
+          ) : (
+            <div className="rounded p-4" style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}>
+              <p style={{ color: 'var(--warm-gray)' }}>OCR pending</p>
+            </div>
+          )}
+          </div>
+        </div>
+
+        {/* Back: PDF viewer */}
+        {hasPdf && (
+          <div
+            className="absolute inset-0 p-6 rounded-lg flex flex-col"
+            style={{
+              backfaceVisibility: 'hidden',
+              transform: 'rotateY(180deg)',
+              backgroundColor: 'var(--card)',
+            }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--warm-charcoal)' }}>
+                Page {page.page_number} - PDF
+              </h3>
+
+              <button
+                onClick={handleTogglePdf}
+                className="p-2 rounded transition-colors hover:bg-[var(--soft-cream)]"
+                style={{ color: 'var(--terracotta)' }}
+                title="Back to text"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {loadingPdf ? (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--terracotta)' }}></div>
+              </div>
+            ) : pdfBlob ? (
+              <iframe
+                src={pdfBlob}
+                className="w-full rounded"
+                style={{ border: '1px solid var(--border)', height: 'calc(100% - 4rem)' }}
+                title={`Page ${page.page_number} PDF`}
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center">
+                <p style={{ color: 'var(--warm-gray)' }}>Click to load PDF</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function NotebookPage() {
   const params = useParams();
@@ -15,8 +263,9 @@ export default function NotebookPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedPageId, setCopiedPageId] = useState<number | null>(null);
+  const [authToken, setAuthToken] = useState<string>('');
 
-  // Development mode bypass
+  // Development mode: use JWT token from localStorage
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
 
@@ -28,11 +277,17 @@ export default function NotebookPage() {
 
     const fetchNotebook = async () => {
       try {
-        // In dev mode, use a mock token that bypasses Clerk
-        const token = isDevelopmentMode ? 'dev-mode-bypass' : await getToken();
+        // In dev mode, get JWT token from localStorage (set via /login command or password auth)
+        const token = isDevelopmentMode
+          ? localStorage.getItem('dev_auth_token') || ''
+          : await getToken();
+
         if (!token) {
           throw new Error('Failed to get authentication token');
         }
+
+        // Store token for PDF fetching
+        setAuthToken(token);
 
         const id = Number(params.id);
         if (isNaN(id)) {
@@ -169,94 +424,15 @@ export default function NotebookPage() {
           </div>
         ) : (
           <div className="space-y-6">
-            {sortedPages.map((page) => {
-              const handleCopy = async () => {
-                if (page.ocr_text) {
-                  await navigator.clipboard.writeText(page.ocr_text);
-                  setCopiedPageId(page.id);
-                  setTimeout(() => setCopiedPageId(null), 2000);
-                }
-              };
-
-              return (
-                <div
-                  key={page.id}
-                  className="rounded-lg p-6 relative"
-                  style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
-                >
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--warm-charcoal)' }}>
-                      Page {page.page_number}
-                    </h3>
-
-                    <div className="flex items-center gap-3">
-                      {page.ocr_status === 'completed' && page.ocr_text && (
-                        <button
-                          onClick={handleCopy}
-                          className="p-2 rounded transition-colors hover:bg-[var(--soft-cream)]"
-                          style={{ color: 'var(--warm-gray)' }}
-                          title="Copy markdown"
-                        >
-                          {copiedPageId === page.id ? (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: 'var(--sage-green)' }}>
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                          ) : (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                            </svg>
-                          )}
-                        </button>
-                      )}
-
-                      <span
-                        className="px-3 py-1 rounded-full"
-                        style={{
-                          fontSize: '0.875em',
-                          fontWeight: 500,
-                          backgroundColor: page.ocr_status === 'completed'
-                            ? 'rgba(122, 156, 137, 0.15)'
-                            : page.ocr_status === 'processing'
-                            ? 'rgba(212, 165, 116, 0.15)'
-                            : page.ocr_status === 'failed'
-                            ? 'rgba(220, 38, 38, 0.15)'
-                            : 'var(--soft-cream)',
-                          color: page.ocr_status === 'completed'
-                            ? 'var(--sage-green)'
-                            : page.ocr_status === 'processing'
-                            ? 'var(--amber-gold)'
-                            : page.ocr_status === 'failed'
-                            ? 'var(--destructive)'
-                            : 'var(--warm-gray)'
-                        }}
-                      >
-                        {page.ocr_status}
-                      </span>
-                    </div>
-                  </div>
-
-                  {page.ocr_status === 'completed' && page.ocr_text ? (
-                    <div className="prose prose-sm sm:prose max-w-none prose-headings:font-semibold prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg prose-p:text-[var(--warm-charcoal)] prose-ul:text-[var(--warm-charcoal)] prose-ol:text-[var(--warm-charcoal)] prose-li:text-[var(--warm-charcoal)] prose-strong:text-[var(--warm-charcoal)] prose-a:text-[var(--terracotta)] hover:prose-a:opacity-80">
-                      <ReactMarkdown>{page.ocr_text}</ReactMarkdown>
-                    </div>
-                  ) : page.ocr_status === 'failed' && page.ocr_error ? (
-                    <div className="rounded p-4" style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.2)' }}>
-                      <p style={{ color: 'var(--destructive)', fontWeight: 500, marginBottom: '0.5rem' }}>OCR Failed</p>
-                      <p style={{ color: 'var(--destructive)', fontSize: '0.875em', opacity: 0.8 }}>{page.ocr_error}</p>
-                    </div>
-                  ) : page.ocr_status === 'processing' ? (
-                    <div className="rounded p-4 flex items-center" style={{ backgroundColor: 'rgba(212, 165, 116, 0.1)', border: '1px solid rgba(212, 165, 116, 0.2)' }}>
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 mr-3" style={{ borderColor: 'var(--amber-gold)' }}></div>
-                      <p style={{ color: 'var(--amber-gold)', fontWeight: 500 }}>Processing OCR...</p>
-                    </div>
-                  ) : (
-                    <div className="rounded p-4" style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}>
-                      <p style={{ color: 'var(--warm-gray)' }}>OCR pending</p>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {sortedPages.map((page) => (
+              <PageCard
+                key={page.id}
+                page={page}
+                token={authToken}
+                copiedPageId={copiedPageId}
+                setCopiedPageId={setCopiedPageId}
+              />
+            ))}
           </div>
         )}
         </div>

@@ -27,6 +27,7 @@ export interface Page {
   ocr_status: string;
   ocr_text: string | null;
   ocr_error: string | null;
+  pdf_s3_key: string | null;
   created_at: string;
   updated_at: string;
 }
