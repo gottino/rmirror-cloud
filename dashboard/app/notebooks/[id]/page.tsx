@@ -277,9 +277,9 @@ export default function NotebookPage() {
 
     const fetchNotebook = async () => {
       try {
-        // In dev mode, get JWT token from localStorage (set via /login command or password auth)
+        // In dev mode, get JWT token from env var or localStorage
         const token = isDevelopmentMode
-          ? localStorage.getItem('dev_auth_token') || ''
+          ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
           : await getToken();
 
         if (!token) {

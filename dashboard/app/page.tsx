@@ -121,7 +121,9 @@ export default function Home() {
 
   const handleDownloadClick = async () => {
     if (effectiveIsSignedIn) {
-      const token = isDevelopmentMode ? 'dev-mode-bypass' : await getToken();
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
       if (token) {
         await trackAgentDownload(token);
       }
@@ -137,8 +139,10 @@ export default function Home() {
 
     try {
       setError(null);
-      // In dev mode, use a mock token that bypasses Clerk
-      const token = isDevelopmentMode ? 'dev-mode-bypass' : await getToken();
+      // In dev mode, get JWT token from env var or localStorage
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
       if (!token) {
         throw new Error('Failed to get authentication token');
       }
@@ -157,7 +161,9 @@ export default function Home() {
     if (!effectiveIsSignedIn) return;
 
     try {
-      const token = isDevelopmentMode ? 'dev-mode-bypass' : await getToken();
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
       if (!token) return;
 
       const status = await getAgentStatus(token);
