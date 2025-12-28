@@ -2,14 +2,18 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
 
 class Todo(Base):
-    """Extracted todo items/tasks from handwritten notes."""
+    """Extracted todo items/tasks from handwritten notes.
+
+    Includes fuzzy deduplication to prevent creating duplicate todos
+    when OCR variations occur on re-processing.
+    """
 
     __tablename__ = "todos"
 
@@ -33,6 +37,10 @@ class Todo(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)  # Full text
     completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Deduplication fields
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # SHA-256 hash
+    fuzzy_signature: Mapped[str | None] = mapped_column(String(100), nullable=True)  # Fuzzy matching key
+
     # Extraction metadata
     source_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -55,6 +63,10 @@ class Todo(Base):
     user: Mapped["User"] = relationship("User", back_populates="todos")
     notebook: Mapped["Notebook"] = relationship("Notebook", back_populates="todos")
     page: Mapped["Page"] = relationship("Page", back_populates="todos")
+
+    __table_args__ = (
+        Index('idx_todos_fuzzy', 'fuzzy_signature', 'notebook_id', 'user_id', unique=True),
+    )
 
     def __repr__(self) -> str:
         status = "✓" if self.completed else "☐"
