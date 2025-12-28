@@ -25,7 +25,6 @@ from app.models.notebook import Notebook
 from app.models.page import Page
 from app.models.sync_record import (
     IntegrationConfig,
-    PageSyncRecord,
     SyncItemType,
     SyncRecord,
     SyncStatus,
@@ -243,7 +242,7 @@ class UnifiedSyncManager:
         self, item_id: str, target_name: str
     ) -> Optional[Dict[str, Any]]:
         """
-        Get sync record for a specific page from page_sync_records table.
+        Get sync record for a specific page from sync_records table.
 
         Args:
             item_id: Item ID in format "notebook_uuid:page:page_number"
@@ -263,27 +262,31 @@ class UnifiedSyncManager:
             page_number = int(parts[1])
 
             record = (
-                self.db.query(PageSyncRecord)
+                self.db.query(SyncRecord)
                 .filter(
                     and_(
-                        PageSyncRecord.user_id == self.user_id,
-                        PageSyncRecord.notebook_uuid == notebook_uuid,
-                        PageSyncRecord.page_number == page_number,
-                        PageSyncRecord.target_name == target_name,
+                        SyncRecord.user_id == self.user_id,
+                        SyncRecord.item_type == 'page_text',
+                        SyncRecord.notebook_uuid == notebook_uuid,
+                        SyncRecord.page_number == page_number,
+                        SyncRecord.target_name == target_name,
                     )
                 )
                 .first()
             )
 
             if record:
+                # Parse metadata_json to extract notion IDs
+                metadata = json.loads(record.metadata_json) if record.metadata_json else {}
+
                 return {
                     "id": record.id,
                     "notebook_uuid": record.notebook_uuid,
                     "page_number": record.page_number,
                     "content_hash": record.content_hash,
                     "target_name": record.target_name,
-                    "notion_page_id": record.notion_page_id,
-                    "notion_block_id": record.notion_block_id,
+                    "notion_page_id": metadata.get("notion_page_id"),
+                    "notion_block_id": metadata.get("notion_block_id"),
                     "status": record.status,
                     "error_message": record.error_message,
                     "retry_count": record.retry_count,
@@ -375,7 +378,7 @@ class UnifiedSyncManager:
             now = datetime.utcnow()
             synced_at = now if result.success else None
 
-            # For PAGE_TEXT items, use page_sync_records table
+            # For PAGE_TEXT items, store in sync_records with page context
             if item_type == SyncItemType.PAGE_TEXT:
                 # Parse item_id to extract notebook_uuid and page_number
                 parts = item_id.split(":page:")
@@ -386,7 +389,7 @@ class UnifiedSyncManager:
                 notebook_uuid = parts[0]
                 page_number = int(parts[1])
 
-                # Extract Notion IDs from result metadata
+                # Extract Notion IDs from result metadata and combine with other metadata
                 notion_page_id = (
                     result.target_id
                     or result.metadata.get("notebook_page_id")
@@ -397,15 +400,27 @@ class UnifiedSyncManager:
                     result.metadata.get("page_block_id") if result.metadata else None
                 )
 
+                # Combine metadata
+                final_metadata = metadata or {}
+                if result.metadata:
+                    final_metadata.update(result.metadata)
+
+                # Add notion IDs to metadata
+                if notion_page_id:
+                    final_metadata["notion_page_id"] = notion_page_id
+                if notion_block_id:
+                    final_metadata["notion_block_id"] = notion_block_id
+
                 # Check if record exists
                 existing = (
-                    self.db.query(PageSyncRecord)
+                    self.db.query(SyncRecord)
                     .filter(
                         and_(
-                            PageSyncRecord.user_id == self.user_id,
-                            PageSyncRecord.notebook_uuid == notebook_uuid,
-                            PageSyncRecord.page_number == page_number,
-                            PageSyncRecord.target_name == target_name,
+                            SyncRecord.user_id == self.user_id,
+                            SyncRecord.item_type == 'page_text',
+                            SyncRecord.notebook_uuid == notebook_uuid,
+                            SyncRecord.page_number == page_number,
+                            SyncRecord.target_name == target_name,
                         )
                     )
                     .first()
@@ -414,26 +429,28 @@ class UnifiedSyncManager:
                 if existing:
                     # Update existing
                     existing.content_hash = content_hash
-                    existing.notion_page_id = notion_page_id
-                    existing.notion_block_id = notion_block_id
+                    existing.external_id = result.target_id or ""
                     existing.status = result.status.value
                     existing.error_message = result.error_message
                     existing.retry_count = 0  # Reset on new attempt
+                    existing.metadata_json = json.dumps(final_metadata)
                     existing.updated_at = now
                     existing.synced_at = synced_at
                 else:
                     # Create new
-                    page_sync = PageSyncRecord(
+                    page_sync = SyncRecord(
                         user_id=self.user_id,
+                        item_type='page_text',
+                        item_id=item_id,
                         notebook_uuid=notebook_uuid,
                         page_number=page_number,
                         content_hash=content_hash,
                         target_name=target_name,
-                        notion_page_id=notion_page_id,
-                        notion_block_id=notion_block_id,
+                        external_id=result.target_id or "",
                         status=result.status.value,
                         error_message=result.error_message,
                         retry_count=0,
+                        metadata_json=json.dumps(final_metadata),
                         created_at=now,
                         updated_at=now,
                         synced_at=synced_at,
