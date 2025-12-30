@@ -75,9 +75,9 @@ class SyncRecord(Base):
     synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (
-        Index('idx_sync_content_target', 'content_hash', 'target_name', 'user_id', unique=True),
+        Index('idx_sync_content_target', 'content_hash', 'target_name', 'user_id'),
         Index('idx_sync_content_target_item', 'content_hash', 'target_name', 'item_id'),
-        Index('idx_sync_page_uuid', 'page_uuid'),
+        Index('idx_sync_page_uuid', 'page_uuid', 'target_name', 'user_id', unique=True),
         Index('idx_sync_notebook_page', 'notebook_uuid', 'page_number'),
     )
 

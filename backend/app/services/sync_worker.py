@@ -213,12 +213,12 @@ class SyncWorker:
             return
 
         # Check if this page was previously synced to get the existing Notion block ID
+        # Use page_uuid as the primary identifier (reMarkable's unique page ID)
         existing_record = (
             db.query(SyncRecord)
             .filter(
                 SyncRecord.user_id == queue_item.user_id,
-                SyncRecord.notebook_uuid == queue_item.notebook_uuid,
-                SyncRecord.page_number == queue_item.page_number,
+                SyncRecord.page_uuid == queue_item.page_uuid,
                 SyncRecord.target_name == queue_item.target_name,
             )
             .first()
@@ -264,14 +264,13 @@ class SyncWorker:
 
         if result.success:
             # Check if sync record already exists (upsert pattern)
-            # Use page identifier (notebook_uuid + page_number), not content_hash
+            # Use page_uuid (reMarkable's unique page identifier), not content_hash
             # since content_hash changes when page content changes
             existing_record = (
                 db.query(SyncRecord)
                 .filter(
                     SyncRecord.user_id == queue_item.user_id,
-                    SyncRecord.notebook_uuid == queue_item.notebook_uuid,
-                    SyncRecord.page_number == queue_item.page_number,
+                    SyncRecord.page_uuid == queue_item.page_uuid,
                     SyncRecord.target_name == queue_item.target_name,
                 )
                 .first()

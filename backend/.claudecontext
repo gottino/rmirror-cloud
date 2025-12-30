@@ -34,6 +34,8 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - `integration_configs`: User integration settings (encrypted credentials)
 
 ## Recent Major Changes
+- **2024-12-30**: Switched to page_uuid (reMarkable's ID) for deduplication instead of composite keys
+- **2024-12-30**: Migration 51324b8f201a - Updated sync_records indexes for page_uuid uniqueness
 - **2024-12-30**: Refactored to database-driven deduplication (removed Notion block title hashes)
 - **2024-12-30**: Fixed upsert logic to query by page identifier instead of content_hash
 - **2024-12-30**: Added archived block handling (treat as deleted, create fresh)
@@ -55,9 +57,10 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 
 ### Notion Sync Changes
 1. Database is source of truth (SyncRecord table)
-2. Use page identifier (notebook_uuid + page_number) for deduplication
+2. Use page_uuid (reMarkable's unique page ID) for deduplication
 3. Handle archived blocks gracefully (catch "Can't edit block that is archived")
 4. Clean page titles in Notion: "📄 Page 81" (no hashes!)
+5. Unique constraint on (page_uuid, target_name, user_id) prevents duplicates
 
 ### Testing
 1. Run: `poetry run pytest` (if tests exist)

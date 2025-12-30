@@ -65,56 +65,114 @@ def queue_sync(
     """
     import json
 
-    # Check if already queued or synced
-    existing_queue = (
-        db.query(SyncQueue)
-        .filter(
-            SyncQueue.content_hash == content_hash,
-            SyncQueue.target_name == target_name,
-            SyncQueue.user_id == user_id,
-            SyncQueue.status.in_(['pending', 'processing']),
+    # For page_text items, check by page_uuid (reMarkable's unique page identifier)
+    # This ensures we update existing pages rather than creating duplicates
+    if item_type == 'page_text' and page_uuid:
+        # Check if already queued for this specific page
+        existing_queue = (
+            db.query(SyncQueue)
+            .filter(
+                SyncQueue.page_uuid == page_uuid,
+                SyncQueue.target_name == target_name,
+                SyncQueue.user_id == user_id,
+                SyncQueue.status.in_(['pending', 'processing']),
+            )
+            .first()
         )
-        .first()
-    )
 
-    if existing_queue:
-        # Already queued, don't create duplicate
-        return existing_queue
+        if existing_queue:
+            # Already queued for this page, update content hash if changed
+            if existing_queue.content_hash != content_hash:
+                existing_queue.content_hash = content_hash
+                existing_queue.updated_at = datetime.utcnow()
+                db.commit()
+            return existing_queue
 
-    # Check if already successfully synced
-    existing_sync = (
-        db.query(SyncRecord)
-        .filter(
-            SyncRecord.content_hash == content_hash,
-            SyncRecord.target_name == target_name,
-            SyncRecord.user_id == user_id,
-            SyncRecord.status == 'success',
+        # Check if already successfully synced with same content
+        existing_sync = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.page_uuid == page_uuid,
+                SyncRecord.target_name == target_name,
+                SyncRecord.user_id == user_id,
+            )
+            .first()
         )
-        .first()
-    )
 
-    if existing_sync:
-        # Already synced successfully, no need to queue
-        # Create a completed queue entry for tracking
-        queue_entry = SyncQueue(
-            user_id=user_id,
-            item_type=item_type,
-            item_id=item_id,
-            content_hash=content_hash,
-            page_uuid=page_uuid,
-            notebook_uuid=notebook_uuid,
-            page_number=page_number,
-            target_name=target_name,
-            status='completed',
-            priority=priority,
-            metadata_json=json.dumps(metadata) if metadata else None,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-            completed_at=existing_sync.synced_at,
+        if existing_sync and existing_sync.content_hash == content_hash:
+            # Already synced successfully with same content, no need to queue
+            # Create a completed queue entry for tracking
+            queue_entry = SyncQueue(
+                user_id=user_id,
+                item_type=item_type,
+                item_id=item_id,
+                content_hash=content_hash,
+                page_uuid=page_uuid,
+                notebook_uuid=notebook_uuid,
+                page_number=page_number,
+                target_name=target_name,
+                status='completed',
+                priority=priority,
+                metadata_json=json.dumps(metadata) if metadata else None,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                completed_at=existing_sync.synced_at,
+            )
+            db.add(queue_entry)
+            db.commit()
+            return queue_entry
+        # If existing_sync exists but content_hash is different, we'll queue it for update
+    else:
+        # For other item types, use content_hash for deduplication
+        existing_queue = (
+            db.query(SyncQueue)
+            .filter(
+                SyncQueue.content_hash == content_hash,
+                SyncQueue.target_name == target_name,
+                SyncQueue.user_id == user_id,
+                SyncQueue.status.in_(['pending', 'processing']),
+            )
+            .first()
         )
-        db.add(queue_entry)
-        db.commit()
-        return queue_entry
+
+        if existing_queue:
+            # Already queued, don't create duplicate
+            return existing_queue
+
+        # Check if already successfully synced
+        existing_sync = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.content_hash == content_hash,
+                SyncRecord.target_name == target_name,
+                SyncRecord.user_id == user_id,
+                SyncRecord.status == 'success',
+            )
+            .first()
+        )
+
+        if existing_sync:
+            # Already synced successfully, no need to queue
+            # Create a completed queue entry for tracking
+            queue_entry = SyncQueue(
+                user_id=user_id,
+                item_type=item_type,
+                item_id=item_id,
+                content_hash=content_hash,
+                page_uuid=page_uuid,
+                notebook_uuid=notebook_uuid,
+                page_number=page_number,
+                target_name=target_name,
+                status='completed',
+                priority=priority,
+                metadata_json=json.dumps(metadata) if metadata else None,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                completed_at=existing_sync.synced_at,
+            )
+            db.add(queue_entry)
+            db.commit()
+            return queue_entry
 
     # Create new queue entry
     queue_entry = SyncQueue(

@@ -205,12 +205,39 @@ class NotionSyncTarget(SyncTarget):
             }
 
             if existing_block_id:
-                # Page was previously synced - update by deleting old and creating new
+                # Page was previously synced - update by deleting old and creating new in same position
                 self.logger.info(f"Updating existing page {page_number} (block {existing_block_id})")
 
+                # Get all blocks to find the position of the existing block
+                all_blocks = []
+                start_cursor = None
+                while True:
+                    if start_cursor:
+                        response = self.client.blocks.children.list(
+                            block_id=parent_page_id,
+                            start_cursor=start_cursor
+                        )
+                    else:
+                        response = self.client.blocks.children.list(block_id=parent_page_id)
+
+                    all_blocks.extend(response.get("results", []))
+
+                    if not response.get("has_more", False):
+                        break
+                    start_cursor = response.get("next_cursor")
+
+                # Find the block that comes BEFORE the existing block (to use as insertion anchor)
+                insert_after_block_id = None
+                for i, block in enumerate(all_blocks):
+                    if block["id"] == existing_block_id:
+                        # Get the previous block
+                        if i > 0:
+                            insert_after_block_id = all_blocks[i - 1]["id"]
+                        break
+
+                # Try to delete the old block
                 block_deleted = False
                 try:
-                    # Try to delete old block
                     self.client.blocks.delete(block_id=existing_block_id)
                     block_deleted = True
                 except Exception as e:
@@ -218,16 +245,25 @@ class NotionSyncTarget(SyncTarget):
                     # Check if block is archived or doesn't exist
                     if "archived" in error_msg.lower() or "not found" in error_msg.lower() or "Could not find block" in error_msg:
                         self.logger.info(f"Block {existing_block_id} is archived/deleted, will create fresh block")
-                        # Block is gone/archived, treat as new page
-                        block_deleted = True  # Pretend it was deleted since it's effectively gone
+                        block_deleted = True  # Block is effectively gone
                     else:
                         self.logger.warning(f"Failed to delete old block {existing_block_id}: {e}")
 
-                # Create new block (will go to end for updates, but that's okay)
-                response = self.client.blocks.children.append(
-                    block_id=parent_page_id,
-                    children=[page_toggle]
-                )
+                # Create new block in the same position
+                if insert_after_block_id:
+                    response = self.client.blocks.children.append(
+                        block_id=parent_page_id,
+                        children=[page_toggle],
+                        after=insert_after_block_id
+                    )
+                    self.logger.info(f"Updated page {page_number} after block {insert_after_block_id}")
+                else:
+                    # No previous block, add at the beginning
+                    response = self.client.blocks.children.append(
+                        block_id=parent_page_id,
+                        children=[page_toggle]
+                    )
+                    self.logger.info(f"Updated page {page_number} at beginning")
 
                 new_block_id = response["results"][0]["id"] if response.get("results") else None
 
@@ -316,134 +352,6 @@ class NotionSyncTarget(SyncTarget):
             self.logger.error(f"Error syncing page text: {e}")
             return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
 
-    async def _sync_page_text_OLD_DELETE_ME(self, item: SyncItem) -> SyncResult:
-        """OLD VERSION - DELETE THIS"""
-        try:
-            if existing_page_block and not content_changed:
-                # Page already exists with same content, skip
-                self.logger.info(f"Page {page_number} already exists with same content, skipping")
-                return SyncResult(
-                    status=SyncStatus.SKIPPED,
-                    metadata={
-                        "reason": "page_unchanged",
-                        "page_number": page_number,
-                        "parent_page_id": parent_page_id,
-                    }
-                )
-            elif existing_page_block and content_changed:
-                # Page exists but content changed, delete old block and add new one in same position
-                self.logger.info(f"Page {page_number} changed (hash: {existing_hash} → {current_hash}), replacing")
-
-                # Find the block that comes BEFORE the existing page (to use as 'after' anchor)
-                insert_after_block_id = None
-                found_existing = False
-                for i, block in enumerate(all_blocks):
-                    if block["id"] == existing_page_block["id"]:
-                        found_existing = True
-                        # Get the previous block (the one before this page)
-                        if i > 0:
-                            insert_after_block_id = all_blocks[i - 1]["id"]
-                        break
-
-                # Delete the old block
-                try:
-                    self.client.blocks.delete(block_id=existing_page_block["id"])
-                except Exception as e:
-                    self.logger.warning(f"Failed to delete old block for page {page_number}: {e}")
-
-                # Add new block in the same position using 'after' parameter
-                if insert_after_block_id:
-                    response = self.client.blocks.children.append(
-                        block_id=parent_page_id,
-                        children=[page_toggle],
-                        after=insert_after_block_id
-                    )
-                    self.logger.info(f"Replaced page {page_number} after block {insert_after_block_id}")
-                else:
-                    # No previous block, add at the beginning (after parent)
-                    response = self.client.blocks.children.append(
-                        block_id=parent_page_id,
-                        children=[page_toggle]
-                    )
-                    self.logger.info(f"Replaced page {page_number} at beginning")
-
-                block_id = response["results"][0]["id"] if response.get("results") else None
-
-                return SyncResult(
-                    status=SyncStatus.SUCCESS,
-                    target_id=block_id or parent_page_id,
-                    metadata={
-                        "action": "page_replaced",
-                        "page_number": page_number,
-                        "blocks_added": len(blocks),
-                        "parent_page_id": parent_page_id,
-                    }
-                )
-            else:
-                # New page - insert it in correct position using the 'after' parameter
-                # Find the insertion anchor: the block that should come BEFORE this page
-                # In reverse order, higher page numbers come first
-                self.logger.info(f"Adding new page {page_number} to Notion in correct position")
-
-                insert_after_block_id = None
-
-                # First, look for the heading block - new highest page should go after heading
-                for block in all_blocks:
-                    if block.get("type") == "heading_2":
-                        insert_after_block_id = block["id"]
-                        break
-
-                # Then find the first existing page with a HIGHER number than ours
-                # We want to insert after that page (to maintain descending order)
-                for block in all_blocks:
-                    if block.get("type") == "toggle":
-                        toggle_data = block.get("toggle", {})
-                        rich_text = toggle_data.get("rich_text", [])
-                        if rich_text:
-                            content = rich_text[0].get("text", {}).get("content", "")
-                            match = re.match(r"📄 Page (\d+)(?: \[([a-f0-9]+)\])?", content)
-                            if match:
-                                block_page_num = int(match.group(1))
-                                # If this existing page has a higher number, insert after it
-                                if block_page_num > page_number:
-                                    insert_after_block_id = block["id"]
-                                # Once we hit a lower number, stop searching
-                                elif block_page_num < page_number:
-                                    break
-
-                # Insert the new page using the 'after' parameter
-                if insert_after_block_id:
-                    response = self.client.blocks.children.append(
-                        block_id=parent_page_id,
-                        children=[page_toggle],
-                        after=insert_after_block_id
-                    )
-                    self.logger.info(f"Inserted page {page_number} after block {insert_after_block_id}")
-                else:
-                    # No anchor found, append to end (shouldn't normally happen)
-                    response = self.client.blocks.children.append(
-                        block_id=parent_page_id,
-                        children=[page_toggle]
-                    )
-                    self.logger.info(f"Appended page {page_number} to end (no anchor found)")
-
-                block_id = response["results"][0]["id"] if response.get("results") else None
-
-                return SyncResult(
-                    status=SyncStatus.SUCCESS,
-                    target_id=block_id or parent_page_id,
-                    metadata={
-                        "action": "page_added",
-                        "page_number": page_number,
-                        "blocks_added": len(blocks),
-                        "parent_page_id": parent_page_id,
-                        "insert_after_block_id": insert_after_block_id,
-                    }
-                )
-
-        except Exception as e:
-            self.logger.error(f"Error syncing page text: {e}")
-            return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
 
     def _extract_tags_from_path(self, full_path: str) -> List[str]:
         """
