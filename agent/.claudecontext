@@ -1,0 +1,324 @@
+# rMirror Agent Development Context
+
+## What This Is
+
+This is the **macOS agent** for rMirror - a Python application that monitors the reMarkable sync folder and automatically uploads notebooks to the cloud backend.
+
+## Tech Stack
+
+- **Python 3.11+**: Core language
+- **watchdog**: File system monitoring for reMarkable folder changes
+- **Flask**: Web UI server (localhost:9090) for configuration
+- **httpx**: Async HTTP client for API calls
+- **rumps**: macOS menu bar app integration
+- **Click**: CLI interface
+- **Pydantic**: Configuration validation and settings management
+- **keyring**: Secure credential storage in system keychain
+- **PyInstaller**: Packaging into standalone .app bundle
+
+## Project Structure
+
+```
+agent/
+├── app/                        # Main application code
+│   ├── main.py                 # Entry point, Agent class, CLI
+│   ├── config.py               # Configuration models (Pydantic)
+│   ├── logging_config.py       # Logging setup
+│   ├── browser_utils.py        # Browser automation helpers
+│   ├── auth/                   # Authentication management
+│   │   └── auth_manager.py     # Token storage, refresh
+│   ├── watcher/                # File system monitoring
+│   │   ├── watcher.py          # Watchdog event handlers
+│   │   └── file_observer.py    # File change detection
+│   ├── sync/                   # Cloud sync logic
+│   │   ├── cloud_sync.py       # HTTP API calls to backend
+│   │   └── sync_manager.py     # Sync queue management
+│   ├── remarkable/             # reMarkable file parsing
+│   │   ├── parser.py           # .rm file parsing
+│   │   └── metadata.py         # Metadata extraction
+│   ├── web/                    # Flask web UI
+│   │   ├── app.py              # Flask app creation
+│   │   └── routes.py           # Web routes
+│   └── tray/                   # Menu bar integration
+│       └── tray_app.py         # rumps menu bar app
+├── build/                      # PyInstaller build files
+├── dist/                       # Built .app bundles
+├── resources/                  # Icons, assets
+├── hooks/                      # PyInstaller hooks
+├── rmirror.spec                # PyInstaller spec file
+├── build_macos.sh              # Build script for .app
+├── config.example.yaml         # Example configuration
+└── pyproject.toml              # Poetry dependencies
+```
+
+## Core Components
+
+### 1. Agent (`app/main.py`)
+
+Main entry point with two operational modes:
+
+**Foreground Mode** (for development):
+```bash
+poetry run python -m app.main --foreground --debug
+```
+- Runs in terminal with logging output
+- Uses asyncio event loop on main thread
+- Web server and file watcher in background threads
+- Ctrl+C to stop
+
+**Menu Bar Mode** (production):
+```bash
+poetry run python -m app.main
+```
+- Runs as macOS menu bar app (rumps)
+- No terminal output (logs to file)
+- Menu bar icon with status, settings, quit
+
+### 2. File Watcher (`app/watcher/`)
+
+Monitors reMarkable sync folder for changes:
+- Uses `watchdog` library
+- Detects new/modified `.rm` files and metadata
+- Triggers upload via CloudSync
+- Runs in background thread
+
+### 3. Cloud Sync (`app/sync/`)
+
+Handles HTTP API calls to backend:
+```python
+# Upload notebook
+POST /api/notebooks
+{
+  "notebook_uuid": "...",
+  "name": "My Notebook",
+  "created_at": "2024-01-01T00:00:00Z"
+}
+
+# Upload page
+POST /api/pages
+{
+  "page_uuid": "...",
+  "notebook_uuid": "...",
+  "page_number": 1,
+  "rm_file_data": "...",  # Base64 encoded .rm file
+  "metadata": {...}
+}
+```
+
+### 4. Web UI (`app/web/`)
+
+Flask web server for configuration:
+- Runs on `localhost:9090`
+- Shows sync status, settings
+- OAuth flow for backend authentication
+- Runs in background thread (non-blocking)
+
+### 5. Menu Bar App (`app/tray/`)
+
+macOS menu bar integration using `rumps`:
+- Shows sync status icon
+- Menu items: Status, Settings, Open Web UI, Quit
+- Must run on main thread (macOS AppKit requirement)
+
+## Configuration
+
+Configuration in `~/.rmirror/config.yaml`:
+
+```yaml
+# reMarkable sync folder
+remarkable:
+  sync_folder: "/Users/username/reMarkable"
+
+# Backend API
+api:
+  base_url: "http://localhost:8000"  # or production URL
+
+# Web UI
+web:
+  host: "localhost"
+  port: 9090
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "~/.rmirror/agent.log"
+```
+
+## Authentication Flow
+
+1. User clicks "Connect to Cloud" in web UI
+2. Opens browser to backend OAuth page
+3. User authenticates with Clerk
+4. Backend redirects back with auth token
+5. Agent stores token in system keychain (secure)
+6. Token included in all API requests
+
+```python
+# Store token (keyring)
+keyring.set_password("rmirror", "access_token", token)
+
+# Retrieve token
+token = keyring.get_password("rmirror", "access_token")
+
+# Use in API calls
+headers = {"Authorization": f"Bearer {token}"}
+```
+
+## Development Workflow
+
+### Running Locally
+
+```bash
+cd agent
+
+# Install dependencies
+poetry install
+
+# Run in foreground (with logs)
+poetry run python -m app.main --foreground --debug
+
+# Access web UI
+open http://localhost:9090
+```
+
+### Building .app Bundle
+
+```bash
+cd agent
+./build_macos.sh
+
+# Output: dist/rMirror.app
+# Double-click to run
+```
+
+### Testing File Watching
+
+1. Start agent in foreground mode
+2. Copy .rm files to reMarkable sync folder
+3. Watch logs for upload activity
+
+## When Working Here
+
+### Before Making Changes
+
+1. **Check config.py** for configuration schema (Pydantic models)
+2. **Review main.py** for agent lifecycle (startup, shutdown)
+3. **Understand threading model**:
+   - Main thread: rumps menu bar app (menu bar mode) or asyncio loop (foreground)
+   - Background threads: Flask web server, file watcher
+4. **Check remarkable/ for file parsing** - .rm files are binary format
+
+### Common Tasks
+
+**Add new API endpoint call:**
+```python
+# In app/sync/cloud_sync.py
+async def upload_new_thing(self, thing_data: dict):
+    response = await self.client.post(
+        f"{self.base_url}/api/things",
+        json=thing_data,
+        headers={"Authorization": f"Bearer {self.token}"}
+    )
+    response.raise_for_status()
+    return response.json()
+```
+
+**Add new web UI route:**
+```python
+# In app/web/routes.py
+@app.route('/my-page')
+def my_page():
+    return render_template('my_page.html')
+```
+
+**Add new menu bar item:**
+```python
+# In app/tray/tray_app.py
+@rumps.clicked("My Menu Item")
+def on_my_item(self, _):
+    print("Menu item clicked!")
+```
+
+**Handle new file type:**
+```python
+# In app/watcher/watcher.py
+def on_created(self, event):
+    if event.src_path.endswith('.mynewfile'):
+        self.process_new_file(event.src_path)
+```
+
+## Gotchas
+
+1. **Thread Safety**:
+   - rumps runs on main thread (macOS requirement)
+   - Flask and watchdog run in background threads
+   - Use thread-safe data structures or locks
+
+2. **PyInstaller Hidden Imports**:
+   - Some libraries need explicit inclusion in `rmirror.spec`
+   - Check `hooks/` for custom hooks
+
+3. **macOS Permissions**:
+   - Agent needs Full Disk Access to read reMarkable folder
+   - Request in System Preferences > Security & Privacy
+
+4. **Config File Location**:
+   - Always `~/.rmirror/config.yaml`
+   - Create on first run if missing (use config.example.yaml)
+
+5. **Token Expiration**:
+   - Backend tokens expire after 24 hours
+   - Implement token refresh in `app/auth/auth_manager.py`
+
+6. **reMarkable File Format**:
+   - `.rm` files are binary (not human-readable)
+   - Use `app/remarkable/parser.py` to extract stroke data
+   - Metadata in `.metadata` JSON files
+
+## Integration with Backend
+
+The agent is the bridge between reMarkable tablet and cloud. When working on features that involve backend changes:
+
+1. **Check backend API first**: See `../backend/.claudecontext` for API patterns
+2. **Update HTTP client**: Modify `app/sync/cloud_sync.py` for new endpoints
+3. **Test with backend running**: `cd ../backend && poetry run uvicorn app.main:app --reload`
+4. **Handle errors gracefully**: Network failures, auth errors, rate limits
+
+## Related Documentation
+
+- **Backend API**: `../backend/.claudecontext`
+- **System Architecture**: `../dev-context/architecture/system-overview.md`
+- **Build Instructions**: `BUILD.md`
+- **Standalone App**: `STANDALONE_APP.md`
+- **Initial Sync Feature**: `INITIAL_SYNC_FEATURE.md`
+
+## Recent Major Changes
+
+- **2024-12-25**: Implemented initial sync feature (sync existing notebooks on first run)
+- **2024-12-19**: Added PyInstaller build for .app bundle distribution
+- **2024-12-16**: Integrated keyring for secure token storage
+- **2024-12-15**: Added Flask web UI for configuration
+- **2024-11-22**: Implemented watchdog file monitoring
+- **2024-11-18**: Initial agent setup with rumps menu bar
+
+## Current Status
+
+**Implemented:**
+- ✅ File watcher with watchdog (monitors reMarkable folder)
+- ✅ Flask web UI (localhost:9090) for settings
+- ✅ Menu bar integration with rumps
+- ✅ Cloud sync via HTTP API
+- ✅ Secure token storage with keyring
+- ✅ PyInstaller .app bundle packaging
+- ✅ Initial sync of existing notebooks
+- ✅ OAuth authentication flow
+
+**In Progress:**
+- 🚧 Error recovery (retry failed uploads)
+- 🚧 Sync status UI improvements
+
+**Planned:**
+- ⏳ Auto-update mechanism
+- ⏳ Pause/resume sync
+- ⏳ Selective sync (choose which notebooks to upload)
+- ⏳ Windows support (cross-platform agent)

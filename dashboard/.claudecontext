@@ -1,0 +1,234 @@
+# rMirror Dashboard Development Context
+
+## What This Is
+
+This is the **Next.js 15 dashboard** for rMirror Cloud - a web application for viewing and managing reMarkable notebooks synced to the cloud.
+
+## Tech Stack
+
+- **Next.js 15**: React framework with App Router
+- **TypeScript**: Type-safe JavaScript
+- **Tailwind CSS**: Utility-first CSS framework
+- **Clerk**: Authentication and user management (@clerk/nextjs)
+- **React Markdown**: Rendering markdown content
+- **Lucide React**: Icon library
+
+## Project Structure
+
+```
+dashboard/
+├── app/                      # Next.js App Router
+│   ├── globals.css          # Global styles
+│   ├── layout.tsx           # Root layout with Clerk provider
+│   ├── page.tsx             # Homepage
+│   ├── notebooks/           # Notebook viewing pages
+│   ├── integrations/        # Integration settings
+│   ├── settings/            # User settings
+│   ├── sign-in/             # Clerk sign-in page
+│   └── sign-up/             # Clerk sign-up page
+├── components/              # Reusable React components
+│   ├── Sidebar.tsx          # Main navigation sidebar
+│   ├── FolderSidebar.tsx    # Notebook folder navigation
+│   ├── NotebookTree.tsx     # Tree view of notebooks
+│   ├── MainContentArea.tsx  # Content display area
+│   └── Breadcrumb.tsx       # Navigation breadcrumbs
+├── lib/                     # Utility functions
+├── public/                  # Static assets
+├── middleware.ts            # Clerk auth middleware
+└── tailwind.config.ts       # Tailwind configuration
+```
+
+## Key Features
+
+1. **Authentication**: Clerk-based user auth with sign-in/sign-up flows
+2. **Notebook Browser**: Tree view of synced notebooks and pages
+3. **Page Viewer**: Display OCR'd text and markdown from notebook pages
+4. **Integration Settings**: Manage Notion, Readwise connections
+5. **Responsive Design**: Tailwind CSS with mobile-first approach
+
+## Backend API Integration
+
+The dashboard communicates with the FastAPI backend at:
+- **Local dev**: `http://localhost:8000`
+- **Production**: `https://api.rmirror.cloud` (or configured via env)
+
+### Key API Endpoints Used
+
+```typescript
+// Get user's notebooks
+GET /api/notebooks
+
+// Get specific notebook
+GET /api/notebooks/{notebook_uuid}
+
+// Get page content
+GET /api/pages/{page_id}
+
+// Integration management
+GET /api/integrations
+POST /api/integrations/notion/connect
+DELETE /api/integrations/{integration_id}
+```
+
+## Authentication Flow
+
+1. User signs in via Clerk (`/sign-in`)
+2. Clerk provides JWT token
+3. Frontend includes token in API requests:
+   ```typescript
+   headers: {
+     'Authorization': `Bearer ${await clerk.session.getToken()}`
+   }
+   ```
+4. Backend validates token and retrieves user data
+
+## Development Workflow
+
+### Running Locally
+
+```bash
+cd dashboard
+npm run dev    # Start dev server on port 3000
+```
+
+### Environment Variables
+
+Required in `.env.local`:
+```bash
+# Clerk Authentication
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+
+# Backend API
+NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# Clerk URLs
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/notebooks
+NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/notebooks
+```
+
+## When Working Here
+
+### Before Making Changes
+
+1. **Check middleware.ts** for protected routes - all pages require auth by default
+2. **Review app/ structure** - using App Router (not Pages Router)
+3. **Check Tailwind config** for custom theme settings
+4. **Understand component hierarchy** - Sidebar → NotebookTree → MainContentArea
+
+### Common Tasks
+
+**Add a new page:**
+```bash
+# Create app/my-page/page.tsx
+export default function MyPage() {
+  return <div>My Page</div>
+}
+# Automatically routed to /my-page
+```
+
+**Fetch from API with auth:**
+```typescript
+import { useAuth } from '@clerk/nextjs'
+
+function MyComponent() {
+  const { getToken } = useAuth()
+
+  const fetchData = async () => {
+    const token = await getToken()
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/...`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    return response.json()
+  }
+}
+```
+
+**Add a new component:**
+```bash
+# Create components/MyComponent.tsx
+export function MyComponent() {
+  return <div className="p-4">Component</div>
+}
+```
+
+## Gotchas
+
+1. **Server vs Client Components**:
+   - Default is Server Components (no `'use client'`)
+   - Add `'use client'` at top for hooks (useState, useEffect, useAuth)
+   ```typescript
+   'use client'
+   import { useState } from 'react'
+   ```
+
+2. **Clerk Auth on Server Components**:
+   ```typescript
+   import { auth } from '@clerk/nextjs'
+
+   export default async function Page() {
+     const { userId } = auth()  // Server-side auth
+     if (!userId) redirect('/sign-in')
+   }
+   ```
+
+3. **API URL Configuration**:
+   - Always use `process.env.NEXT_PUBLIC_API_URL`
+   - Must be prefixed with `NEXT_PUBLIC_` to be available in browser
+
+4. **Middleware Protected Routes**:
+   - All routes protected by default (see middleware.ts)
+   - Public routes: `/`, `/sign-in`, `/sign-up`
+   - API routes NOT protected (handle auth in route handler)
+
+5. **CSS Modules vs Tailwind**:
+   - Project uses **Tailwind only** - no CSS modules
+   - Global styles in `app/globals.css`
+
+## Integration with Backend
+
+The dashboard is tightly coupled with the backend API. When working on features that involve backend changes:
+
+1. **Check backend API first**: See `backend/.claudecontext` for API patterns
+2. **Update types**: TypeScript types should match backend response schemas
+3. **Handle loading/error states**: API calls may fail or be slow
+4. **Test with backend running**: `cd backend && poetry run uvicorn app.main:app --reload`
+
+## Related Documentation
+
+- **Backend API**: `../backend/.claudecontext`
+- **System Architecture**: `../dev-context/architecture/system-overview.md`
+- **Technical Decisions**: `../dev-context/decisions/technical-decisions.md`
+- **Next.js Docs**: https://nextjs.org/docs
+- **Clerk Docs**: https://clerk.com/docs/nextjs
+
+## Recent Major Changes
+
+- **2024-12-28**: Added Clerk authentication with sign-in/sign-up flows
+- **2024-12-27**: Created notebook tree view with folder navigation
+- **2024-12-26**: Initial Next.js 15 setup with App Router
+- **2024-12-21**: Added middleware for route protection
+
+## Current Status
+
+**Implemented:**
+- ✅ Clerk authentication
+- ✅ Protected routes with middleware
+- ✅ Notebook browser with tree view
+- ✅ Page content viewer
+- ✅ Integration settings UI
+- ✅ Responsive sidebar navigation
+
+**In Progress:**
+- 🚧 Real-time sync status indicators
+- 🚧 Rich text editor for page annotations
+- 🚧 Search functionality
+
+**Planned:**
+- ⏳ Dark mode toggle
+- ⏳ Export notebooks to PDF
+- ⏳ Collaboration features (sharing notebooks)

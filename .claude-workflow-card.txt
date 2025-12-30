@@ -1,0 +1,90 @@
+┌───────────────────────────────────────────────────────────────────┐
+│                                                                   │
+│           rMirror Multi-Instance Claude Code Workflow            │
+│                                                                   │
+├───────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  📋 BEFORE STARTING SESSION                                       │
+│  ────────────────────────────────────────────────────            │
+│  1. Check state:  cat dev-context/state/current-state.md         │
+│  2. Choose domain:  cd backend/  (or dashboard/, agent/, root)   │
+│  3. Open Claude Code                                             │
+│  4. First message:  "Read .claudecontext, task: [X]"             │
+│                                                                   │
+│  🎯 DOMAINS                                                       │
+│  ────────────────────────────────────────────────────            │
+│  • backend/        API, database, OCR, sync worker               │
+│  • backend/        Notion integration (focus on integration)     │
+│  • dashboard/      Frontend UI, components (Next.js)             │
+│  • agent/          Mac agent, file watcher, Flask web UI         │
+│  • / (root)        Infrastructure, deployment, migrations        │
+│                                                                   │
+│  💻 DURING SESSION                                                │
+│  ────────────────────────────────────────────────────            │
+│  • Stay focused on ONE domain                                    │
+│  • Document decisions immediately                                │
+│  • Commit frequently                                             │
+│  • Check .claudecontext and dev-context/architecture/            │
+│                                                                   │
+│  ✅ AFTER SESSION                                                 │
+│  ────────────────────────────────────────────────────            │
+│  1. Summarize:  Ask Claude "What did we accomplish?"             │
+│  2. Update state:  vim dev-context/state/current-state.md        │
+│     - Move completed items to "Recently Completed"               │
+│     - Update "In Progress" and "Up Next"                         │
+│     - Set "Active Session: none"                                 │
+│  3. Commit context:  cd dev-context && git commit -am "..."      │
+│  4. Commit code:  cd .. && git commit -am "feat: ..."            │
+│  5. Push both:  git push (in both repos)                         │
+│                                                                   │
+│  📚 DOCUMENTATION LOCATIONS                                       │
+│  ────────────────────────────────────────────────────            │
+│  • backend/.claudecontext              Backend context           │
+│  • dashboard/.claudecontext            Frontend context          │
+│  • agent/.claudecontext                Agent context (future)    │
+│  • dev-context/state/current-state.md  What's being worked on    │
+│  • dev-context/decisions/              Architectural decisions   │
+│  • dev-context/architecture/           System design docs        │
+│  • dev-context/WORKFLOW.md             Full workflow guide       │
+│  • dev-context/GETTING_STARTED.md      Quick start guide         │
+│                                                                   │
+│  ⚡ QUICK COMMANDS                                                │
+│  ────────────────────────────────────────────────────            │
+│  Check state:       cat dev-context/state/current-state.md       │
+│  Backend session:   cd backend && code .                         │
+│  Frontend session:  cd dashboard && code .                       │
+│  Update state:      vim dev-context/state/current-state.md       │
+│  Commit context:    cd dev-context && git commit -am "..."       │
+│  Recent decisions:  cat dev-context/decisions/tech*.md           │
+│                                                                   │
+│  🎨 GOLDEN RULES                                                  │
+│  ────────────────────────────────────────────────────            │
+│  ✅ DO:                                                           │
+│  • One domain per session                                        │
+│  • Update state at start and end                                 │
+│  • Say "Read .claudecontext" at session start                    │
+│  • Document decisions as you make them                           │
+│  • Commit frequently with good messages                          │
+│                                                                   │
+│  ❌ DON'T:                                                        │
+│  • Run 2+ hour sessions (Claude compacts)                        │
+│  • Mix domains in one session                                    │
+│  • Rely on conversation memory                                   │
+│  • Skip state updates                                            │
+│  • Leave "Active Session" set when done                          │
+│                                                                   │
+│  🔧 SETUP (ONE-TIME)                                              │
+│  ────────────────────────────────────────────────────            │
+│  ./scripts/setup_dev_context.sh                                  │
+│                                                                   │
+│  🆘 TROUBLESHOOTING                                               │
+│  ────────────────────────────────────────────────────            │
+│  Claude won't read .claudecontext:  Ask "Read .claudecontext"    │
+│  Lost state:  cd dev-context && git log --oneline                │
+│  Need context:  cat dev-context/README.md                        │
+│                                                                   │
+└───────────────────────────────────────────────────────────────────┘
+
+Print this card and keep it visible while coding!
+
+Alternative: Set as desktop wallpaper or pin in notes app.
