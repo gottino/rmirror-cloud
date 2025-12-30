@@ -105,3 +105,15 @@ rm-irror-design-system/
 
 # Security analysis system (private repo)
 security/
+
+# Claude Code development context (private repo)
+dev-context/
+
+# Claude Code workflow documentation (should be in dev-context/, not main repo)
+README-CLAUDE-SETUP.md
+CLAUDE_CODE_SETUP.md
+GETTING_STARTED.md
+
+# Test scripts with secrets (do not commit)
+backend/test_*.py
+backend/get_*.py

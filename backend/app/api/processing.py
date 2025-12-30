@@ -23,7 +23,10 @@ from app.dependencies import get_storage_service
 from app.models.notebook import Notebook, DocumentType
 from app.models.notebook_page import NotebookPage
 from app.models.page import Page, OcrStatus
+from app.models.sync_record import IntegrationConfig
 from app.models.user import User
+from app.services.fingerprinting import fingerprint_page
+from app.services.sync_queue import queue_sync
 from app.storage import StorageService
 from app.utils.files import calculate_file_hash
 
@@ -321,6 +324,71 @@ async def process_rm_file(
             f"notebook_id={notebook.id}, page_id={page.id}, "
             f"extracted {len(extracted_text)} characters"
         )
+
+        # Queue sync to active integrations if OCR was performed
+        if needs_processing and extracted_text:
+            # Get the page number from the notebook_pages mapping
+            notebook_page = (
+                db.query(NotebookPage)
+                .filter(
+                    NotebookPage.notebook_id == notebook.id,
+                    NotebookPage.page_id == page.id,
+                )
+                .first()
+            )
+
+            page_number = notebook_page.page_number if notebook_page else None
+
+            # Get all active integrations for this user
+            active_integrations = (
+                db.query(IntegrationConfig)
+                .filter(
+                    IntegrationConfig.user_id == current_user.id,
+                    IntegrationConfig.is_enabled == True,
+                )
+                .all()
+            )
+
+            logger.info(f"Found {len(active_integrations)} active integrations for user {current_user.id}")
+
+            # Queue sync for each active integration
+            for integration in active_integrations:
+                try:
+                    # Generate content hash for this page
+                    content_hash = fingerprint_page(
+                        notebook_uuid=notebook_uuid,
+                        page_number=page_number or 0,
+                        ocr_text=extracted_text,
+                        page_uuid=page_uuid,
+                    )
+
+                    # Queue the sync
+                    queue_entry = queue_sync(
+                        db=db,
+                        user_id=current_user.id,
+                        item_type='page_text',
+                        item_id=str(page.id),
+                        content_hash=content_hash,
+                        target_name=integration.target_name,
+                        page_uuid=page_uuid,
+                        notebook_uuid=notebook_uuid,
+                        page_number=page_number,
+                        metadata={
+                            'notebook_name': notebook.visible_name,
+                            'notebook_id': notebook.id,
+                            'page_id': page.id,
+                        }
+                    )
+
+                    logger.info(
+                        f"Queued sync to {integration.target_name}: "
+                        f"queue_id={queue_entry.id}, status={queue_entry.status}"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to queue sync to {integration.target_name}: {e}")
+                    # Don't fail the whole request if queueing fails
+
+            db.commit()
 
         return ProcessRMFileResponse(
             success=True,

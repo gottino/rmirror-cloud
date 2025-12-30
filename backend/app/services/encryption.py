@@ -3,11 +3,14 @@
 Used for encrypting integration credentials at rest.
 """
 
+import base64
+import hashlib
 import json
-import os
 from typing import Any
 
 from cryptography.fernet import Fernet
+
+from app.config import get_settings
 
 
 class EncryptionService:
@@ -20,7 +23,8 @@ class EncryptionService:
 
     def __init__(self):
         """Initialize encryption service with master key from environment."""
-        master_key = os.getenv("INTEGRATION_MASTER_KEY")
+        settings = get_settings()
+        master_key = settings.integration_master_key
 
         if not master_key:
             raise ValueError(
@@ -38,8 +42,7 @@ class EncryptionService:
         """
         Derive a user-specific encryption key.
 
-        Uses the master key to encrypt the user_id, creating a deterministic
-        but unique key for each user.
+        Uses SHA256 to derive a deterministic key from master key + user_id.
 
         Args:
             user_id: User ID to derive key for
@@ -47,18 +50,19 @@ class EncryptionService:
         Returns:
             Fernet instance with user-specific key
         """
+        # Get master key bytes
+        master_key_bytes = self.master_fernet._encryption_key  # Access the raw key
+
         # Create deterministic salt from user_id
         user_salt = f"user_{user_id}_salt".encode()
 
-        # Derive user key by encrypting the salt with master key
-        # This creates a unique, reproducible key per user
-        user_key_material = self.master_fernet.encrypt(user_salt)
+        # Derive user key using SHA256 hash of master key + user salt
+        key_material = hashlib.sha256(master_key_bytes + user_salt).digest()
 
-        # Use first 32 bytes as Fernet key (Fernet needs 32 url-safe base64-encoded bytes)
-        # We'll use the encrypted material directly as it's already the right format
-        user_fernet = Fernet(user_key_material[:44])  # Fernet keys are 44 bytes when base64 encoded
+        # Encode as base64 for Fernet (Fernet expects url-safe base64-encoded 32 bytes)
+        user_key = base64.urlsafe_b64encode(key_material)
 
-        return user_fernet
+        return Fernet(user_key)
 
     def encrypt_config(self, config_dict: dict[str, Any], user_id: int) -> str:
         """

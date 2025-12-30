@@ -4,7 +4,7 @@ import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Settings, CreditCard, Menu, Home as HomeIcon, Folder } from 'lucide-react';
+import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, CreditCard, Menu, Home as HomeIcon, Folder } from 'lucide-react';
 import { getNotebooksTree, trackAgentDownload, getAgentStatus, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus } from '@/lib/api';
 
 // Group notebooks by date
@@ -353,10 +353,10 @@ export default function Home() {
           ) : null}
         </div>
 
-        {/* Settings and Billing links */}
+        {/* Integrations and Billing links */}
         <div className="border-t p-4 space-y-1" style={{ borderColor: 'var(--border)' }}>
           <Link
-            href="/settings"
+            href="/integrations"
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
             style={{
               color: 'var(--warm-charcoal)',
@@ -364,8 +364,8 @@ export default function Home() {
               fontWeight: 500
             }}
           >
-            <Settings className="w-5 h-5" />
-            Settings
+            <Puzzle className="w-5 h-5" />
+            Integrations
           </Link>
           <Link
             href="/billing"

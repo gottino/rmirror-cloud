@@ -1,0 +1,144 @@
+# Backend API Development Context
+
+## What This Is
+FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync, and data storage.
+
+## Tech Stack
+- **Framework**: FastAPI with async/await
+- **Database**: PostgreSQL (production), SQLite (local dev)
+- **ORM**: SQLAlchemy 2.0
+- **Queue**: SyncQueue table with background worker
+- **OCR**: Mistral OCR API (primary), Claude Vision (fallback)
+- **Deployment**: Hetzner VPS (167.235.74.51) via GitHub Actions
+
+## Key Architecture Patterns
+- **Background sync worker**: Asyncio-based worker (app/services/sync_worker.py) polls queue every 5s
+- **Database-driven deduplication**: SyncRecord table tracks what's synced (not Notion-based)
+- **Upsert pattern**: Query by page identifier (notebook_uuid + page_number), update content_hash
+- **Content hashing**: SHA-256 for change detection, stored in database only
+
+## Critical Files
+- `app/main.py`: FastAPI app, lifespan events, sync worker startup
+- `app/models/`: SQLAlchemy models (Notebook, Page, SyncQueue, SyncRecord, IntegrationConfig)
+- `app/api/`: Route handlers organized by resource
+- `app/services/sync_worker.py`: Background worker for sync queue processing
+- `app/integrations/notion_sync.py`: Notion sync implementation
+- `app/core/sync_engine.py`: Sync engine abstraction
+
+## Database Schema (Key Tables)
+- `users`: User accounts
+- `notebooks`: reMarkable notebooks (uuid, visible_name, parent_uuid)
+- `pages`: Notebook pages (page_number, ocr_text, content_hash)
+- `sync_queue`: Pending sync tasks (item_type, content_hash, status, priority)
+- `sync_records`: Sync history (external_id = Notion block ID, content_hash for dedup)
+- `integration_configs`: User integration settings (encrypted credentials)
+
+## Recent Major Changes
+- **2024-12-30**: Refactored to database-driven deduplication (removed Notion block title hashes)
+- **2024-12-30**: Fixed upsert logic to query by page identifier instead of content_hash
+- **2024-12-30**: Added archived block handling (treat as deleted, create fresh)
+- **2024-12**: Migrated from SQLite to PostgreSQL
+- **2024-12**: Implemented background sync worker with asyncio
+
+## When Working Here
+
+### Before Making Changes
+1. Read database schema docs if touching models
+2. Check app/integrations/notion_sync.py for Notion sync patterns
+3. Review rm-int-src/integrations/notion_incremental.py (working reference implementation)
+
+### Database Changes
+1. Create Alembic migration if schema changes
+2. Test migration on local SQLite first
+3. Update models in app/models/
+4. Document in schema docs
+
+### Notion Sync Changes
+1. Database is source of truth (SyncRecord table)
+2. Use page identifier (notebook_uuid + page_number) for deduplication
+3. Handle archived blocks gracefully (catch "Can't edit block that is archived")
+4. Clean page titles in Notion: "📄 Page 81" (no hashes!)
+
+### Testing
+1. Run: `poetry run pytest` (if tests exist)
+2. Manual test: Upload via API → Check queue → Verify worker processes → Check Notion
+3. Check logs: `tail -f /var/log/rmirror/backend.log` (on server)
+
+### Deployment
+1. Push to main branch triggers GitHub Actions
+2. Deployed to Hetzner VPS via SSH
+3. Server restarts uvicorn automatically
+4. Check deployment: `ssh deploy@167.235.74.51 'systemctl status rmirror-backend'`
+
+## Common Tasks
+
+### Add New API Endpoint
+```python
+# 1. Add route in app/api/[resource].py
+# 2. Update OpenAPI docs
+# 3. Test locally
+# 4. Commit and push (auto-deploys)
+```
+
+### Add New Integration
+```python
+# 1. Create app/integrations/[name]_sync.py
+# 2. Inherit from BaseSyncTarget (or follow NotionSyncTarget pattern)
+# 3. Implement sync_item() method
+# 4. Add to sync_worker.py target selection
+# 5. Create IntegrationConfig entry in database
+```
+
+### Debug Sync Issues
+```python
+# 1. Check SyncQueue: SELECT * FROM sync_queue WHERE status = 'failed';
+# 2. Check SyncRecord: SELECT * FROM sync_records WHERE page_number = X;
+# 3. Check worker logs for errors
+# 4. Verify IntegrationConfig is enabled and has valid credentials
+```
+
+## Environment Variables
+- `DATABASE_URL`: PostgreSQL connection string
+- `NOTION_CLIENT_ID`, `NOTION_CLIENT_SECRET`, `NOTION_REDIRECT_URI`: OAuth
+- `DEBUG`: Enable SSL verification bypass (local dev only)
+- See `.env.example` for full list
+
+## Local Development
+```bash
+# Start server
+cd backend
+poetry install
+poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Server starts sync worker automatically on lifespan startup
+# Access API: http://localhost:8000
+# Docs: http://localhost:8000/docs
+```
+
+## Production Server
+- **Host**: Hetzner VPS (167.235.74.51)
+- **Access**: `ssh deploy@167.235.74.51`
+- **Logs**: `/var/log/rmirror/backend.log`
+- **Service**: `systemctl status rmirror-backend`
+- **Database**: PostgreSQL on same server
+- **Env**: `/var/www/rmirror-cloud/backend/.env`
+
+## Gotchas
+- SQLAlchemy sessions must be closed in finally blocks (especially in background workers)
+- Notion API 2025-09-03 requires data source API for adding properties
+- Content hash UNIQUE constraint requires page identifier for upsert queries
+- Archived Notion blocks throw "Can't edit block that is archived" - catch and treat as deleted
+- Background worker runs in asyncio event loop - use async/await throughout
+
+## Reference Implementations
+- **Local working implementation**: `rm-int-src/integrations/notion_incremental.py`
+- **Database schema**: See app/models/
+- **Sync patterns**: app/services/sync_worker.py + app/integrations/notion_sync.py
+
+## Related Documentation
+- Main repo: `README.md` (user-facing)
+- API docs: Auto-generated at `/docs` endpoint
+- Dev context: `../dev-context/` (private git repo, gitignored)
+  - System overview: `../dev-context/architecture/system-overview.md`
+  - Technical decisions: `../dev-context/decisions/technical-decisions.md`
+  - Current state: `../dev-context/state/current-state.md`

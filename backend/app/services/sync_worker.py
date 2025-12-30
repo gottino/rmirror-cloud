@@ -1,0 +1,352 @@
+"""Background worker for processing sync queue."""
+
+import asyncio
+import json
+import logging
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy.orm import Session
+
+from app.core.sync_engine import SyncItem, SyncItemType
+from app.database import SessionLocal
+from app.integrations.notion_sync import NotionSyncTarget
+from app.models.notebook import Notebook
+from app.models.page import Page
+from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
+
+logger = logging.getLogger(__name__)
+
+
+class SyncWorker:
+    """Background worker that processes items from the sync queue."""
+
+    def __init__(self, poll_interval: int = 5):
+        """
+        Initialize sync worker.
+
+        Args:
+            poll_interval: Seconds to wait between checking for new items (default: 5)
+        """
+        self.poll_interval = poll_interval
+        self.running = False
+        self._task: Optional[asyncio.Task] = None
+
+    async def start(self):
+        """Start the background worker."""
+        if self.running:
+            logger.warning("Sync worker already running")
+            return
+
+        self.running = True
+        self._task = asyncio.create_task(self._run())
+        logger.info(f"🔄 Sync worker started (poll interval: {self.poll_interval}s)")
+
+    async def stop(self):
+        """Stop the background worker."""
+        if not self.running:
+            return
+
+        self.running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        logger.info("🛑 Sync worker stopped")
+
+    async def _run(self):
+        """Main worker loop that polls the queue and processes items."""
+        logger.info("Starting sync worker main loop")
+
+        while self.running:
+            try:
+                # Process pending items
+                await self._process_pending_items()
+
+                # Wait before next poll
+                await asyncio.sleep(self.poll_interval)
+
+            except asyncio.CancelledError:
+                logger.info("Sync worker cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in sync worker loop: {e}", exc_info=True)
+                # Continue running even if there's an error
+                await asyncio.sleep(self.poll_interval)
+
+    async def _process_pending_items(self, limit: int = 10):
+        """
+        Process pending items from the queue.
+
+        Args:
+            limit: Maximum number of items to process in one batch
+        """
+        db: Session = SessionLocal()
+        try:
+            # Get pending items
+            pending_items = (
+                db.query(SyncQueue)
+                .filter(
+                    SyncQueue.status == 'pending',
+                    SyncQueue.scheduled_at <= datetime.utcnow(),
+                )
+                .order_by(
+                    SyncQueue.priority.asc(),  # Lower number = higher priority
+                    SyncQueue.created_at.asc(),  # FIFO within same priority
+                )
+                .limit(limit)
+                .all()
+            )
+
+            if not pending_items:
+                return
+
+            logger.info(f"Processing {len(pending_items)} pending sync items")
+
+            for queue_item in pending_items:
+                try:
+                    await self._process_queue_item(db, queue_item)
+                except Exception as e:
+                    logger.error(
+                        f"Error processing queue item {queue_item.id}: {e}",
+                        exc_info=True
+                    )
+                    # Mark as failed
+                    queue_item.status = 'failed'
+                    queue_item.error_message = str(e)
+                    queue_item.retry_count += 1
+                    db.commit()
+
+        finally:
+            db.close()
+
+    async def _process_queue_item(self, db: Session, queue_item: SyncQueue):
+        """
+        Process a single queue item.
+
+        Args:
+            db: Database session
+            queue_item: Queue item to process
+        """
+        # Mark as processing
+        queue_item.status = 'processing'
+        queue_item.retry_count += 1
+        queue_item.started_at = datetime.utcnow()
+        db.commit()
+
+        logger.info(
+            f"Processing queue item {queue_item.id}: "
+            f"{queue_item.item_type} -> {queue_item.target_name}"
+        )
+
+        # Get integration config
+        config = (
+            db.query(IntegrationConfig)
+            .filter(
+                IntegrationConfig.user_id == queue_item.user_id,
+                IntegrationConfig.target_name == queue_item.target_name,
+                IntegrationConfig.is_enabled == True,
+            )
+            .first()
+        )
+
+        if not config:
+            logger.warning(
+                f"No active integration found for {queue_item.target_name}"
+            )
+            queue_item.status = 'failed'
+            queue_item.error_message = f"Integration {queue_item.target_name} not active"
+            db.commit()
+            return
+
+        # Process based on item type
+        if queue_item.item_type == 'page_text':
+            await self._process_page_sync(db, queue_item, config)
+        else:
+            logger.warning(f"Unsupported item type: {queue_item.item_type}")
+            queue_item.status = 'failed'
+            queue_item.error_message = f"Unsupported item type: {queue_item.item_type}"
+            db.commit()
+
+    async def _process_page_sync(
+        self,
+        db: Session,
+        queue_item: SyncQueue,
+        config: IntegrationConfig
+    ):
+        """
+        Process a page text sync.
+
+        Args:
+            db: Database session
+            queue_item: Queue item
+            config: Integration config
+        """
+        # Get the page data
+        page = db.query(Page).filter(Page.id == int(queue_item.item_id)).first()
+        if not page:
+            logger.warning(f"Page {queue_item.item_id} not found")
+            queue_item.status = 'failed'
+            queue_item.error_message = "Page not found"
+            db.commit()
+            return
+
+        # Get notebook info
+        notebook = db.query(Notebook).filter(Notebook.id == page.notebook_id).first()
+
+        # Get decrypted config
+        config_dict = config.get_config()
+
+        # Create appropriate sync target
+        if queue_item.target_name == 'notion':
+            target = NotionSyncTarget(
+                access_token=config_dict.get('access_token'),
+                database_id=config_dict.get('database_id'),
+            )
+        else:
+            logger.warning(f"Unknown target: {queue_item.target_name}")
+            queue_item.status = 'failed'
+            queue_item.error_message = f"Unknown target: {queue_item.target_name}"
+            db.commit()
+            return
+
+        # Check if this page was previously synced to get the existing Notion block ID
+        existing_record = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == queue_item.user_id,
+                SyncRecord.notebook_uuid == queue_item.notebook_uuid,
+                SyncRecord.page_number == queue_item.page_number,
+                SyncRecord.target_name == queue_item.target_name,
+            )
+            .first()
+        )
+
+        existing_block_id = existing_record.external_id if existing_record else None
+        existing_content_hash = existing_record.content_hash if existing_record else None
+
+        # Check if content actually changed
+        content_changed = existing_content_hash != queue_item.content_hash
+
+        if existing_record and not content_changed:
+            # Content unchanged, skip sync
+            logger.info(f"⏭️ Page {queue_item.page_number} unchanged, skipping Notion sync")
+            queue_item.status = 'completed'
+            queue_item.completed_at = datetime.utcnow()
+            db.commit()
+            return
+
+        # Create sync item with existing block ID if available
+        metadata = json.loads(queue_item.metadata_json) if queue_item.metadata_json else {}
+        sync_item = SyncItem(
+            item_type=SyncItemType.PAGE_TEXT,
+            item_id=str(page.id),
+            content_hash=queue_item.content_hash,
+            data={
+                'page_uuid': queue_item.page_uuid,
+                'notebook_uuid': queue_item.notebook_uuid,
+                'page_number': queue_item.page_number,
+                'text': page.ocr_text or '',
+                'notebook_name': notebook.visible_name if notebook else 'Unknown',
+                'existing_block_id': existing_block_id,  # Pass existing block ID
+                'user_id': queue_item.user_id,
+                **metadata
+            },
+            source_table='pages',
+            created_at=page.created_at,
+            updated_at=page.updated_at,
+        )
+
+        # Sync the item
+        result = await target.sync_item(sync_item)
+
+        if result.success:
+            # Check if sync record already exists (upsert pattern)
+            # Use page identifier (notebook_uuid + page_number), not content_hash
+            # since content_hash changes when page content changes
+            existing_record = (
+                db.query(SyncRecord)
+                .filter(
+                    SyncRecord.user_id == queue_item.user_id,
+                    SyncRecord.notebook_uuid == queue_item.notebook_uuid,
+                    SyncRecord.page_number == queue_item.page_number,
+                    SyncRecord.target_name == queue_item.target_name,
+                )
+                .first()
+            )
+
+            if existing_record:
+                # Update existing record with new content hash and block ID
+                existing_record.external_id = result.target_id
+                existing_record.content_hash = queue_item.content_hash
+                existing_record.status = 'success'
+                existing_record.synced_at = datetime.utcnow()
+                existing_record.updated_at = datetime.utcnow()
+                logger.info(f"Updated existing sync record for page {page.id}")
+            else:
+                # Create new sync record
+                sync_record = SyncRecord(
+                    user_id=queue_item.user_id,
+                    target_name=queue_item.target_name,
+                    item_type=queue_item.item_type,
+                    item_id=queue_item.item_id,
+                    content_hash=queue_item.content_hash,
+                    external_id=result.target_id,
+                    status='success',
+                    synced_at=datetime.utcnow(),
+                    page_uuid=queue_item.page_uuid,
+                    notebook_uuid=queue_item.notebook_uuid,
+                    page_number=queue_item.page_number,
+                )
+                db.add(sync_record)
+
+            # Mark queue item as completed
+            queue_item.status = 'completed'
+            queue_item.completed_at = datetime.utcnow()
+
+            logger.info(
+                f"✅ Successfully synced page {page.id} (page {queue_item.page_number}) "
+                f"to {queue_item.target_name}"
+            )
+        else:
+            queue_item.status = 'failed'
+            queue_item.error_message = result.error_message
+            logger.error(
+                f"❌ Failed to sync page {page.id}: {result.error_message}"
+            )
+
+        db.commit()
+
+
+# Global worker instance
+_worker: Optional[SyncWorker] = None
+
+
+async def start_sync_worker(poll_interval: int = 5):
+    """
+    Start the global sync worker.
+
+    Args:
+        poll_interval: Seconds to wait between checking for new items
+    """
+    global _worker
+
+    if _worker is not None:
+        logger.warning("Sync worker already exists")
+        return
+
+    _worker = SyncWorker(poll_interval=poll_interval)
+    await _worker.start()
+
+
+async def stop_sync_worker():
+    """Stop the global sync worker."""
+    global _worker
+
+    if _worker is None:
+        return
+
+    await _worker.stop()
+    _worker = None

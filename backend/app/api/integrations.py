@@ -12,6 +12,7 @@ from app.auth.dependencies import get_current_active_user
 from app.core.unified_sync_manager import UnifiedSyncManager
 from app.database import get_db
 from app.integrations.notion_sync import NotionSyncTarget
+from app.integrations.notion_todos_sync import NotionTodosSyncTarget
 from app.models.sync_record import IntegrationConfig
 from app.models.user import User
 
@@ -310,20 +311,34 @@ async def test_integration(
                 status_code=404, detail=f"Integration '{target_name}' not found"
             )
 
-        config_dict = json.loads(config.config_json)
+        config_dict = config.get_config()  # Use encrypted config
 
         # Create sync target based on type
         if target_name == "notion":
-            api_token = config_dict.get("api_token")
+            # Support both OAuth (access_token) and manual (api_token) for backwards compatibility
+            access_token = config_dict.get("access_token") or config_dict.get("api_token")
             database_id = config_dict.get("database_id")
 
-            if not api_token or not database_id:
+            if not access_token or not database_id:
                 raise HTTPException(
                     status_code=400,
-                    detail="Notion integration requires api_token and database_id",
+                    detail="Notion integration requires access_token/api_token and database_id",
                 )
 
-            target = NotionSyncTarget(api_token=api_token, database_id=database_id)
+            target = NotionSyncTarget(access_token=access_token, database_id=database_id)
+
+        elif target_name == "notion-todos":
+            # Notion todos integration - syncs to separate todos database
+            access_token = config_dict.get("access_token") or config_dict.get("api_token")
+            database_id = config_dict.get("database_id")  # todos_database_id
+
+            if not access_token or not database_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Notion Todos integration requires access_token and database_id",
+                )
+
+            target = NotionTodosSyncTarget(access_token=access_token, database_id=database_id)
 
         else:
             raise HTTPException(

@@ -149,9 +149,11 @@ def queue_page_sync(
     page_uuid: Optional[str] = None,
 ) -> list[SyncQueue]:
     """
-    Queue page sync to all enabled integrations.
+    Queue page sync to all enabled notebook integrations.
 
     Called when OCR completes for a page.
+    Only queues to integrations that support page text (notion, etc.).
+    Does NOT queue to todo-only integrations (notion-todos, todoist, ticktick).
 
     Args:
         db: Database session
@@ -178,12 +180,17 @@ def queue_page_sync(
     # Generate content hash
     content_hash = fingerprint_page(notebook_uuid, page_number, ocr_text, page_uuid)
 
-    # Get all enabled integrations for user
+    # Define integration types that should NOT receive page syncs
+    # These are todo-only integrations
+    TODO_ONLY_INTEGRATIONS = ['notion-todos', 'todoist', 'ticktick']
+
+    # Get all enabled integrations that support page syncs
     integrations = (
         db.query(IntegrationConfig)
         .filter(
             IntegrationConfig.user_id == user_id,
             IntegrationConfig.is_enabled == True,
+            ~IntegrationConfig.target_name.in_(TODO_ONLY_INTEGRATIONS),
         )
         .all()
     )
@@ -217,7 +224,10 @@ def queue_todo_sync(
     page_uuid: Optional[str] = None,
 ) -> list[SyncQueue]:
     """
-    Queue todo sync to all enabled integrations.
+    Queue todo sync to all enabled todo-specific integrations.
+
+    Only queues to integrations that support todos (notion-todos, todoist, ticktick, etc.).
+    Does NOT queue to general notebook integrations (notion).
 
     Args:
         db: Database session
@@ -234,12 +244,17 @@ def queue_todo_sync(
     # Generate content hash and fuzzy signature
     content_hash, _ = fingerprint_todo(todo_text, notebook_uuid, page_number)
 
-    # Get all enabled integrations
+    # Define which integration types support todos
+    # These are dedicated todo integrations, NOT general notebook integrations
+    TODO_INTEGRATION_TYPES = ['notion-todos', 'todoist', 'ticktick']
+
+    # Get all enabled integrations that support todos
     integrations = (
         db.query(IntegrationConfig)
         .filter(
             IntegrationConfig.user_id == user_id,
             IntegrationConfig.is_enabled == True,
+            IntegrationConfig.target_name.in_(TODO_INTEGRATION_TYPES),
         )
         .all()
     )

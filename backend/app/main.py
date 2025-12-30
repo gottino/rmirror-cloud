@@ -16,9 +16,19 @@ async def lifespan(app: FastAPI):
     """Handle application lifecycle events."""
     # Startup
     print("🚀 Starting rMirror Cloud API...")
+
+    # Start background sync worker
+    from app.services.sync_worker import start_sync_worker
+    await start_sync_worker(poll_interval=5)
+
     yield
+
     # Shutdown
     print("👋 Shutting down rMirror Cloud API...")
+
+    # Stop background sync worker
+    from app.services.sync_worker import stop_sync_worker
+    await stop_sync_worker()
 
 
 # Create FastAPI application

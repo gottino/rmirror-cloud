@@ -107,6 +107,14 @@ class Settings(BaseSettings):
     resend_from_name: str = "rMirror Cloud"
     admin_email: Optional[str] = None
 
+    # Notion OAuth Integration
+    notion_client_id: Optional[str] = None
+    notion_client_secret: Optional[str] = None
+    notion_redirect_uri: Optional[str] = None
+
+    # Integration Encryption
+    integration_master_key: Optional[str] = None
+
 
 @lru_cache
 def get_settings() -> Settings:
