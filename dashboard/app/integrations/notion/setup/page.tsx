@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useAuth, UserButton } from '@clerk/nextjs';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Menu } from 'lucide-react';
@@ -14,7 +14,7 @@ import {
   NotionPage,
 } from '@/lib/api';
 
-export default function NotionSetupPage() {
+function NotionSetupContent() {
   const { getToken } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -321,5 +321,24 @@ export default function NotionSetupPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function NotionSetupPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen bg-gray-50">
+          <div className="bg-white rounded-lg shadow-lg p-8">
+            <div className="flex justify-center mb-4">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black"></div>
+            </div>
+            <h2 className="text-xl font-semibold text-center">Loading...</h2>
+          </div>
+        </div>
+      }
+    >
+      <NotionSetupContent />
+    </Suspense>
   );
 }
