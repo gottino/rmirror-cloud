@@ -54,6 +54,35 @@ class UnifiedSyncManager:
         self.logger = logging.getLogger(f"{__name__}.UnifiedSyncManager")
         self.targets: Dict[str, SyncTarget] = {}
 
+    def _get_page_count_from_content(self, notebook: Notebook) -> int:
+        """
+        Get page count from notebook's .content file.
+
+        Args:
+            notebook: Notebook instance
+
+        Returns:
+            Page count from .content file, or 0 if not available
+        """
+        if not notebook.content_json:
+            return 0
+
+        try:
+            content_data = json.loads(notebook.content_json)
+            # Try pageCount field first (most accurate)
+            page_count = content_data.get("pageCount")
+            if page_count is not None:
+                return page_count
+
+            # Fallback: count pages array
+            pages_array = content_data.get("pages", [])
+            if not pages_array and "cPages" in content_data:
+                pages_array = content_data.get("cPages", {}).get("pages", [])
+            return len(pages_array)
+        except Exception as e:
+            self.logger.warning(f"Failed to parse content_json for page count: {e}")
+            return 0
+
     def register_target(self, target: SyncTarget):
         """
         Register a sync target with the unified manager.
@@ -661,12 +690,16 @@ class UnifiedSyncManager:
                     ]
                 )
 
+                # Get page count from .content file (reMarkable's source of truth)
+                page_count = self._get_page_count_from_content(notebook)
+
                 # Build notebook data
                 notebook_data = {
                     "notebook_uuid": notebook.notebook_uuid,
                     "notebook_name": notebook.visible_name or "Untitled Notebook",
                     "title": notebook.visible_name or "Untitled Notebook",
                     "pages": pages_data,
+                    "page_count": page_count,  # From .content file
                     "full_path": notebook.full_path or "",
                     "last_opened_at": notebook.last_opened.isoformat() if notebook.last_opened else None,
                     "last_modified_at": notebook.updated_at.isoformat(),
@@ -765,6 +798,9 @@ class UnifiedSyncManager:
                     ]
                 )
 
+                # Get page count from .content file (reMarkable's source of truth)
+                page_count = self._get_page_count_from_content(notebook)
+
                 # Build notebook data
                 notebook_data = {
                     "notebook_uuid": notebook.notebook_uuid,
@@ -772,7 +808,7 @@ class UnifiedSyncManager:
                     "title": notebook.visible_name or "Untitled Notebook",
                     "pages": pages_data,
                     "text_content": text_content,
-                    "page_count": len(pages_data),
+                    "page_count": page_count,  # From .content file, not len(pages_data)
                     "type": "notebook",
                     "full_path": notebook.full_path,
                     "created_at": notebook.created_at.isoformat(),

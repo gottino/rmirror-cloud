@@ -507,14 +507,20 @@ async def update_notebook_metadata(
                 from app.core.unified_sync_manager import UnifiedSyncManager
                 from app.core.sync_engine import SyncItem, ContentFingerprint
                 from app.models.sync_record import SyncItemType
-                from app.models.notebook_page import NotebookPage
 
-                # Get page count (lightweight - just count, no content loading)
-                page_count = (
-                    db.query(NotebookPage)
-                    .filter(NotebookPage.notebook_id == notebook.id)
-                    .count()
-                )
+                # Get page count from .content file (no DB query needed)
+                page_count = 0
+                if notebook.content_json:
+                    try:
+                        content_data = json.loads(notebook.content_json)
+                        page_count = content_data.get("pageCount", 0)
+                    except Exception as e:
+                        logger.warning(f"Failed to parse content_json for page count: {e}")
+                        # Fallback: use length of pages array if available
+                        pages_array = content_data.get("pages", [])
+                        if not pages_array and "cPages" in content_data:
+                            pages_array = content_data.get("cPages", {}).get("pages", [])
+                        page_count = len(pages_array)
 
                 # Build lightweight metadata-only data (no page content)
                 notebook_metadata = {
