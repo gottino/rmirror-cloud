@@ -23,6 +23,7 @@ class SyncItemType(str, Enum):
     """Type of item being synced."""
 
     NOTEBOOK = "notebook"
+    NOTEBOOK_METADATA = "notebook_metadata"  # Lightweight metadata-only sync
     PAGE_TEXT = "page_text"
     TODO = "todo"
     HIGHLIGHT = "highlight"

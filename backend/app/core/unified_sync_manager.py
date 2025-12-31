@@ -118,6 +118,8 @@ class UnifiedSyncManager:
                     # Fallback: use ContentFingerprint
                     if item.item_type == SyncItemType.NOTEBOOK:
                         item.content_hash = ContentFingerprint.for_notebook(item.data)
+                    elif item.item_type == SyncItemType.NOTEBOOK_METADATA:
+                        item.content_hash = ContentFingerprint.for_notebook_metadata(item.data)
                     elif item.item_type == SyncItemType.PAGE_TEXT:
                         item.content_hash = ContentFingerprint.for_page(item.data)
                     elif item.item_type == SyncItemType.TODO:
@@ -666,6 +668,8 @@ class UnifiedSyncManager:
                     "title": notebook.visible_name or "Untitled Notebook",
                     "pages": pages_data,
                     "full_path": notebook.full_path or "",
+                    "last_opened_at": notebook.last_opened.isoformat() if notebook.last_opened else None,
+                    "last_modified_at": notebook.updated_at.isoformat(),
                 }
 
                 content_hash = ContentFingerprint.for_notebook(notebook_data)
@@ -773,6 +777,8 @@ class UnifiedSyncManager:
                     "full_path": notebook.full_path,
                     "created_at": notebook.created_at.isoformat(),
                     "updated_at": notebook.updated_at.isoformat(),
+                    "last_opened_at": notebook.last_opened.isoformat() if notebook.last_opened else None,
+                    "last_modified_at": notebook.updated_at.isoformat(),
                 }
 
                 # Generate content hash

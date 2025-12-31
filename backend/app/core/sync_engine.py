@@ -200,12 +200,49 @@ class ContentFingerprint:
         title = notebook_data.get("title", notebook_data.get("notebook_name", ""))
         text_content = notebook_data.get("text_content", "")
         page_count = notebook_data.get("page_count", 0)
+        last_opened_at = notebook_data.get("last_opened_at", "")
+        last_modified_at = notebook_data.get("last_modified_at", "")
 
         # Create normalized content string
         content_parts = [
             f"title:{title}",
             f"pages:{page_count}",
             f"content:{text_content[:1000]}",  # First 1000 chars to keep hash stable
+            f"last_opened:{last_opened_at}",  # Include metadata timestamps
+            f"last_modified:{last_modified_at}",
+        ]
+
+        content_str = "|".join(content_parts)
+        return hashlib.sha256(content_str.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def for_notebook_metadata(notebook_data: Dict[str, Any]) -> str:
+        """
+        Generate content fingerprint for notebook metadata only (lightweight).
+
+        This hash changes only when metadata changes, not when page content changes.
+        Used for metadata-only syncs to avoid processing all page content.
+
+        Args:
+            notebook_data: Notebook metadata dictionary
+
+        Returns:
+            SHA-256 hash of the normalized metadata
+        """
+        # Extract only metadata fields
+        title = notebook_data.get("title", notebook_data.get("notebook_name", ""))
+        page_count = notebook_data.get("page_count", 0)
+        full_path = notebook_data.get("full_path", "")
+        last_opened_at = notebook_data.get("last_opened_at", "")
+        last_modified_at = notebook_data.get("last_modified_at", "")
+
+        # Create normalized metadata string (no content)
+        content_parts = [
+            f"title:{title}",
+            f"pages:{page_count}",
+            f"path:{full_path}",
+            f"last_opened:{last_opened_at}",
+            f"last_modified:{last_modified_at}",
         ]
 
         content_str = "|".join(content_parts)

@@ -34,6 +34,10 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - `integration_configs`: User integration settings (encrypted credentials)
 
 ## Recent Major Changes
+- **2024-12-31**: Separated metadata sync from content sync (NOTEBOOK_METADATA type for lightweight updates)
+- **2024-12-31**: Notebook metadata (lastOpened, page count) now syncs to Notion on every metadata update
+- **2024-12-31**: Added ContentFingerprint.for_notebook_metadata() for metadata-only hashing
+- **2024-12-31**: Metadata updates 50-100x faster (~100ms vs ~5s) - no page content processing
 - **2024-12-30**: Switched to page_uuid (reMarkable's ID) for deduplication instead of composite keys
 - **2024-12-30**: Migration 51324b8f201a - Updated sync_records indexes for page_uuid uniqueness
 - **2024-12-30**: Refactored to database-driven deduplication (removed Notion block title hashes)
@@ -61,6 +65,9 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 3. Handle archived blocks gracefully (catch "Can't edit block that is archived")
 4. Clean page titles in Notion: "📄 Page 81" (no hashes!)
 5. Unique constraint on (page_uuid, target_name, user_id) prevents duplicates
+6. Two sync types: NOTEBOOK (full content) vs NOTEBOOK_METADATA (lightweight)
+7. Metadata syncs only update Notion properties, not content blocks
+8. /metadata/update endpoint triggers lightweight NOTEBOOK_METADATA sync
 
 ### Testing
 1. Run: `poetry run pytest` (if tests exist)

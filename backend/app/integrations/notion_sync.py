@@ -57,6 +57,8 @@ class NotionSyncTarget(SyncTarget):
         try:
             if item.item_type == SyncItemType.NOTEBOOK:
                 return await self._sync_notebook(item)
+            elif item.item_type == SyncItemType.NOTEBOOK_METADATA:
+                return await self._sync_notebook_metadata(item)
             elif item.item_type == SyncItemType.PAGE_TEXT:
                 return await self._sync_page_text(item)
             elif item.item_type == SyncItemType.TODO:
@@ -129,6 +131,54 @@ class NotionSyncTarget(SyncTarget):
 
         except Exception as e:
             self.logger.error(f"Error syncing notebook to Notion: {e}")
+            return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
+
+    async def _sync_notebook_metadata(self, item: SyncItem) -> SyncResult:
+        """
+        Sync only notebook metadata (lightweight operation).
+
+        This updates the Notion page properties without touching page content blocks.
+        Used when only metadata changes (e.g., lastOpened timestamp).
+        """
+        try:
+            notebook_data = item.data
+            notebook_uuid = notebook_data.get("notebook_uuid")
+            title = notebook_data.get("title", "Untitled Notebook")
+            full_path = notebook_data.get("full_path", "")
+            page_count = notebook_data.get("page_count", 0)
+            last_opened = notebook_data.get("last_opened_at")
+            last_modified = notebook_data.get("last_modified_at")
+
+            # Check if page exists
+            existing_page_id = await self.find_existing_page(notebook_uuid)
+
+            if not existing_page_id:
+                # Page doesn't exist yet - skip metadata-only sync
+                return SyncResult(
+                    status=SyncStatus.SKIPPED,
+                    metadata={"reason": "Notebook not yet synced, use full notebook sync first"},
+                )
+
+            # Update only the properties (metadata), not the content blocks
+            success = await self._update_notion_page_properties(
+                existing_page_id, notebook_uuid, title, page_count, full_path,
+                last_opened, last_modified
+            )
+
+            if success:
+                return SyncResult(
+                    status=SyncStatus.SUCCESS,
+                    target_id=existing_page_id,
+                    metadata={"action": "metadata_updated"},
+                )
+            else:
+                return SyncResult(
+                    status=SyncStatus.RETRY,
+                    error_message="Failed to update Notion page metadata",
+                )
+
+        except Exception as e:
+            self.logger.error(f"Error syncing notebook metadata to Notion: {e}")
             return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
 
     async def _sync_page_text(self, item: SyncItem) -> SyncResult:
@@ -671,6 +721,71 @@ class NotionSyncTarget(SyncTarget):
 
         except Exception as e:
             self.logger.error(f"Error updating Notion page: {e}")
+            return False
+
+    async def _update_notion_page_properties(
+        self, page_id: str, notebook_uuid: str, title: str, page_count: int, full_path: str,
+        last_opened: Optional[str] = None, last_modified: Optional[str] = None
+    ) -> bool:
+        """
+        Update only Notion page properties (metadata) without touching content blocks.
+
+        This is a lightweight operation for metadata-only updates.
+
+        Args:
+            page_id: Notion page ID
+            notebook_uuid: UUID of the notebook
+            title: Updated title
+            page_count: Number of pages
+            full_path: Updated folder path
+            last_opened: When notebook was last opened on reMarkable (ISO 8601)
+            last_modified: When notebook was last modified on reMarkable (ISO 8601)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            from datetime import datetime
+
+            # Build properties update
+            properties = {
+                "Name": {"title": [{"text": {"content": f"{title} [{notebook_uuid[:8]}]"}}]},
+                "UUID": {"rich_text": [{"text": {"content": notebook_uuid}}]},
+                "Path": {"rich_text": [{"text": {"content": full_path or ""}}]},
+                "Pages": {"number": page_count},
+                "Synced At": {"date": {"start": datetime.utcnow().isoformat()}},
+                "Status": {"select": {"name": "Synced"}},
+            }
+
+            # Update Tags from path
+            tags = self._extract_tags_from_path(full_path)
+            if tags:
+                properties["Tags"] = {"multi_select": [{"name": tag} for tag in tags]}
+            else:
+                properties["Tags"] = {"multi_select": []}
+
+            # Update Last Opened if available
+            if last_opened:
+                try:
+                    properties["Last Opened"] = {"date": {"start": last_opened}}
+                except Exception as e:
+                    self.logger.warning(f"Invalid last_opened format: {last_opened}, error: {e}")
+
+            # Update Last Modified if available
+            if last_modified:
+                try:
+                    properties["Last Modified"] = {"date": {"start": last_modified}}
+                except Exception as e:
+                    self.logger.warning(f"Invalid last_modified format: {last_modified}, error: {e}")
+
+            # Update only properties (no content blocks)
+            self.client.pages.update(page_id=page_id, properties=properties)
+            self.logger.info(f"Updated metadata for Notion page {page_id}: {title}")
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error updating Notion page properties: {e}")
             return False
 
     def _build_page_blocks(self, pages: List[Dict]) -> List[Dict]:
