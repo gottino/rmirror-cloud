@@ -4,6 +4,7 @@ import { useAuth } from '@clerk/nextjs';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState } from 'react';
+import { Check, ArrowRight, Github, Zap, Search as SearchIcon, Cloud, Puzzle } from 'lucide-react';
 
 export default function LandingPage() {
   const { isSignedIn } = useAuth();
@@ -41,324 +42,515 @@ export default function LandingPage() {
   };
 
   return (
-    <div style={{ margin: 0, padding: 0, boxSizing: 'border-box' }}>
-      <style jsx>{`
-        :root {
-          --primary: #2B2B2B;
-          --accent: #E47C37;
-          --text: #333;
-          --text-light: #666;
-          --background: #FAFAFA;
-          --white: #FFFFFF;
-        }
-
-        .container {
-          max-width: 800px;
-          margin: 0 auto;
-          padding: 0 20px;
-        }
-
-        header {
-          padding: 60px 0 0;
-          text-align: center;
-        }
-
-        .logo {
-          width: 120px;
-          height: auto;
-          margin-bottom: 40px;
-        }
-
-        h1 {
-          font-size: 48px;
-          font-weight: 700;
-          color: var(--primary);
-          margin-bottom: 20px;
-          letter-spacing: -1px;
-        }
-
-        .tagline {
-          font-size: 24px;
-          color: var(--text-light);
-          margin-bottom: 60px;
-          font-weight: 300;
-        }
-
-        .hero {
-          background: var(--white);
-          border-radius: 16px;
-          padding: 60px 40px;
-          margin-bottom: 40px;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        }
-
-        .features {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-          gap: 30px;
-          margin: 40px 0 60px;
-        }
-
-        .feature {
-          text-align: center;
-        }
-
-        .feature-icon {
-          font-size: 40px;
-          margin-bottom: 16px;
-        }
-
-        .feature h3 {
-          font-size: 18px;
-          margin-bottom: 8px;
-          color: var(--primary);
-        }
-
-        .feature p {
-          font-size: 14px;
-          color: var(--text-light);
-        }
-
-        .waitlist-section {
-          text-align: center;
-          margin: 60px 0;
-        }
-
-        .waitlist-section h2 {
-          font-size: 32px;
-          margin-bottom: 20px;
-          color: var(--primary);
-        }
-
-        .waitlist-section p {
-          font-size: 18px;
-          color: var(--text-light);
-          margin-bottom: 30px;
-        }
-
-        .waitlist-form {
-          max-width: 500px;
-          margin: 0 auto;
-          display: flex;
-          gap: 12px;
-          flex-wrap: wrap;
-          justify-content: center;
-        }
-
-        input[type="email"] {
-          flex: 1;
-          min-width: 250px;
-          padding: 16px 20px;
-          font-size: 16px;
-          border: 2px solid #E0E0E0;
-          border-radius: 8px;
-          transition: border-color 0.3s;
-        }
-
-        input[type="email"]:focus {
-          outline: none;
-          border-color: var(--accent);
-        }
-
-        button {
-          padding: 16px 32px;
-          font-size: 16px;
-          font-weight: 600;
-          background: var(--accent);
-          color: var(--white);
-          border: none;
-          border-radius: 8px;
-          cursor: pointer;
-          transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        button:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(228, 124, 55, 0.3);
-        }
-
-        button:active {
-          transform: translateY(0);
-        }
-
-        button:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
-        .success-message {
-          padding: 16px;
-          background: #E8F5E9;
-          color: #2E7D32;
-          border-radius: 8px;
-          margin-top: 20px;
-        }
-
-        .error-message {
-          padding: 16px;
-          background: #FFEBEE;
-          color: #C62828;
-          border-radius: 8px;
-          margin-top: 20px;
-        }
-
-        .cta-section {
-          text-align: center;
-          margin: 40px 0;
-        }
-
-        .dashboard-link {
-          display: inline-block;
-          padding: 16px 32px;
-          font-size: 18px;
-          font-weight: 600;
-          background: var(--accent);
-          color: var(--white);
-          text-decoration: none;
-          border-radius: 8px;
-          transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .dashboard-link:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(228, 124, 55, 0.3);
-        }
-
-        .github-link {
-          margin: 40px 0;
-          text-align: center;
-        }
-
-        .github-link a {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          padding: 12px 24px;
-          color: var(--primary);
-          text-decoration: none;
-          border: 2px solid var(--primary);
-          border-radius: 8px;
-          font-weight: 500;
-          transition: all 0.3s;
-        }
-
-        .github-link a:hover {
-          background: var(--primary);
-          color: var(--white);
-        }
-
-        footer {
-          text-align: center;
-          padding: 40px 0;
-          color: var(--text-light);
-          font-size: 14px;
-        }
-
-        @media (max-width: 600px) {
-          h1 {
-            font-size: 36px;
-          }
-
-          .tagline {
-            font-size: 20px;
-          }
-
-          .hero {
-            padding: 40px 24px;
-          }
-
-          .waitlist-form {
-            flex-direction: column;
-          }
-
-          input[type="email"], button {
-            width: 100%;
-          }
-        }
-      `}</style>
-
-      <div className="container">
-        <header>
-          <Image src="/landing-logo.png" alt="rMirror Logo" width={120} height={120} className="logo" />
-          <h1>rMirror Cloud</h1>
-          <p className="tagline">Your reMarkable notes, searchable and accessible everywhere</p>
-        </header>
-
-        <div className="hero">
-          <div className="features">
-            <div className="feature">
-              <div className="feature-icon">🔄</div>
-              <h3>Auto Sync</h3>
-              <p>Seamless background sync from your reMarkable to the cloud</p>
+    <div className="min-h-screen" style={{ background: 'var(--background)' }}>
+      {/* Hero Section */}
+      <section className="relative overflow-hidden">
+        <div className="max-w-6xl mx-auto px-6 py-20 lg:py-28">
+          <div className="text-center max-w-3xl mx-auto">
+            <div className="mb-8">
+              <Image
+                src="/landing-logo.png"
+                alt="rMirror"
+                width={80}
+                height={80}
+                className="mx-auto"
+              />
             </div>
-            <div className="feature">
-              <div className="feature-icon">🔍</div>
-              <h3>OCR Search</h3>
-              <p>Find anything in your handwritten notes with full-text search</p>
-            </div>
-            <div className="feature">
-              <div className="feature-icon">🌐</div>
-              <h3>Web Access</h3>
-              <p>Browse and search your notes from any device, anywhere</p>
-            </div>
-            <div className="feature">
-              <div className="feature-icon">🔒</div>
-              <h3>Self-Hosted</h3>
-              <p>Keep your data private on your own server</p>
-            </div>
+
+            <h1
+              className="text-5xl lg:text-6xl font-bold mb-6"
+              style={{ color: 'var(--warm-charcoal)', lineHeight: '1.1' }}
+            >
+              Your reMarkable Notes,
+              <br />
+              <span style={{ color: 'var(--terracotta)' }}>Searchable Everywhere</span>
+            </h1>
+
+            <p
+              className="text-xl lg:text-2xl mb-10"
+              style={{ color: 'var(--warm-gray)', lineHeight: '1.5' }}
+            >
+              Auto-sync your handwritten notes to the cloud with OCR.
+              Search, access, and integrate with your favorite tools.
+            </p>
+
+            {isSignedIn ? (
+              <Link
+                href="/dashboard"
+                className="inline-flex items-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
+                style={{
+                  background: 'var(--terracotta)',
+                  color: 'white',
+                  boxShadow: 'var(--shadow-md)'
+                }}
+              >
+                Go to Dashboard
+                <ArrowRight className="w-5 h-5" />
+              </Link>
+            ) : (
+              <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                <Link
+                  href="/sign-up"
+                  className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
+                  style={{
+                    background: 'var(--terracotta)',
+                    color: 'white',
+                    boxShadow: 'var(--shadow-md)'
+                  }}
+                >
+                  Start Free
+                  <ArrowRight className="w-5 h-5" />
+                </Link>
+                <a
+                  href="https://github.com/gottino/rmirror-cloud"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all"
+                  style={{
+                    background: 'white',
+                    color: 'var(--warm-charcoal)',
+                    border: '2px solid var(--border)',
+                    boxShadow: 'var(--shadow-sm)'
+                  }}
+                >
+                  <Github className="w-5 h-5" />
+                  View on GitHub
+                </a>
+              </div>
+            )}
+
+            <p className="mt-6 text-sm" style={{ color: 'var(--warm-gray)' }}>
+              Free tier: 30 pages of OCR per month • No credit card required
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Problem Section */}
+      <section className="py-16 lg:py-24" style={{ background: 'var(--soft-cream)' }}>
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <h2
+            className="text-3xl lg:text-4xl font-bold mb-6"
+            style={{ color: 'var(--warm-charcoal)' }}
+          >
+            Love your reMarkable, but...
+          </h2>
+          <p
+            className="text-lg lg:text-xl leading-relaxed"
+            style={{ color: 'var(--warm-gray)' }}
+          >
+            Your handwritten notes are trapped on the device. You can't search them.
+            You can't access them from your phone or computer. They don't integrate
+            with your workflow. <span style={{ color: 'var(--terracotta)', fontWeight: 600 }}>Until now.</span>
+          </p>
+        </div>
+      </section>
+
+      {/* How It Works */}
+      <section className="py-16 lg:py-24">
+        <div className="max-w-5xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2
+              className="text-3xl lg:text-4xl font-bold mb-4"
+              style={{ color: 'var(--warm-charcoal)' }}
+            >
+              How It Works
+            </h2>
+            <p className="text-lg" style={{ color: 'var(--warm-gray)' }}>
+              Get started in 3 simple steps
+            </p>
           </div>
 
-          {isSignedIn ? (
-            <div className="cta-section">
-              <Link href="/dashboard" className="dashboard-link">
-                Go to Dashboard
+          <div className="grid md:grid-cols-3 gap-8">
+            {[
+              {
+                step: '1',
+                title: 'Download Agent',
+                description: 'Install the rMirror agent on your Mac. It runs quietly in the background.',
+                icon: <Cloud className="w-8 h-8" />
+              },
+              {
+                step: '2',
+                title: 'Connect Device',
+                description: 'Sign in and connect your reMarkable. The agent syncs your notebooks automatically.',
+                icon: <Zap className="w-8 h-8" />
+              },
+              {
+                step: '3',
+                title: 'Access Anywhere',
+                description: 'Search your handwritten notes from any device. Sync to Notion, Readwise, and more.',
+                icon: <SearchIcon className="w-8 h-8" />
+              }
+            ].map((item) => (
+              <div
+                key={item.step}
+                className="relative p-8 rounded-xl"
+                style={{ background: 'white', boxShadow: 'var(--shadow-sm)' }}
+              >
+                <div
+                  className="absolute -top-4 -left-4 w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xl"
+                  style={{ background: 'var(--terracotta)' }}
+                >
+                  {item.step}
+                </div>
+                <div className="mb-4" style={{ color: 'var(--terracotta)' }}>
+                  {item.icon}
+                </div>
+                <h3 className="text-xl font-semibold mb-3" style={{ color: 'var(--warm-charcoal)' }}>
+                  {item.title}
+                </h3>
+                <p style={{ color: 'var(--warm-gray)' }}>
+                  {item.description}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Features */}
+      <section className="py-16 lg:py-24" style={{ background: 'var(--soft-cream)' }}>
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2
+              className="text-3xl lg:text-4xl font-bold mb-4"
+              style={{ color: 'var(--warm-charcoal)' }}
+            >
+              Everything You Need
+            </h2>
+            <p className="text-lg" style={{ color: 'var(--warm-gray)' }}>
+              Powerful features to unlock your handwritten notes
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8">
+            {[
+              {
+                icon: <Zap className="w-6 h-6" />,
+                title: 'Automatic Sync',
+                description: 'Your notebooks sync automatically in the background. Never manually export again.',
+                benefits: ['Real-time updates', 'Works while you write', 'Zero maintenance']
+              },
+              {
+                icon: <SearchIcon className="w-6 h-6" />,
+                title: 'Full-Text OCR Search',
+                description: 'Find anything in your handwritten notes instantly with powerful OCR.',
+                benefits: ['Search handwriting', 'Find sketches & diagrams', 'Lightning fast results']
+              },
+              {
+                icon: <Cloud className="w-6 h-6" />,
+                title: 'Web Access',
+                description: 'Access your notes from any browser. Phone, tablet, or computer.',
+                benefits: ['No app install needed', 'Works anywhere', 'Secure cloud storage']
+              },
+              {
+                icon: <Puzzle className="w-6 h-6" />,
+                title: 'Powerful Integrations',
+                description: 'Connect to Notion, Readwise, and more. Fit into your existing workflow.',
+                benefits: ['Notion sync', 'Readwise highlights', 'More coming soon']
+              }
+            ].map((feature, index) => (
+              <div
+                key={index}
+                className="p-8 rounded-xl"
+                style={{ background: 'white', boxShadow: 'var(--shadow-sm)' }}
+              >
+                <div
+                  className="w-12 h-12 rounded-lg flex items-center justify-center mb-4"
+                  style={{ background: 'var(--soft-cream)', color: 'var(--terracotta)' }}
+                >
+                  {feature.icon}
+                </div>
+                <h3 className="text-xl font-semibold mb-3" style={{ color: 'var(--warm-charcoal)' }}>
+                  {feature.title}
+                </h3>
+                <p className="mb-4" style={{ color: 'var(--warm-gray)' }}>
+                  {feature.description}
+                </p>
+                <ul className="space-y-2">
+                  {feature.benefits.map((benefit, i) => (
+                    <li key={i} className="flex items-center gap-2">
+                      <Check className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--sage-green)' }} />
+                      <span className="text-sm" style={{ color: 'var(--warm-gray)' }}>
+                        {benefit}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Pricing */}
+      <section className="py-16 lg:py-24">
+        <div className="max-w-4xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2
+              className="text-3xl lg:text-4xl font-bold mb-4"
+              style={{ color: 'var(--warm-charcoal)' }}
+            >
+              Simple, Transparent Pricing
+            </h2>
+            <p className="text-lg" style={{ color: 'var(--warm-gray)' }}>
+              Start free, upgrade when you need more
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8">
+            {/* Free Tier */}
+            <div
+              className="p-8 rounded-xl border-2"
+              style={{
+                background: 'white',
+                borderColor: 'var(--border)',
+                boxShadow: 'var(--shadow-sm)'
+              }}
+            >
+              <h3 className="text-2xl font-bold mb-2" style={{ color: 'var(--warm-charcoal)' }}>
+                Free
+              </h3>
+              <div className="mb-6">
+                <span className="text-4xl font-bold" style={{ color: 'var(--warm-charcoal)' }}>$0</span>
+                <span className="text-lg" style={{ color: 'var(--warm-gray)' }}>/month</span>
+              </div>
+              <ul className="space-y-3 mb-8">
+                {[
+                  '30 pages OCR per month',
+                  'Automatic sync',
+                  'Web access',
+                  'Basic integrations',
+                  'Community support'
+                ].map((feature, i) => (
+                  <li key={i} className="flex items-center gap-2">
+                    <Check className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--sage-green)' }} />
+                    <span style={{ color: 'var(--warm-charcoal)' }}>{feature}</span>
+                  </li>
+                ))}
+              </ul>
+              <Link
+                href="/sign-up"
+                className="block w-full text-center px-6 py-3 rounded-lg font-semibold transition-all"
+                style={{
+                  background: 'var(--soft-cream)',
+                  color: 'var(--warm-charcoal)',
+                  border: '2px solid var(--border)'
+                }}
+              >
+                Get Started
               </Link>
             </div>
-          ) : (
-            <div className="waitlist-section">
-              <h2>Join the Waitlist</h2>
-              <p>Be the first to know when rMirror Cloud launches</p>
 
-              <form className="waitlist-form" onSubmit={handleSubmit}>
+            {/* Pro Tier */}
+            <div
+              className="p-8 rounded-xl border-2 relative"
+              style={{
+                background: 'white',
+                borderColor: 'var(--terracotta)',
+                boxShadow: 'var(--shadow-md)'
+              }}
+            >
+              <div
+                className="absolute -top-4 left-1/2 transform -translate-x-1/2 px-4 py-1 rounded-full text-sm font-semibold text-white"
+                style={{ background: 'var(--terracotta)' }}
+              >
+                Coming Soon
+              </div>
+              <h3 className="text-2xl font-bold mb-2" style={{ color: 'var(--warm-charcoal)' }}>
+                Pro
+              </h3>
+              <div className="mb-6">
+                <span className="text-4xl font-bold" style={{ color: 'var(--warm-charcoal)' }}>$9</span>
+                <span className="text-lg" style={{ color: 'var(--warm-gray)' }}>/month</span>
+              </div>
+              <ul className="space-y-3 mb-8">
+                {[
+                  'Unlimited OCR pages',
+                  'Priority sync',
+                  'All integrations',
+                  'Advanced search',
+                  'Priority support',
+                  'Self-hosting option'
+                ].map((feature, i) => (
+                  <li key={i} className="flex items-center gap-2">
+                    <Check className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--sage-green)' }} />
+                    <span style={{ color: 'var(--warm-charcoal)' }}>{feature}</span>
+                  </li>
+                ))}
+              </ul>
+              <button
+                disabled
+                className="block w-full text-center px-6 py-3 rounded-lg font-semibold opacity-50 cursor-not-allowed"
+                style={{
+                  background: 'var(--terracotta)',
+                  color: 'white'
+                }}
+              >
+                Coming Soon
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Social Proof */}
+      <section className="py-16 lg:py-24" style={{ background: 'var(--soft-cream)' }}>
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <h2
+            className="text-3xl lg:text-4xl font-bold mb-8"
+            style={{ color: 'var(--warm-charcoal)' }}
+          >
+            Open Source & Self-Hostable
+          </h2>
+          <p className="text-lg mb-8" style={{ color: 'var(--warm-gray)' }}>
+            rMirror is completely open source. Host it yourself or use our cloud service.
+            Your data, your choice.
+          </p>
+          <a
+            href="https://github.com/gottino/rmirror-cloud"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-3 px-8 py-4 rounded-lg font-semibold transition-all hover:scale-105"
+            style={{
+              background: 'var(--warm-charcoal)',
+              color: 'white',
+              boxShadow: 'var(--shadow-md)'
+            }}
+          >
+            <Github className="w-6 h-6" />
+            <span>Star on GitHub</span>
+          </a>
+        </div>
+      </section>
+
+      {/* Final CTA */}
+      {!isSignedIn && (
+        <section className="py-20 lg:py-28">
+          <div className="max-w-3xl mx-auto px-6 text-center">
+            <h2
+              className="text-4xl lg:text-5xl font-bold mb-6"
+              style={{ color: 'var(--warm-charcoal)' }}
+            >
+              Ready to Unlock Your Notes?
+            </h2>
+            <p className="text-xl mb-10" style={{ color: 'var(--warm-gray)' }}>
+              Join the waitlist and be the first to know when we launch.
+            </p>
+
+            <form onSubmit={handleSubmit} className="max-w-md mx-auto">
+              <div className="flex flex-col sm:flex-row gap-3">
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="your.email@example.com"
                   required
+                  className="flex-1 px-6 py-4 rounded-lg text-lg"
+                  style={{
+                    border: '2px solid var(--border)',
+                    background: 'white',
+                    color: 'var(--warm-charcoal)'
+                  }}
                 />
-                <button type="submit" disabled={isSubmitting}>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    background: 'var(--terracotta)',
+                    color: 'white',
+                    boxShadow: 'var(--shadow-md)'
+                  }}
+                >
                   {isSubmitting ? 'Joining...' : 'Join Waitlist'}
                 </button>
-              </form>
+              </div>
 
               {showSuccess && (
-                <div className="success-message">
+                <div
+                  className="mt-4 p-4 rounded-lg"
+                  style={{
+                    background: 'rgba(122, 156, 137, 0.1)',
+                    color: 'var(--sage-green)',
+                    border: '1px solid var(--sage-green)'
+                  }}
+                >
                   Thanks for joining! We'll notify you when we launch.
                 </div>
               )}
               {showError && (
-                <div className="error-message">
+                <div
+                  className="mt-4 p-4 rounded-lg"
+                  style={{
+                    background: 'rgba(220, 38, 38, 0.1)',
+                    color: '#dc2626',
+                    border: '1px solid #dc2626'
+                  }}
+                >
                   Something went wrong. Please try again.
                 </div>
               )}
-            </div>
-          )}
+            </form>
+          </div>
+        </section>
+      )}
 
-          <div className="github-link">
-            <a href="https://github.com/gottino/rmirror-cloud" target="_blank" rel="noopener noreferrer">
-              <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
-              </svg>
-              View on GitHub
-            </a>
+      {/* Footer */}
+      <footer
+        className="py-12 border-t"
+        style={{
+          borderColor: 'var(--border)',
+          background: 'var(--soft-cream)'
+        }}
+      >
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="flex flex-col md:flex-row justify-between items-center gap-6">
+            <div className="flex items-center gap-2">
+              <Image src="/landing-logo.png" alt="rMirror" width={32} height={32} />
+              <span className="font-semibold" style={{ color: 'var(--warm-charcoal)' }}>
+                rMirror Cloud
+              </span>
+            </div>
+
+            <div className="flex gap-8">
+              <a
+                href="https://github.com/gottino/rmirror-cloud"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition-colors"
+                style={{ color: 'var(--warm-gray)' }}
+              >
+                GitHub
+              </a>
+              <a
+                href="https://github.com/gottino/rmirror-cloud/blob/main/README.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition-colors"
+                style={{ color: 'var(--warm-gray)' }}
+              >
+                Docs
+              </a>
+              {isSignedIn && (
+                <Link
+                  href="/dashboard"
+                  className="transition-colors"
+                  style={{ color: 'var(--warm-gray)' }}
+                >
+                  Dashboard
+                </Link>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-8 pt-8 border-t text-center" style={{ borderColor: 'var(--border)' }}>
+            <p className="text-sm" style={{ color: 'var(--warm-gray)' }}>
+              &copy; 2025 rMirror Cloud. Open source and self-hostable.
+            </p>
           </div>
         </div>
-
-        <footer>
-          <p>&copy; 2025 rMirror Cloud. Open source and self-hostable.</p>
-        </footer>
-      </div>
+      </footer>
     </div>
   );
 }
