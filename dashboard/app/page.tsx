@@ -1,737 +1,363 @@
 'use client';
 
-import { useAuth, UserButton } from '@clerk/nextjs';
-import { useEffect, useState } from 'react';
-import Image from 'next/image';
+import { useAuth } from '@clerk/nextjs';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, CreditCard, Menu, Home as HomeIcon, Folder } from 'lucide-react';
-import { getNotebooksTree, trackAgentDownload, getAgentStatus, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus } from '@/lib/api';
+import Image from 'next/image';
+import { useState } from 'react';
 
-// Group notebooks by date
-function groupNotebooksByDate(notebooks: NotebookTreeNode[]) {
-  const now = new Date();
-  const groups: Record<string, NotebookTreeNode[]> = {
-    'Today': [],
-    'Last Week': [],
-    'Last Month': [],
-    'Last Year': [],
-    'Older': []
-  };
+export default function LandingPage() {
+  const { isSignedIn } = useAuth();
+  const [email, setEmail] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [showError, setShowError] = useState(false);
 
-  notebooks.forEach((notebook) => {
-    if (!notebook.last_synced_at) {
-      groups['Older'].push(notebook);
-      return;
-    }
-
-    const syncedDate = new Date(notebook.last_synced_at);
-    const diffInMs = now.getTime() - syncedDate.getTime();
-    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-
-    if (diffInDays === 0) {
-      groups['Today'].push(notebook);
-    } else if (diffInDays <= 7) {
-      groups['Last Week'].push(notebook);
-    } else if (diffInDays <= 30) {
-      groups['Last Month'].push(notebook);
-    } else if (diffInDays <= 365) {
-      groups['Last Year'].push(notebook);
-    } else {
-      groups['Older'].push(notebook);
-    }
-  });
-
-  return groups;
-}
-
-// Check if a folder contains any notebooks in its hierarchy
-function folderHasNotebooks(node: NotebookTreeNode): boolean {
-  // If this is a notebook itself
-  if (!node.is_folder && node.document_type === 'notebook') {
-    return true;
-  }
-
-  // Check children recursively
-  if (node.children && node.children.length > 0) {
-    return node.children.some(child => folderHasNotebooks(child));
-  }
-
-  return false;
-}
-
-// Get all notebooks from a node and its descendants
-function getNotebooksFromNode(node: NotebookTreeNode): NotebookTreeNode[] {
-  const results: NotebookTreeNode[] = [];
-
-  if (!node.is_folder && node.document_type === 'notebook') {
-    results.push(node);
-  }
-
-  if (node.children && node.children.length > 0) {
-    for (const child of node.children) {
-      results.push(...getNotebooksFromNode(child));
-    }
-  }
-
-  return results;
-}
-
-// Get all notebooks from an array of nodes
-function getAllNotebooks(nodes: NotebookTreeNode[]): NotebookTreeNode[] {
-  const results: NotebookTreeNode[] = [];
-  for (const node of nodes) {
-    results.push(...getNotebooksFromNode(node));
-  }
-  return results;
-}
-
-// Get folders at a specific level that contain notebooks
-function getFoldersWithNotebooks(nodes: NotebookTreeNode[]): NotebookTreeNode[] {
-  return nodes.filter(node => node.is_folder && folderHasNotebooks(node));
-}
-
-// Find a node by UUID in the tree
-function findNodeByUuid(nodes: NotebookTreeNode[], uuid: string): NotebookTreeNode | null {
-  for (const node of nodes) {
-    if (node.notebook_uuid === uuid) {
-      return node;
-    }
-    if (node.children && node.children.length > 0) {
-      const found = findNodeByUuid(node.children, uuid);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-export default function Home() {
-  const { getToken, isSignedIn } = useAuth();
-  const [tree, setTree] = useState<NotebookTreeNode[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [currentFolderPath, setCurrentFolderPath] = useState<string[]>([]); // Array of folder UUIDs
-
-  // Development mode bypass
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
-  const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
-
-  const handleDownloadClick = async () => {
-    if (effectiveIsSignedIn) {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
-      if (token) {
-        await trackAgentDownload(token);
-      }
-    }
-    window.location.href = 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.0.0/rMirror-1.0.0.dmg';
-  };
-
-  const fetchNotebooks = async () => {
-    if (!effectiveIsSignedIn) {
-      setLoading(false);
-      return;
-    }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setShowSuccess(false);
+    setShowError(false);
+    setIsSubmitting(true);
 
     try {
-      setError(null);
-      // In dev mode, get JWT token from env var or localStorage
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
-      if (!token) {
-        throw new Error('Failed to get authentication token');
-      }
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/waitlist`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
+      });
 
-      const data = await getNotebooksTree(token);
-      setTree(data.tree);
-    } catch (err) {
-      console.error('Error fetching notebooks:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch notebooks');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchAgentStatus = async () => {
-    if (!effectiveIsSignedIn) return;
-
-    try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
-      if (!token) return;
-
-      const status = await getAgentStatus(token);
-      setAgentStatus(status);
-    } catch (err) {
-      console.error('Error fetching agent status:', err);
-    }
-  };
-
-  useEffect(() => {
-    fetchNotebooks();
-    fetchAgentStatus();
-  }, [effectiveIsSignedIn]);
-
-  // Get current folder node and its contents
-  const getCurrentFolderNode = (): NotebookTreeNode[] => {
-    if (currentFolderPath.length === 0) {
-      // At root level
-      return tree;
-    }
-
-    // Navigate to current folder
-    let currentNodes = tree;
-    for (const folderUuid of currentFolderPath) {
-      const found = findNodeByUuid(currentNodes, folderUuid);
-      if (found && found.children) {
-        currentNodes = found.children;
+      if (response.ok) {
+        setShowSuccess(true);
+        setEmail('');
       } else {
-        return [];
+        setShowError(true);
       }
+    } catch (error) {
+      setShowError(true);
+    } finally {
+      setIsSubmitting(false);
     }
-    return currentNodes;
   };
-
-  const currentNode = getCurrentFolderNode();
-
-  // Get all notebooks in current scope (current folder + all subfolders)
-  const notebooks = getAllNotebooks(currentNode);
-
-  // Get folders at current level that contain notebooks
-  const currentFolders = getFoldersWithNotebooks(currentNode);
-
-  // Filter notebooks by search query
-  const filteredNotebooks = notebooks.filter((notebook) =>
-    notebook.visible_name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const groupedNotebooks = groupNotebooksByDate(filteredNotebooks);
-
-  // Build breadcrumb path
-  const breadcrumbs: { name: string; uuid: string | null }[] = [{ name: 'Home', uuid: null }];
-  if (currentFolderPath.length > 0) {
-    let currentNodes = tree;
-    for (const folderUuid of currentFolderPath) {
-      const found = findNodeByUuid(currentNodes, folderUuid);
-      if (found) {
-        breadcrumbs.push({ name: found.visible_name, uuid: found.notebook_uuid });
-        if (found.children) {
-          currentNodes = found.children;
-        }
-      }
-    }
-  }
-
-  // Sidebar
-  const Sidebar = () => (
-    <>
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      <aside
-        className={`
-          fixed lg:static inset-y-0 left-0 z-50
-          w-64 border-r flex flex-col h-screen
-          transform transition-transform duration-200 ease-in-out
-          lg:transform-none
-          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        `}
-        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--card)' }}
-      >
-        {/* Logo */}
-        <div className="p-6 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <Image src="/rm-icon.png" alt="rMirror" width={32} height={32} style={{ marginRight: '8px', marginTop: '3px'}} />
-              <h1 style={{ fontSize: '1.375rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
-            </div>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="lg:hidden p-2"
-              style={{ color: 'var(--warm-gray)' }}
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          <p style={{ fontSize: '0.875em', color: 'var(--warm-gray)', marginTop: '0.25rem' }}>Cloud Sync</p>
-        </div>
-
-      {/* Folder Navigation */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Home button - always visible */}
-        <div className="p-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <button
-            onClick={() => setCurrentFolderPath([])}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
-            style={{
-              backgroundColor: currentFolderPath.length === 0 ? 'var(--primary)' : 'transparent',
-              color: currentFolderPath.length === 0 ? 'var(--primary-foreground)' : 'var(--warm-charcoal)',
-              fontSize: '0.925em',
-              fontWeight: 500
-            }}
-          >
-            <HomeIcon className="w-5 h-5" />
-            All Notebooks
-          </button>
-        </div>
-
-        {/* Breadcrumbs */}
-        {breadcrumbs.length > 1 && (
-          <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
-            <div className="flex items-center flex-wrap gap-1" style={{ fontSize: '0.8em', color: 'var(--warm-gray)' }}>
-              {breadcrumbs.map((crumb, index) => (
-                <div key={index} className="flex items-center gap-1">
-                  {index > 0 && <ChevronRight className="w-3 h-3" />}
-                  <button
-                    onClick={() => {
-                      if (crumb.uuid === null) {
-                        setCurrentFolderPath([]);
-                      } else {
-                        setCurrentFolderPath(currentFolderPath.slice(0, index));
-                      }
-                    }}
-                    className="hover:opacity-60 transition-opacity"
-                    style={{
-                      color: index === breadcrumbs.length - 1 ? 'var(--terracotta)' : 'var(--warm-gray)',
-                      fontWeight: index === breadcrumbs.length - 1 ? 500 : 400
-                    }}
-                  >
-                    {crumb.name}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Folder list */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {currentFolders.length > 0 ? (
-            <div className="space-y-1">
-              <div style={{ fontSize: '0.7em', fontWeight: 600, color: 'var(--warm-gray)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', paddingLeft: '0.75rem' }}>
-                Folders
-              </div>
-              {currentFolders.map((folder) => {
-                const notebookCount = getNotebooksFromNode(folder).length;
-                return (
-                  <button
-                    key={folder.notebook_uuid}
-                    onClick={() => setCurrentFolderPath([...currentFolderPath, folder.notebook_uuid])}
-                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)] group"
-                    style={{
-                      fontSize: '0.925em',
-                      fontWeight: 500,
-                      color: 'var(--warm-charcoal)'
-                    }}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <Folder className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--terracotta)' }} />
-                      <span className="truncate">{folder.visible_name}</span>
-                    </div>
-                    <span style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
-                      {notebookCount}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : currentFolderPath.length > 0 ? (
-            <div className="text-center py-8" style={{ color: 'var(--warm-gray)', fontSize: '0.875em' }}>
-              No subfolders
-            </div>
-          ) : null}
-        </div>
-
-        {/* Integrations and Billing links */}
-        <div className="border-t p-4 space-y-1" style={{ borderColor: 'var(--border)' }}>
-          <Link
-            href="/integrations"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
-            style={{
-              color: 'var(--warm-charcoal)',
-              fontSize: '0.925em',
-              fontWeight: 500
-            }}
-          >
-            <Puzzle className="w-5 h-5" />
-            Integrations
-          </Link>
-          <Link
-            href="/billing"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
-            style={{
-              color: 'var(--warm-charcoal)',
-              fontSize: '0.925em',
-              fontWeight: 500
-            }}
-          >
-            <CreditCard className="w-5 h-5" />
-            Billing
-          </Link>
-        </div>
-      </div>
-
-      {/* Status Footer */}
-      {agentStatus && (
-        <div className="p-4 border-t space-y-3" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex items-center space-x-2">
-            <div
-              className="w-2 h-2 rounded-full"
-              style={{ backgroundColor: agentStatus.has_agent_connected ? 'var(--sage-green)' : 'var(--warm-gray)' }}
-            />
-            <span style={{ fontSize: '0.875em', color: 'var(--foreground)', fontWeight: 500 }}>
-              {agentStatus.has_agent_connected ? 'Agent Connected' : 'No Agent'}
-            </span>
-          </div>
-          {agentStatus.has_agent_connected && (
-            <div style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
-              Last sync: a few moments ago
-            </div>
-          )}
-        </div>
-      )}
-      </aside>
-    </>
-  );
-
-
-  if (loading) {
-    return (
-      <div className="flex h-screen">
-        <Sidebar />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--terracotta)' }}></div>
-            <p className="mt-4" style={{ color: 'var(--warm-gray)' }}>Loading notebooks...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex h-screen">
-        <Sidebar />
-        <div className="flex-1 flex items-center justify-center px-4">
-          <div className="text-center max-w-md">
-            <div style={{ color: 'var(--destructive)', fontSize: '3rem', marginBottom: '1rem' }}>✗</div>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>Error</h2>
-            <p style={{ color: 'var(--warm-gray)', marginBottom: '1.5rem' }}>{error}</p>
-            <button
-              onClick={() => fetchNotebooks()}
-              className="px-6 py-2 rounded-lg transition-colors"
-              style={{
-                backgroundColor: 'var(--primary)',
-                color: 'var(--primary-foreground)'
-              }}
-            >
-              Try Again
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="flex h-screen">
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <header className="bg-white shadow-sm sticky top-0 z-30" style={{ borderBottom: '1px solid var(--border)' }}>
-          <div className="max-w-full mx-auto px-6 lg:px-8 py-4">
-            <div className="flex items-center justify-between gap-4">
-              {/* Hamburger menu button for mobile */}
-              <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="lg:hidden p-2 -ml-2"
-                style={{ color: 'var(--warm-charcoal)' }}
-              >
-                <Menu className="w-6 h-6" />
-              </button>
+    <div style={{ margin: 0, padding: 0, boxSizing: 'border-box' }}>
+      <style jsx>{`
+        :root {
+          --primary: #2B2B2B;
+          --accent: #E47C37;
+          --text: #333;
+          --text-light: #666;
+          --background: #FAFAFA;
+          --white: #FFFFFF;
+        }
 
-              <div className="flex-1 max-w-md">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
-                  <input
-                    type="text"
-                    placeholder="Search notebooks..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-10 py-2 rounded-lg"
-                    style={{
-                      border: '1px solid var(--border)',
-                      fontSize: '0.925em',
-                      backgroundColor: 'var(--card)',
-                      color: 'var(--foreground)'
-                    }}
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2"
-                      style={{ color: 'var(--warm-gray)' }}
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  )}
-                </div>
-              </div>
+        .container {
+          max-width: 800px;
+          margin: 0 auto;
+          padding: 0 20px;
+        }
 
-              <div className="flex items-center space-x-4">
-                {isDevelopmentMode ? (
-                  <div style={{
-                    fontSize: '0.75em',
-                    color: 'var(--warm-gray)',
-                    padding: '0.5rem',
-                    backgroundColor: 'var(--soft-cream)',
-                    borderRadius: 'var(--radius)',
-                    border: '1px solid var(--border)'
-                  }}>
-                    DEV MODE
-                  </div>
-                ) : (
-                  isSignedIn && <UserButton afterSignOutUrl="/" />
-                )}
-              </div>
+        header {
+          padding: 60px 0 0;
+          text-align: center;
+        }
+
+        .logo {
+          width: 120px;
+          height: auto;
+          margin-bottom: 40px;
+        }
+
+        h1 {
+          font-size: 48px;
+          font-weight: 700;
+          color: var(--primary);
+          margin-bottom: 20px;
+          letter-spacing: -1px;
+        }
+
+        .tagline {
+          font-size: 24px;
+          color: var(--text-light);
+          margin-bottom: 60px;
+          font-weight: 300;
+        }
+
+        .hero {
+          background: var(--white);
+          border-radius: 16px;
+          padding: 60px 40px;
+          margin-bottom: 40px;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        .features {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 30px;
+          margin: 40px 0 60px;
+        }
+
+        .feature {
+          text-align: center;
+        }
+
+        .feature-icon {
+          font-size: 40px;
+          margin-bottom: 16px;
+        }
+
+        .feature h3 {
+          font-size: 18px;
+          margin-bottom: 8px;
+          color: var(--primary);
+        }
+
+        .feature p {
+          font-size: 14px;
+          color: var(--text-light);
+        }
+
+        .waitlist-section {
+          text-align: center;
+          margin: 60px 0;
+        }
+
+        .waitlist-section h2 {
+          font-size: 32px;
+          margin-bottom: 20px;
+          color: var(--primary);
+        }
+
+        .waitlist-section p {
+          font-size: 18px;
+          color: var(--text-light);
+          margin-bottom: 30px;
+        }
+
+        .waitlist-form {
+          max-width: 500px;
+          margin: 0 auto;
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          justify-content: center;
+        }
+
+        input[type="email"] {
+          flex: 1;
+          min-width: 250px;
+          padding: 16px 20px;
+          font-size: 16px;
+          border: 2px solid #E0E0E0;
+          border-radius: 8px;
+          transition: border-color 0.3s;
+        }
+
+        input[type="email"]:focus {
+          outline: none;
+          border-color: var(--accent);
+        }
+
+        button {
+          padding: 16px 32px;
+          font-size: 16px;
+          font-weight: 600;
+          background: var(--accent);
+          color: var(--white);
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(228, 124, 55, 0.3);
+        }
+
+        button:active {
+          transform: translateY(0);
+        }
+
+        button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        .success-message {
+          padding: 16px;
+          background: #E8F5E9;
+          color: #2E7D32;
+          border-radius: 8px;
+          margin-top: 20px;
+        }
+
+        .error-message {
+          padding: 16px;
+          background: #FFEBEE;
+          color: #C62828;
+          border-radius: 8px;
+          margin-top: 20px;
+        }
+
+        .cta-section {
+          text-align: center;
+          margin: 40px 0;
+        }
+
+        .dashboard-link {
+          display: inline-block;
+          padding: 16px 32px;
+          font-size: 18px;
+          font-weight: 600;
+          background: var(--accent);
+          color: var(--white);
+          text-decoration: none;
+          border-radius: 8px;
+          transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .dashboard-link:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(228, 124, 55, 0.3);
+        }
+
+        .github-link {
+          margin: 40px 0;
+          text-align: center;
+        }
+
+        .github-link a {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 12px 24px;
+          color: var(--primary);
+          text-decoration: none;
+          border: 2px solid var(--primary);
+          border-radius: 8px;
+          font-weight: 500;
+          transition: all 0.3s;
+        }
+
+        .github-link a:hover {
+          background: var(--primary);
+          color: var(--white);
+        }
+
+        footer {
+          text-align: center;
+          padding: 40px 0;
+          color: var(--text-light);
+          font-size: 14px;
+        }
+
+        @media (max-width: 600px) {
+          h1 {
+            font-size: 36px;
+          }
+
+          .tagline {
+            font-size: 20px;
+          }
+
+          .hero {
+            padding: 40px 24px;
+          }
+
+          .waitlist-form {
+            flex-direction: column;
+          }
+
+          input[type="email"], button {
+            width: 100%;
+          }
+        }
+      `}</style>
+
+      <div className="container">
+        <header>
+          <Image src="/landing-logo.png" alt="rMirror Logo" width={120} height={120} className="logo" />
+          <h1>rMirror Cloud</h1>
+          <p className="tagline">Your reMarkable notes, searchable and accessible everywhere</p>
+        </header>
+
+        <div className="hero">
+          <div className="features">
+            <div className="feature">
+              <div className="feature-icon">🔄</div>
+              <h3>Auto Sync</h3>
+              <p>Seamless background sync from your reMarkable to the cloud</p>
+            </div>
+            <div className="feature">
+              <div className="feature-icon">🔍</div>
+              <h3>OCR Search</h3>
+              <p>Find anything in your handwritten notes with full-text search</p>
+            </div>
+            <div className="feature">
+              <div className="feature-icon">🌐</div>
+              <h3>Web Access</h3>
+              <p>Browse and search your notes from any device, anywhere</p>
+            </div>
+            <div className="feature">
+              <div className="feature-icon">🔒</div>
+              <h3>Self-Hosted</h3>
+              <p>Keep your data private on your own server</p>
             </div>
           </div>
-        </header>
-        <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
-          {notebooks.length === 0 ? (
-            <div className="text-center py-12 rounded-lg max-w-2xl mx-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-              <BookOpen className="w-20 h-20 mx-auto mb-4" style={{ color: 'var(--warm-gray)', opacity: 0.3 }} />
-              <h3 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                No notebooks yet
-              </h3>
-              <p style={{ color: 'var(--warm-gray)', marginBottom: '1.5rem' }}>
-                Download and install the rMirror Agent to sync your reMarkable notebooks.
-                <br />
-                <span style={{ fontSize: '0.875em' }}>Free tier includes 30 pages of OCR transcription per month</span>
-              </p>
-              <button
-                onClick={handleDownloadClick}
-                className="px-6 py-3 rounded-lg transition-colors font-semibold cursor-pointer"
-                style={{
-                  backgroundColor: 'var(--primary)',
-                  color: 'var(--primary-foreground)'
-                }}
-              >
-                Download rMirror Agent for macOS
-              </button>
+
+          {isSignedIn ? (
+            <div className="cta-section">
+              <Link href="/dashboard" className="dashboard-link">
+                Go to Dashboard
+              </Link>
             </div>
           ) : (
-            <>
-              {/* View toggle */}
-              <div className="flex items-center justify-between mb-6">
-                <h2 style={{ fontSize: '1.5rem', fontWeight: 600, margin: 0 }}>
-                  {currentFolderPath.length > 0 ? breadcrumbs[breadcrumbs.length - 1].name : 'All Notebooks'}
-                </h2>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setViewMode('list')}
-                    className="px-3 py-2 rounded-lg flex items-center gap-2 transition-all"
-                    style={{
-                      backgroundColor: viewMode === 'list' ? 'var(--primary)' : 'transparent',
-                      color: viewMode === 'list' ? 'var(--primary-foreground)' : 'var(--warm-gray)',
-                      border: '1px solid var(--border)'
-                    }}
-                  >
-                    <List className="w-4 h-4" />
-                    <span style={{ fontSize: '0.875em' }}>List</span>
-                  </button>
-                  <button
-                    onClick={() => setViewMode('grid')}
-                    className="px-3 py-2 rounded-lg flex items-center gap-2 transition-all"
-                    style={{
-                      backgroundColor: viewMode === 'grid' ? 'var(--primary)' : 'transparent',
-                      color: viewMode === 'grid' ? 'var(--primary-foreground)' : 'var(--warm-gray)',
-                      border: '1px solid var(--border)'
-                    }}
-                  >
-                    <Grid3x3 className="w-4 h-4" />
-                    <span style={{ fontSize: '0.875em' }}>Grid</span>
-                  </button>
-                </div>
-              </div>
+            <div className="waitlist-section">
+              <h2>Join the Waitlist</h2>
+              <p>Be the first to know when rMirror Cloud launches</p>
 
-              {/* Notebooks by date group */}
-              <div className="space-y-8">
-                {Object.entries(groupedNotebooks).map(([groupName, groupNotebooks]) => {
-                  if (groupNotebooks.length === 0) return null;
+              <form className="waitlist-form" onSubmit={handleSubmit}>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your.email@example.com"
+                  required
+                />
+                <button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? 'Joining...' : 'Join Waitlist'}
+                </button>
+              </form>
 
-                  return (
-                    <div key={groupName}>
-                      <h3 style={{
-                        fontSize: '0.8em',
-                        fontWeight: 600,
-                        color: 'var(--warm-gray)',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.05em',
-                        marginBottom: '1rem',
-                        paddingLeft: '0.75rem'
-                      }}>
-                        {groupName}
-                      </h3>
-
-                      {viewMode === 'grid' ? (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                          {groupNotebooks.map((notebook) => (
-                            <Link
-                              key={notebook.notebook_uuid}
-                              href={`/notebooks/${notebook.id}`}
-                              className="p-4 rounded-lg transition-all hover:shadow-md group"
-                              style={{
-                                backgroundColor: 'var(--card)',
-                                border: '1px solid var(--border)',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              <div className="aspect-[3/4] rounded mb-3 flex items-start p-3 overflow-hidden"
-                                style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
-                              >
-                                {notebook.preview ? (
-                                  <p style={{
-                                    fontSize: '0.7em',
-                                    color: 'var(--warm-charcoal)',
-                                    lineHeight: '1.4',
-                                    margin: 0,
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    display: '-webkit-box',
-                                    WebkitLineClamp: 6,
-                                    WebkitBoxOrient: 'vertical'
-                                  }}>
-                                    {notebook.preview}
-                                  </p>
-                                ) : (
-                                  <div className="flex items-center justify-center w-full h-full">
-                                    <span style={{ fontSize: '0.75em', color: 'var(--warm-gray)', textAlign: 'center' }}>
-                                      No preview available
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                              <h4 style={{
-                                fontSize: '0.875em',
-                                fontWeight: 500,
-                                color: 'var(--warm-charcoal)',
-                                marginBottom: '0.25rem',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap'
-                              }} className="group-hover:text-[var(--terracotta)]">
-                                {notebook.visible_name}
-                              </h4>
-                              <p style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
-                                {notebook.last_synced_at ? new Date(notebook.last_synced_at).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric'
-                                }) : 'Never synced'}
-                              </p>
-                            </Link>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {groupNotebooks.map((notebook) => (
-                            <Link
-                              key={notebook.notebook_uuid}
-                              href={`/notebooks/${notebook.id}`}
-                              className="flex items-center justify-between p-4 rounded-lg transition-all hover:bg-[var(--soft-cream)] group"
-                              style={{
-                                backgroundColor: 'var(--card)',
-                                border: '1px solid var(--border)',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              <div className="flex items-center gap-3 flex-1 min-w-0">
-                                <div className="w-12 h-16 rounded flex items-start p-2 flex-shrink-0 overflow-hidden"
-                                  style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
-                                >
-                                  {notebook.preview ? (
-                                    <p style={{
-                                      fontSize: '0.5em',
-                                      color: 'var(--warm-charcoal)',
-                                      lineHeight: '1.3',
-                                      margin: 0,
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      display: '-webkit-box',
-                                      WebkitLineClamp: 4,
-                                      WebkitBoxOrient: 'vertical'
-                                    }}>
-                                      {notebook.preview}
-                                    </p>
-                                  ) : (
-                                    <div className="flex items-center justify-center w-full h-full">
-                                      <BookOpen className="w-6 h-6" style={{ color: 'var(--warm-gray)' }} />
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <h4 style={{
-                                    fontSize: '0.925em',
-                                    fontWeight: 500,
-                                    color: 'var(--warm-charcoal)',
-                                    marginBottom: '0.125rem',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap'
-                                  }} className="group-hover:text-[var(--terracotta)]">
-                                    {notebook.visible_name}
-                                  </h4>
-                                  <p style={{ fontSize: '0.8em', color: 'var(--warm-gray)' }}>
-                                    {notebook.last_synced_at ? new Date(notebook.last_synced_at).toLocaleDateString('en-US', {
-                                      year: 'numeric',
-                                      month: 'short',
-                                      day: 'numeric'
-                                    }) : 'Never synced'}
-                                  </p>
-                                </div>
-                              </div>
-                              <ChevronRight className="w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
-                            </Link>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {filteredNotebooks.length === 0 && searchQuery && (
-                <div className="text-center py-12 rounded-lg" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-                  <Search className="w-16 h-16 mx-auto mb-4" style={{ color: 'var(--warm-gray)' }} />
-                  <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                    No results found
-                  </h3>
-                  <p style={{ color: 'var(--warm-gray)' }}>
-                    Try adjusting your search terms or{' '}
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      style={{ color: 'var(--terracotta)', textDecoration: 'underline' }}
-                    >
-                      clear the search
-                    </button>
-                  </p>
+              {showSuccess && (
+                <div className="success-message">
+                  Thanks for joining! We'll notify you when we launch.
                 </div>
               )}
-            </>
+              {showError && (
+                <div className="error-message">
+                  Something went wrong. Please try again.
+                </div>
+              )}
+            </div>
           )}
-        </main>
+
+          <div className="github-link">
+            <a href="https://github.com/gottino/rmirror-cloud" target="_blank" rel="noopener noreferrer">
+              <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
+              </svg>
+              View on GitHub
+            </a>
+          </div>
+        </div>
+
+        <footer>
+          <p>&copy; 2025 rMirror Cloud. Open source and self-hostable.</p>
+        </footer>
       </div>
     </div>
   );

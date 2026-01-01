@@ -46,6 +46,8 @@ jobs:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           CLERK_WEBHOOK_SECRET: ${{ secrets.CLERK_WEBHOOK_SECRET }}
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: ${{ secrets.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL }}
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: ${{ secrets.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           B2_ENDPOINT_URL: ${{ secrets.B2_ENDPOINT_URL }}
           B2_ACCESS_KEY_ID: ${{ secrets.B2_ACCESS_KEY_ID }}
@@ -79,6 +81,8 @@ jobs:
                # Update dashboard .env
                update_env dashboard/.env CLERK_SECRET_KEY \"$CLERK_SECRET_KEY\" && \
                update_env dashboard/.env NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \"$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\" && \
+               update_env dashboard/.env NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL \"$NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL\" && \
+               update_env dashboard/.env NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL \"$NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL\" && \
 
                # Update backend .env
                update_env backend/.env RESEND_API_KEY \"$RESEND_API_KEY\" && \

@@ -20,7 +20,8 @@ dashboard/
 ├── app/                      # Next.js App Router
 │   ├── globals.css          # Global styles
 │   ├── layout.tsx           # Root layout with Clerk provider
-│   ├── page.tsx             # Homepage
+│   ├── page.tsx             # Public landing page
+│   ├── dashboard/           # Authenticated dashboard (notebooks view)
 │   ├── notebooks/           # Notebook viewing pages
 │   ├── integrations/        # Integration settings
 │   ├── settings/            # User settings
@@ -105,8 +106,8 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 # Clerk URLs
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
-NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/notebooks
-NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/notebooks
+NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
+NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
 ```
 
 ## When Working Here
@@ -181,8 +182,9 @@ export function MyComponent() {
    - Must be prefixed with `NEXT_PUBLIC_` to be available in browser
 
 4. **Middleware Protected Routes**:
-   - All routes protected by default (see middleware.ts)
-   - Public routes: `/`, `/sign-in`, `/sign-up`
+   - Most routes protected by default (see middleware.ts)
+   - Public routes: `/` (landing page), `/sign-in`, `/sign-up`
+   - Protected routes: `/dashboard`, `/notebooks`, `/integrations`, `/settings`
    - API routes NOT protected (handle auth in route handler)
 
 5. **CSS Modules vs Tailwind**:
