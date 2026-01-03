@@ -75,6 +75,12 @@ class User(Base):
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
+    subscription: Mapped["Subscription"] = relationship(
+        "Subscription", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    quota_usages: Mapped[list["QuotaUsage"]] = relationship(
+        "QuotaUsage", back_populates="user", cascade="all, delete-orphan"
+    )
     notebooks: Mapped[list["Notebook"]] = relationship(
         "Notebook", back_populates="user", cascade="all, delete-orphan"
     )
@@ -93,3 +99,11 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email})>"
+
+    @property
+    def ocr_quota(self) -> "QuotaUsage | None":
+        """Get the OCR quota for this user."""
+        for quota in self.quota_usages:
+            if quota.quota_type == "ocr":
+                return quota
+        return None
