@@ -27,6 +27,7 @@ from app.models.sync_record import IntegrationConfig
 from app.models.user import User
 from app.services.fingerprinting import fingerprint_page
 from app.services.sync_queue import queue_sync
+from app.services import quota_service
 from app.storage import StorageService
 from app.utils.files import calculate_file_hash
 
@@ -205,6 +206,19 @@ async def process_rm_file(
         pdf_bytes = None
 
         if needs_processing:
+            # Check quota before processing
+            if not quota_service.check_quota(db, current_user.id):
+                # Quota exhausted - return helpful error
+                quota_status = quota_service.get_quota_status(db, current_user.id)
+                raise HTTPException(
+                    status_code=402,  # Payment Required
+                    detail={
+                        "error": "quota_exceeded",
+                        "message": f"You've used {quota_status['used']} of {quota_status['limit']} free pages this month. Quota resets on {quota_status['reset_at']}.",
+                        "quota": quota_status,
+                    }
+                )
+
             # Convert .rm to PDF
             logger.info(f"Converting {rm_file.filename} to PDF (file hash changed or new file)")
             pdf_bytes = converter.rm_to_pdf_bytes(temp_rm_path)
@@ -212,6 +226,21 @@ async def process_rm_file(
             # Extract text via Claude Vision OCR
             logger.info(f"Extracting text from {rm_file.filename} via OCR")
             extracted_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
+
+            # Consume quota after successful OCR
+            try:
+                quota_service.consume_quota(db, current_user.id, amount=1)
+                logger.info(f"Consumed 1 OCR quota unit for user {current_user.id}")
+            except quota_service.QuotaExceededError as e:
+                # This shouldn't happen since we checked above, but handle it
+                logger.error(f"Quota exceeded after check: {e}")
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "error": "quota_exceeded",
+                        "message": str(e),
+                    }
+                )
         else:
             logger.info(f"Skipping OCR for {rm_file.filename} - file unchanged (hash: {file_hash})")
             # File unchanged - reuse existing OCR text and PDF
@@ -327,68 +356,78 @@ async def process_rm_file(
 
         # Queue sync to active integrations if OCR was performed
         if needs_processing and extracted_text:
-            # Get the page number from the notebook_pages mapping
-            notebook_page = (
-                db.query(NotebookPage)
-                .filter(
-                    NotebookPage.notebook_id == notebook.id,
-                    NotebookPage.page_id == page.id,
+            # Check if user has quota remaining for integration syncing
+            # If quota exhausted, skip integration sync (per strategy: block integrations when quota exceeded)
+            has_quota = quota_service.check_quota(db, current_user.id)
+
+            if not has_quota:
+                logger.warning(
+                    f"Skipping integration sync for user {current_user.id} - quota exhausted. "
+                    "OCR completed but integrations will not be updated."
                 )
-                .first()
-            )
-
-            page_number = notebook_page.page_number if notebook_page else None
-
-            # Get all active integrations for this user
-            active_integrations = (
-                db.query(IntegrationConfig)
-                .filter(
-                    IntegrationConfig.user_id == current_user.id,
-                    IntegrationConfig.is_enabled == True,
+            else:
+                # Get the page number from the notebook_pages mapping
+                notebook_page = (
+                    db.query(NotebookPage)
+                    .filter(
+                        NotebookPage.notebook_id == notebook.id,
+                        NotebookPage.page_id == page.id,
+                    )
+                    .first()
                 )
-                .all()
-            )
 
-            logger.info(f"Found {len(active_integrations)} active integrations for user {current_user.id}")
+                page_number = notebook_page.page_number if notebook_page else None
 
-            # Queue sync for each active integration
-            for integration in active_integrations:
-                try:
-                    # Generate content hash for this page
-                    content_hash = fingerprint_page(
-                        notebook_uuid=notebook_uuid,
-                        page_number=page_number or 0,
-                        ocr_text=extracted_text,
-                        page_uuid=page_uuid,
+                # Get all active integrations for this user
+                active_integrations = (
+                    db.query(IntegrationConfig)
+                    .filter(
+                        IntegrationConfig.user_id == current_user.id,
+                        IntegrationConfig.is_enabled == True,
                     )
+                    .all()
+                )
 
-                    # Queue the sync
-                    queue_entry = queue_sync(
-                        db=db,
-                        user_id=current_user.id,
-                        item_type='page_text',
-                        item_id=str(page.id),
-                        content_hash=content_hash,
-                        target_name=integration.target_name,
-                        page_uuid=page_uuid,
-                        notebook_uuid=notebook_uuid,
-                        page_number=page_number,
-                        metadata={
-                            'notebook_name': notebook.visible_name,
-                            'notebook_id': notebook.id,
-                            'page_id': page.id,
-                        }
-                    )
+                logger.info(f"Found {len(active_integrations)} active integrations for user {current_user.id}")
 
-                    logger.info(
-                        f"Queued sync to {integration.target_name}: "
-                        f"queue_id={queue_entry.id}, status={queue_entry.status}"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to queue sync to {integration.target_name}: {e}")
-                    # Don't fail the whole request if queueing fails
+                # Queue sync for each active integration
+                for integration in active_integrations:
+                    try:
+                        # Generate content hash for this page
+                        content_hash = fingerprint_page(
+                            notebook_uuid=notebook_uuid,
+                            page_number=page_number or 0,
+                            ocr_text=extracted_text,
+                            page_uuid=page_uuid,
+                        )
 
-            db.commit()
+                        # Queue the sync
+                        queue_entry = queue_sync(
+                            db=db,
+                            user_id=current_user.id,
+                            item_type='page_text',
+                            item_id=str(page.id),
+                            content_hash=content_hash,
+                            target_name=integration.target_name,
+                            page_uuid=page_uuid,
+                            notebook_uuid=notebook_uuid,
+                            page_number=page_number,
+                            metadata={
+                                'notebook_name': notebook.visible_name,
+                                'notebook_id': notebook.id,
+                                'page_id': page.id,
+                            }
+                        )
+
+                        logger.info(
+                            f"Queued sync to {integration.target_name}: "
+                            f"queue_id={queue_entry.id}, status={queue_entry.status}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to queue sync to {integration.target_name}: {e}")
+                        # Don't fail the whole request if queueing fails
+
+                db.commit()
 
         return ProcessRMFileResponse(
             success=True,

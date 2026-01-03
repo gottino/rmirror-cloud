@@ -70,6 +70,7 @@ class QuotaUsage(Base):
         return self.used >= self.limit
 
     @property
-    def is_near_limit(self, threshold: float = 0.8) -> bool:
-        """Check if quota usage is near the limit (default 80%)."""
+    def is_near_limit(self) -> bool:
+        """Check if quota usage is near the limit (80% threshold)."""
+        threshold = 0.8
         return (self.used / self.limit) >= threshold if self.limit > 0 else False
