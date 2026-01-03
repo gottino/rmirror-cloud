@@ -312,7 +312,7 @@ export default function NotebookPage() {
     <header className="bg-white shadow-sm sticky top-0 z-50" style={{ borderBottom: '1px solid var(--border)' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex items-center justify-between">
-          <Link href="/" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
+          <Link href="/dashboard" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
             <h1 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
           </Link>
           <div className="flex items-center space-x-4">
@@ -360,7 +360,7 @@ export default function NotebookPage() {
             <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>Error</h2>
             <p style={{ color: 'var(--warm-gray)', marginBottom: '1.5rem' }}>{error || 'Notebook not found'}</p>
             <Link
-              href="/"
+              href="/dashboard"
               className="inline-block px-6 py-2 rounded-lg transition-colors"
               style={{
                 backgroundColor: 'var(--primary)',
@@ -386,7 +386,7 @@ export default function NotebookPage() {
           {/* Back link and notebook header */}
           <div className="mb-8">
             <Link
-              href="/"
+              href="/dashboard"
               className="inline-flex items-center mb-4 hover:opacity-80 transition-opacity"
               style={{ color: 'var(--terracotta)', fontSize: '0.925em', fontWeight: 500 }}
             >

@@ -3,7 +3,7 @@
 import { useAuth } from '@clerk/nextjs';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Check, ArrowRight, Github, Zap, Search as SearchIcon, Cloud, Puzzle } from 'lucide-react';
 
 export default function LandingPage() {
@@ -12,6 +12,19 @@ export default function LandingPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
+  const heroRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      // Trigger animation when user scrolls down 250px from top
+      setIsScrolled(window.scrollY > 250);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    handleScroll(); // Run on mount
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,90 +57,262 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen" style={{ background: 'var(--background)' }}>
       {/* Hero Section */}
-      <section className="relative overflow-hidden">
-        <div className="max-w-6xl mx-auto px-6 py-20 lg:py-28">
-          <div className="text-center max-w-3xl mx-auto">
-            <div className="mb-8">
-              <Image
-                src="/landing-logo.png"
-                alt="rMirror"
-                width={80}
-                height={80}
-                className="mx-auto"
-              />
-            </div>
-
-            <h1
-              className="text-5xl lg:text-6xl font-bold mb-6"
-              style={{ color: 'var(--warm-charcoal)', lineHeight: '1.1' }}
+      <section
+        ref={heroRef}
+        className="relative overflow-visible py-20 lg:py-28 transition-all duration-1000 ease-out"
+        style={{
+          paddingBottom: isScrolled ? '700px' : '5rem'
+        }}
+      >
+        <div className="max-w-7xl mx-auto px-6">
+          {/* Desktop layout */}
+          <div className="hidden lg:block relative" style={{ minHeight: '400px' }}>
+            {/* Title & Tagline */}
+            <div
+              className="transition-all duration-1000 ease-in-out"
+              style={{
+                position: 'relative',
+                width: isScrolled ? '100%' : '50%',
+                opacity: 1
+              }}
             >
-              Your reMarkable Notes,
-              <br />
-              <span style={{ color: 'var(--terracotta)' }}>Searchable Everywhere</span>
-            </h1>
-
-            <p
-              className="text-xl lg:text-2xl mb-10"
-              style={{ color: 'var(--warm-gray)', lineHeight: '1.5' }}
-            >
-              Auto-sync your handwritten notes to the cloud with OCR.
-              Search, access, and integrate with your favorite tools.
-            </p>
-
-            {isSignedIn ? (
-              <Link
-                href="/dashboard"
-                className="inline-flex items-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
+              <div
+                className="mb-8 flex items-center gap-4 transition-all duration-1000 ease-in-out"
                 style={{
-                  background: 'var(--terracotta)',
-                  color: 'white',
-                  boxShadow: 'var(--shadow-md)'
+                  justifyContent: isScrolled ? 'center' : 'flex-start'
                 }}
               >
-                Go to Dashboard
-                <ArrowRight className="w-5 h-5" />
-              </Link>
-            ) : (
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Link
-                  href="/sign-up"
-                  className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
-                  style={{
-                    background: 'var(--terracotta)',
-                    color: 'white',
-                    boxShadow: 'var(--shadow-md)'
-                  }}
+                <Image
+                  src="/landing-logo.png"
+                  alt="rMirror"
+                  width={80}
+                  height={80}
+                />
+                <h1
+                  className="text-5xl font-bold"
+                  style={{ color: 'var(--warm-charcoal)' }}
                 >
-                  Start Free
-                  <ArrowRight className="w-5 h-5" />
-                </Link>
-                <a
-                  href="https://github.com/gottino/rmirror-cloud"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all"
-                  style={{
-                    background: 'white',
-                    color: 'var(--warm-charcoal)',
-                    border: '2px solid var(--border)',
-                    boxShadow: 'var(--shadow-sm)'
-                  }}
-                >
-                  <Github className="w-5 h-5" />
-                  View on GitHub
-                </a>
+                  rMirror
+                </h1>
               </div>
-            )}
 
-            <p className="mt-6 text-sm" style={{ color: 'var(--warm-gray)' }}>
-              Free tier: 30 pages of OCR per month • No credit card required
-            </p>
+              <h2
+                className="text-4xl lg:text-5xl font-bold mb-6 transition-all duration-1000 ease-in-out"
+                style={{
+                  color: 'var(--warm-charcoal)',
+                  lineHeight: '1.1',
+                  textAlign: isScrolled ? 'center' : 'left'
+                }}
+              >
+                Your reMarkable Notes,
+                <br />
+                <span style={{ color: 'var(--terracotta)' }}>Searchable Everywhere</span>
+              </h2>
+
+              <p
+                className="text-xl lg:text-2xl mb-10 transition-all duration-1000 ease-in-out"
+                style={{
+                  color: 'var(--warm-gray)',
+                  lineHeight: '1.5',
+                  textAlign: isScrolled ? 'center' : 'left'
+                }}
+              >
+                Auto-sync your handwritten notes to the cloud with OCR.
+                Search, access, and integrate with your favorite tools.
+              </p>
+
+              <div
+                className="flex transition-all duration-1000 ease-in-out"
+                style={{
+                  justifyContent: isScrolled ? 'center' : 'flex-start'
+                }}
+              >
+                {isSignedIn ? (
+                  <Link
+                    href="/dashboard"
+                    className="inline-flex items-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
+                    style={{
+                      background: 'var(--terracotta)',
+                      color: 'white',
+                      boxShadow: 'var(--shadow-md)'
+                    }}
+                  >
+                    Go to Dashboard
+                    <ArrowRight className="w-5 h-5" />
+                  </Link>
+                ) : (
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <Link
+                      href="/sign-up"
+                      className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
+                      style={{
+                        background: 'var(--terracotta)',
+                        color: 'white',
+                        boxShadow: 'var(--shadow-md)'
+                      }}
+                    >
+                      Start Free
+                      <ArrowRight className="w-5 h-5" />
+                    </Link>
+                    <a
+                      href="https://github.com/gottino/rmirror-cloud"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all"
+                      style={{
+                        background: 'white',
+                        color: 'var(--warm-charcoal)',
+                        border: '2px solid var(--border)',
+                        boxShadow: 'var(--shadow-sm)'
+                      }}
+                    >
+                      <Github className="w-5 h-5" />
+                      View on GitHub
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              <p
+                className="mt-6 text-sm transition-all duration-1000 ease-in-out"
+                style={{
+                  color: 'var(--warm-gray)',
+                  textAlign: isScrolled ? 'center' : 'left'
+                }}
+              >
+                Free tier: 30 pages of OCR per month • No credit card required
+              </p>
+            </div>
+
+            {/* Screenshot - absolutely positioned */}
+            <div
+              className="absolute top-0 transition-all duration-1000 ease-in-out"
+              style={{
+                right: isScrolled ? 'auto' : 0,
+                left: isScrolled ? '50%' : 'auto',
+                width: isScrolled ? '90%' : '50%',
+                maxWidth: isScrolled ? '1200px' : 'none',
+                transform: isScrolled
+                  ? 'translateX(-50%) translateY(450px) scale(1.0)'
+                  : 'translateY(0) scale(0.85)',
+                opacity: isScrolled ? 1 : 0.95,
+                zIndex: isScrolled ? 1 : 10
+              }}
+            >
+              <Image
+                src="/dashboard-screenshot.png"
+                alt="rMirror Dashboard"
+                width={1920}
+                height={1080}
+                className="w-full h-auto"
+                priority
+              />
+            </div>
+          </div>
+
+          {/* Mobile layout */}
+          <div className="lg:hidden">
+            <div className="text-center">
+              <div className="mb-8 flex items-center gap-4 justify-center">
+                <Image
+                  src="/landing-logo.png"
+                  alt="rMirror"
+                  width={80}
+                  height={80}
+                />
+                <h1
+                  className="text-5xl font-bold"
+                  style={{ color: 'var(--warm-charcoal)' }}
+                >
+                  rMirror
+                </h1>
+              </div>
+
+              <h2
+                className="text-4xl font-bold mb-6"
+                style={{ color: 'var(--warm-charcoal)', lineHeight: '1.1' }}
+              >
+                Your reMarkable Notes,
+                <br />
+                <span style={{ color: 'var(--terracotta)' }}>Searchable Everywhere</span>
+              </h2>
+
+              <p
+                className="text-xl mb-10"
+                style={{ color: 'var(--warm-gray)', lineHeight: '1.5' }}
+              >
+                Auto-sync your handwritten notes to the cloud with OCR.
+                Search, access, and integrate with your favorite tools.
+              </p>
+
+              <div className="flex justify-center">
+                {isSignedIn ? (
+                  <Link
+                    href="/dashboard"
+                    className="inline-flex items-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
+                    style={{
+                      background: 'var(--terracotta)',
+                      color: 'white',
+                      boxShadow: 'var(--shadow-md)'
+                    }}
+                  >
+                    Go to Dashboard
+                    <ArrowRight className="w-5 h-5" />
+                  </Link>
+                ) : (
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <Link
+                      href="/sign-up"
+                      className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
+                      style={{
+                        background: 'var(--terracotta)',
+                        color: 'white',
+                        boxShadow: 'var(--shadow-md)'
+                      }}
+                    >
+                      Start Free
+                      <ArrowRight className="w-5 h-5" />
+                    </Link>
+                    <a
+                      href="https://github.com/gottino/rmirror-cloud"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all"
+                      style={{
+                        background: 'white',
+                        color: 'var(--warm-charcoal)',
+                        border: '2px solid var(--border)',
+                        boxShadow: 'var(--shadow-sm)'
+                      }}
+                    >
+                      <Github className="w-5 h-5" />
+                      View on GitHub
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              <p className="mt-6 text-sm" style={{ color: 'var(--warm-gray)' }}>
+                Free tier: 30 pages of OCR per month • No credit card required
+              </p>
+            </div>
+
+            <div className="mt-12">
+              <Image
+                src="/dashboard-screenshot.png"
+                alt="rMirror Dashboard"
+                width={1920}
+                height={1080}
+                className="w-full h-auto"
+                priority
+              />
+            </div>
           </div>
         </div>
       </section>
 
       {/* Problem Section */}
-      <section className="py-16 lg:py-24" style={{ background: 'var(--soft-cream)' }}>
+      <section className="py-16 lg:py-24">
         <div className="max-w-4xl mx-auto px-6 text-center">
           <h2
             className="text-3xl lg:text-4xl font-bold mb-6"
@@ -139,15 +324,16 @@ export default function LandingPage() {
             className="text-lg lg:text-xl leading-relaxed"
             style={{ color: 'var(--warm-gray)' }}
           >
-            Your handwritten notes are trapped on the device. You can't search them.
-            You can't access them from your phone or computer. They don't integrate
-            with your workflow. <span style={{ color: 'var(--terracotta)', fontWeight: 600 }}>Until now.</span>
+            Your handwritten notes are trapped on the device and the reMarkable apps. 
+            No automatic transcription to text.
+            No seamless integration with your other tools and your workflow. 
+            Notes gathering digital dust and todos remaining undone because they don't show up in your todo app. <span style={{ color: 'var(--terracotta)', fontWeight: 600 }}>Until now.</span>
           </p>
         </div>
       </section>
 
       {/* How It Works */}
-      <section className="py-16 lg:py-24">
+      <section className="py-16 lg:py-24" style={{ background: 'var(--soft-cream)' }}>
         <div className="max-w-5xl mx-auto px-6">
           <div className="text-center mb-16">
             <h2
@@ -171,14 +357,14 @@ export default function LandingPage() {
               },
               {
                 step: '2',
-                title: 'Connect Device',
-                description: 'Sign in and connect your reMarkable. The agent syncs your notebooks automatically.',
+                title: 'Connect to rMirror',
+                description: 'Sign in and connect the agent with rMirror. The agent syncs your notebooks automatically as they change.',
                 icon: <Zap className="w-8 h-8" />
               },
               {
                 step: '3',
                 title: 'Access Anywhere',
-                description: 'Search your handwritten notes from any device. Sync to Notion, Readwise, and more.',
+                description: 'Search your handwritten notes from any device. Sync to Notion, your Todo app, Readwise, and more.',
                 icon: <SearchIcon className="w-8 h-8" />
               }
             ].map((item) => (
@@ -208,6 +394,30 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Agent in Action */}
+      <section className="py-16 lg:py-24">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="text-center mb-12">
+            <h2
+              className="text-3xl lg:text-4xl font-bold mb-4"
+              style={{ color: 'var(--warm-charcoal)' }}
+            >
+              Runs Quietly in the Background
+            </h2>
+            <p className="text-lg" style={{ color: 'var(--warm-gray)' }}>
+              The rMirror agent syncs your notebooks automatically - no manual exports needed
+            </p>
+          </div>
+          <Image
+            src="/agent-screenshot.png"
+            alt="rMirror Agent Running"
+            width={1920}
+            height={1080}
+            className="w-full h-auto"
+          />
+        </div>
+      </section>
+
       {/* Features */}
       <section className="py-16 lg:py-24" style={{ background: 'var(--soft-cream)' }}>
         <div className="max-w-6xl mx-auto px-6">
@@ -228,14 +438,14 @@ export default function LandingPage() {
               {
                 icon: <Zap className="w-6 h-6" />,
                 title: 'Automatic Sync',
-                description: 'Your notebooks sync automatically in the background. Never manually export again.',
-                benefits: ['Real-time updates', 'Works while you write', 'Zero maintenance']
+                description: 'Your notebooks sync automatically in the background as soon as the reMarkable Mac app receives changes.',
+                benefits: ['Updates as reMarkable syncs', 'Zero maintenance', 'Bulk upload possible']
               },
               {
                 icon: <SearchIcon className="w-6 h-6" />,
-                title: 'Full-Text OCR Search',
-                description: 'Find anything in your handwritten notes instantly with powerful OCR.',
-                benefits: ['Search handwriting', 'Find sketches & diagrams', 'Lightning fast results']
+                title: 'Full-Text Transcription',
+                description: 'Transcribe your handwritten notes instantly with powerful AI-driven OCR.',
+                benefits: ['Recognizes Formatting', 'Output in Markdown format', 'Copy text with one click']
               },
               {
                 icon: <Cloud className="w-6 h-6" />,
@@ -280,6 +490,54 @@ export default function LandingPage() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* OCR in Action */}
+      <section className="py-16 lg:py-24">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="text-center mb-12">
+            <h2
+              className="text-3xl lg:text-4xl font-bold mb-4"
+              style={{ color: 'var(--warm-charcoal)' }}
+            >
+              Powerful OCR Search
+            </h2>
+            <p className="text-lg" style={{ color: 'var(--warm-gray)' }}>
+              Find anything in your handwritten notes instantly
+            </p>
+          </div>
+          <Image
+            src="/notebook-details-screenshot.png"
+            alt="OCR Search in Action"
+            width={1920}
+            height={1080}
+            className="w-full h-auto"
+          />
+        </div>
+      </section>
+
+      {/* Integrations Showcase */}
+      <section className="py-16 lg:py-24" style={{ background: 'var(--soft-cream)' }}>
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="text-center mb-12">
+            <h2
+              className="text-3xl lg:text-4xl font-bold mb-4"
+              style={{ color: 'var(--warm-charcoal)' }}
+            >
+              Seamless Integrations
+            </h2>
+            <p className="text-lg" style={{ color: 'var(--warm-gray)' }}>
+              Sync your notes to Notion, Readwise, and more
+            </p>
+          </div>
+          <Image
+            src="/integrations-screenshot.png"
+            alt="Integrations Dashboard"
+            width={1920}
+            height={1080}
+            className="w-full h-auto"
+          />
         </div>
       </section>
 
@@ -546,7 +804,7 @@ export default function LandingPage() {
 
           <div className="mt-8 pt-8 border-t text-center" style={{ borderColor: 'var(--border)' }}>
             <p className="text-sm" style={{ color: 'var(--warm-gray)' }}>
-              &copy; 2025 rMirror Cloud. Open source and self-hostable.
+              &copy; 2026 rMirror Cloud. Open source and self-hostable.
             </p>
           </div>
         </div>
