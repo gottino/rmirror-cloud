@@ -70,12 +70,41 @@ async def on_ocr_failed(user: User, notebook_id: str, error: str):
     # Notify user
     html_content = f"""
     <html>
-        <body style="font-family: Arial, sans-serif;">
-            <h2>OCR Processing Issue</h2>
-            <p>Hi {user.name or 'there'},</p>
-            <p>We encountered an issue processing one of your notebooks.</p>
-            <p><strong>Notebook ID:</strong> {notebook_id}</p>
-            <p>We're looking into this and will retry automatically. If the issue persists, please contact support.</p>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                <!-- Header -->
+                <div style="text-align: center; margin-bottom: 32px;">
+                    <div style="display: inline-block; padding: 12px 24px; background-color: #d4a574; border-radius: 8px; margin-bottom: 16px;">
+                        <p style="color: #ffffff; font-size: 14px; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">⚠️ Processing Issue</p>
+                    </div>
+                    <h1 style="color: #2d2a2e; font-size: 28px; font-weight: 600; margin: 0;">OCR Processing Issue</h1>
+                </div>
+
+                <!-- Content card -->
+                <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                    <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user.name or 'there'},</p>
+                    <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">We encountered an issue processing one of your notebooks.</p>
+
+                    <!-- Info box -->
+                    <div style="background-color: #faf8f5; padding: 16px; border-radius: 8px; border-left: 3px solid #d4a574; margin-bottom: 24px;">
+                        <p style="color: #8b8680; font-size: 13px; margin: 0 0 4px 0; font-weight: 600;">Notebook ID:</p>
+                        <p style="color: #2d2a2e; font-size: 14px; font-family: 'SF Mono', monospace; margin: 0;">{notebook_id}</p>
+                    </div>
+
+                    <p style="color: #2d2a2e; font-size: 15px; margin: 0;">We're looking into this and will retry automatically. If the issue persists, please contact our support team.</p>
+                </div>
+
+                <!-- Footer -->
+                <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                    <p style="color: #8b8680; font-size: 13px; margin: 0;">
+                        Questions? We're here to help.
+                    </p>
+                </div>
+            </div>
         </body>
     </html>
     """
@@ -102,29 +131,65 @@ async def send_weekly_summary(user: User, stats: dict):
 
     html_content = f"""
     <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h1 style="color: #6B46C1;">Your Weekly rMirror Summary</h1>
-                <p>Hi {user.name or 'there'},</p>
-                <p>Here's what happened this week:</p>
-
-                <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <h3 style="margin-top: 0; color: #6B46C1;">Activity This Week</h3>
-                    <ul style="list-style: none; padding: 0;">
-                        <li>📝 <strong>{stats['notebooks_synced']}</strong> notebooks synced</li>
-                        <li>📄 <strong>{stats['pages_processed']}</strong> pages processed</li>
-                        <li>🔍 <strong>{stats['ocr_completed']}</strong> notebooks transcribed</li>
-                    </ul>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                <!-- Header -->
+                <div style="text-align: center; margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid #e8e4df;">
+                    <h1 style="color: #2d2a2e; font-size: 32px; font-weight: 600; margin: 0 0 8px 0;">Your Weekly rMirror Summary</h1>
+                    <p style="color: #8b8680; font-size: 16px; margin: 0;">Here's what happened this week</p>
                 </div>
 
-                <p>Keep up the great work!</p>
+                <!-- Content card -->
+                <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                    <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Hi {user.name or 'there'},</p>
 
-                <p style="margin-top: 30px;">
-                    <a href="https://rmirror.io"
-                       style="display: inline-block; padding: 10px 20px; background-color: #6B46C1; color: white; text-decoration: none; border-radius: 5px;">
-                        View Your Notebooks
-                    </a>
-                </p>
+                    <!-- Stats grid -->
+                    <div style="background-color: #faf8f5; padding: 24px; border-radius: 8px; margin-bottom: 28px;">
+                        <h3 style="margin: 0 0 20px 0; color: #2d2a2e; font-size: 18px; font-weight: 600;">Activity This Week</h3>
+
+                        <div style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #e8e4df;">
+                            <div style="display: flex; align-items: center; justify-content: space-between;">
+                                <span style="color: #8b8680; font-size: 15px;">📝 Notebooks synced</span>
+                                <span style="color: #2d2a2e; font-size: 24px; font-weight: 700;">{stats['notebooks_synced']}</span>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #e8e4df;">
+                            <div style="display: flex; align-items: center; justify-content: space-between;">
+                                <span style="color: #8b8680; font-size: 15px;">📄 Pages processed</span>
+                                <span style="color: #2d2a2e; font-size: 24px; font-weight: 700;">{stats['pages_processed']}</span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div style="display: flex; align-items: center; justify-content: space-between;">
+                                <span style="color: #8b8680; font-size: 15px;">🔍 Notebooks transcribed</span>
+                                <span style="color: #c85a54; font-size: 24px; font-weight: 700;">{stats['ocr_completed']}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 24px 0; text-align: center; color: #7a9c89; font-weight: 500;">Keep up the great work!</p>
+
+                    <!-- CTA Button -->
+                    <div style="text-align: center; margin: 32px 0 0 0;">
+                        <a href="https://rmirror.io/dashboard"
+                           style="display: inline-block; padding: 14px 32px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
+                            View Your Notebooks
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                    <p style="color: #8b8680; font-size: 13px; margin: 0;">
+                        Happy note-taking!
+                    </p>
+                </div>
             </div>
         </body>
     </html>
@@ -145,23 +210,51 @@ async def on_subscription_expiring(user: User, days_remaining: int):
 
     html_content = f"""
     <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h1 style="color: #F59E0B;">Subscription Expiring Soon</h1>
-                <p>Hi {user.name or 'there'},</p>
-                <p>Your rMirror Cloud subscription will expire in <strong>{days_remaining} days</strong>.</p>
-                <p>Renew now to continue enjoying:</p>
-                <ul>
-                    <li>Unlimited notebook syncing</li>
-                    <li>OCR transcription</li>
-                    <li>Cloud storage</li>
-                </ul>
-                <p>
-                    <a href="https://rmirror.io/billing"
-                       style="display: inline-block; padding: 10px 20px; background-color: #6B46C1; color: white; text-decoration: none; border-radius: 5px;">
-                        Renew Subscription
-                    </a>
-                </p>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                <!-- Header -->
+                <div style="text-align: center; margin-bottom: 32px;">
+                    <div style="display: inline-block; padding: 12px 24px; background-color: #d4a574; border-radius: 8px; margin-bottom: 16px;">
+                        <p style="color: #ffffff; font-size: 14px; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">⏰ Action Required</p>
+                    </div>
+                    <h1 style="color: #2d2a2e; font-size: 28px; font-weight: 600; margin: 0;">Subscription Expiring Soon</h1>
+                </div>
+
+                <!-- Content card -->
+                <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                    <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user.name or 'there'},</p>
+                    <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Your rMirror Cloud subscription will expire in <strong style="color: #d4a574; font-size: 18px;">{days_remaining} days</strong>.</p>
+
+                    <!-- Features box -->
+                    <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; margin-bottom: 28px;">
+                        <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 12px 0; font-weight: 600;">Renew now to continue enjoying:</p>
+                        <ul style="color: #2d2a2e; font-size: 15px; margin: 0; padding-left: 20px; line-height: 1.8;">
+                            <li>Unlimited notebook syncing</li>
+                            <li>OCR transcription</li>
+                            <li>Cloud storage</li>
+                            <li>Integration with Notion & Readwise</li>
+                        </ul>
+                    </div>
+
+                    <!-- CTA Button -->
+                    <div style="text-align: center; margin: 32px 0 0 0;">
+                        <a href="https://rmirror.io/billing"
+                           style="display: inline-block; padding: 14px 32px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
+                            Renew Subscription
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                    <p style="color: #8b8680; font-size: 13px; margin: 0;">
+                        Questions about your subscription? We're here to help.
+                    </p>
+                </div>
             </div>
         </body>
     </html>
