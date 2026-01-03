@@ -210,6 +210,13 @@ The dashboard is tightly coupled with the backend API. When working on features 
 
 ## Recent Major Changes
 
+- **2026-01-03**: Implemented animated landing page with scroll-triggered hero animation
+  - Added two-column hero layout with screenshot on desktop
+  - Screenshot smoothly scales and centers when user scrolls down
+  - Dynamic spacing prevents content overlap during animation
+  - Integrated 4 product screenshots throughout landing page
+  - Fixed all back navigation links to point to /dashboard instead of /
+  - Updated landing page copy based on user feedback
 - **2024-12-28**: Added Clerk authentication with sign-in/sign-up flows
 - **2024-12-27**: Created notebook tree view with folder navigation
 - **2024-12-26**: Initial Next.js 15 setup with App Router
