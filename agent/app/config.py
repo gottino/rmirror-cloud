@@ -117,6 +117,10 @@ class SyncConfig(BaseSettings):
         default=True,
         description="Sync all notebooks (ignores selected_notebooks if True)"
     )
+    max_pages_per_notebook: Optional[int] = Field(
+        default=None,
+        description="Maximum pages to sync per notebook (None = unlimited, syncs newest pages first)"
+    )
 
     model_config = SettingsConfigDict(env_prefix="RMIRROR_SYNC_", extra="ignore")
 

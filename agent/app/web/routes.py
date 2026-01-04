@@ -62,6 +62,7 @@ def register_routes(app: Flask) -> None:
             email=config.api.email,
             remarkable_dir=config.remarkable.source_directory,
             auto_sync=config.sync.auto_sync,
+            max_pages_per_notebook=config.sync.max_pages_per_notebook,
             use_clerk_auth=config.api.use_clerk_auth,
             authenticated=cloud_sync.authenticated if cloud_sync else False,
         )
@@ -146,6 +147,8 @@ def register_routes(app: Flask) -> None:
                 config.sync.batch_size = data["sync"]["batch_size"]
             if "sync_interval" in data["sync"]:
                 config.sync.sync_interval = data["sync"]["sync_interval"]
+            if "max_pages_per_notebook" in data["sync"]:
+                config.sync.max_pages_per_notebook = data["sync"]["max_pages_per_notebook"]
 
         # Save configuration
         config.save()

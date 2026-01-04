@@ -6,6 +6,7 @@ or is running for the first time and needs to catch up.
 """
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import List, Optional
@@ -108,6 +109,7 @@ class InitialSync:
         Sync a single notebook.
 
         Uploads all pages (.rm files) and then the .content file for mapping.
+        Respects max_pages_per_notebook config to limit pages uploaded.
 
         Args:
             notebook_uuid: UUID of the notebook
@@ -128,13 +130,49 @@ class InitialSync:
             "skipped": 0,
         }
 
-        # 1. Upload all page files first
-        page_files = list(notebook_dir.glob("*.rm"))
+        # 1. Get page files and determine which ones to upload
+        all_page_files = list(notebook_dir.glob("*.rm"))
+        page_files_to_upload = all_page_files
 
-        if page_files:
-            print(f"   📤 Uploading {len(page_files)} page(s)...")
+        # Check if we should limit pages per notebook
+        max_pages = self.config.sync.max_pages_per_notebook
+        if max_pages is not None and max_pages > 0 and len(all_page_files) > max_pages:
+            # Read .content file to get page ordering
+            content_file = self.remarkable_folder / f"{notebook_uuid}.content"
+            if content_file.exists():
+                try:
+                    with open(content_file, 'r') as f:
+                        content_data = json.load(f)
 
-            for page_file in page_files:
+                    # Get pages array (try both locations)
+                    pages_array = content_data.get("pages", [])
+                    if not pages_array and "cPages" in content_data:
+                        pages_array = content_data.get("cPages", {}).get("pages", [])
+
+                    if pages_array:
+                        # Take the last N pages (newest pages are at the end)
+                        newest_page_uuids = pages_array[-max_pages:]
+                        newest_page_uuids_set = set(newest_page_uuids)
+
+                        # Filter to only include newest pages
+                        page_files_to_upload = [
+                            pf for pf in all_page_files
+                            if pf.stem in newest_page_uuids_set
+                        ]
+
+                        skipped_count = len(all_page_files) - len(page_files_to_upload)
+                        print(f"   ⚡ Limiting to {max_pages} most recent pages (skipping {skipped_count} older pages)")
+                        logger.info(f"Limited notebook {notebook_uuid} to {max_pages} newest pages")
+
+                except Exception as e:
+                    logger.warning(f"Failed to read .content file for page limiting: {e}")
+                    # Fall back to uploading all pages
+                    print(f"   ⚠️  Could not limit pages (will upload all)")
+
+        if page_files_to_upload:
+            print(f"   📤 Uploading {len(page_files_to_upload)} page(s)...")
+
+            for page_file in page_files_to_upload:
                 try:
                     await self.cloud_sync.upload_file(page_file, notebook_uuid, "rm")
                     stats["uploaded"] += 1

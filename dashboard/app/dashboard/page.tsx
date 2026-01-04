@@ -645,10 +645,13 @@ export default function Home() {
                                     {notebook.preview}
                                   </p>
                                 ) : (
-                                  <div className="flex items-center justify-center w-full h-full">
-                                    <span style={{ fontSize: '0.75em', color: 'var(--warm-gray)', textAlign: 'center' }}>
-                                      No preview available
+                                  <div className="flex flex-col items-center justify-center w-full h-full px-2">
+                                    <span style={{ fontSize: '0.7em', color: 'var(--amber-gold)', textAlign: 'center', fontWeight: 500, marginBottom: '0.25rem' }}>
+                                      OCR Pending
                                     </span>
+                                    <Link href="/billing" style={{ fontSize: '0.6em', color: 'var(--terracotta)', textAlign: 'center', textDecoration: 'underline' }}>
+                                      Upgrade
+                                    </Link>
                                   </div>
                                 )}
                               </div>
@@ -704,8 +707,10 @@ export default function Home() {
                                       {notebook.preview}
                                     </p>
                                   ) : (
-                                    <div className="flex items-center justify-center w-full h-full">
-                                      <BookOpen className="w-6 h-6" style={{ color: 'var(--warm-gray)' }} />
+                                    <div className="flex flex-col items-center justify-center w-full h-full">
+                                      <span style={{ fontSize: '0.5em', color: 'var(--amber-gold)', textAlign: 'center', fontWeight: 500 }}>
+                                        OCR Pending
+                                      </span>
                                     </div>
                                   )}
                                 </div>
