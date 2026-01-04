@@ -8,8 +8,10 @@ from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
@@ -34,6 +36,9 @@ from app.utils.files import calculate_file_hash
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["processing"])
 
+# Rate limiter for processing endpoints
+limiter = Limiter(key_func=get_remote_address)
+
 
 class ProcessRMFileResponse(BaseModel):
     """Response for .rm file processing."""
@@ -53,7 +58,9 @@ class ProcessRMFileRequest(BaseModel):
 
 
 @router.post("/rm-file", response_model=ProcessRMFileResponse)
+@limiter.limit("10/minute")
 async def process_rm_file(
+    request: Request,
     rm_file: UploadFile = File(..., description=".rm file from reMarkable tablet"),
     metadata_file: UploadFile | None = File(None, description="Optional .metadata file"),
     current_user: User = Depends(get_clerk_active_user),
@@ -204,43 +211,60 @@ async def process_rm_file(
 
         extracted_text = ""
         pdf_bytes = None
+        ocr_status = OcrStatus.PENDING
 
         if needs_processing:
-            # Check quota before processing
-            if not quota_service.check_quota(db, current_user.id):
-                # Quota exhausted - return helpful error
-                quota_status = quota_service.get_quota_status(db, current_user.id)
-                raise HTTPException(
-                    status_code=402,  # Payment Required
-                    detail={
-                        "error": "quota_exceeded",
-                        "message": f"You've used {quota_status['used']} of {quota_status['limit']} free pages this month. Quota resets on {quota_status['reset_at']}.",
-                        "quota": quota_status,
-                    }
-                )
-
-            # Convert .rm to PDF
+            # Convert .rm to PDF (always, regardless of quota)
             logger.info(f"Converting {rm_file.filename} to PDF (file hash changed or new file)")
             pdf_bytes = converter.rm_to_pdf_bytes(temp_rm_path)
 
-            # Extract text via Claude Vision OCR
-            logger.info(f"Extracting text from {rm_file.filename} via OCR")
-            extracted_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
+            # Check quota BEFORE OCR (not before upload)
+            has_quota = quota_service.check_quota(db, current_user.id)
 
-            # Consume quota after successful OCR
-            try:
-                quota_service.consume_quota(db, current_user.id, amount=1)
-                logger.info(f"Consumed 1 OCR quota unit for user {current_user.id}")
-            except quota_service.QuotaExceededError as e:
-                # This shouldn't happen since we checked above, but handle it
-                logger.error(f"Quota exceeded after check: {e}")
-                raise HTTPException(
-                    status_code=402,
-                    detail={
-                        "error": "quota_exceeded",
-                        "message": str(e),
-                    }
+            if has_quota:
+                # Quota available - run OCR
+                logger.info(f"Extracting text from {rm_file.filename} via OCR")
+                extracted_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
+
+                # Consume quota after successful OCR
+                try:
+                    quota_service.consume_quota(db, current_user.id, amount=1)
+                    logger.info(f"Consumed 1 OCR quota unit for user {current_user.id}")
+                    ocr_status = OcrStatus.COMPLETED
+                except quota_service.QuotaExceededError as e:
+                    # Race condition - quota exhausted between check and consume
+                    logger.warning(f"Quota exhausted during processing: {e}")
+                    ocr_status = OcrStatus.PENDING_QUOTA
+                    extracted_text = ""
+            else:
+                # Quota exhausted - skip OCR but keep page
+                quota_status = quota_service.get_quota_status(db, current_user.id)
+
+                # Hard cap: Limit pending pages to prevent abuse
+                pending_count = db.query(Page).filter(
+                    Page.notebook_id.in_(
+                        db.query(Notebook.id).filter(Notebook.user_id == current_user.id)
+                    ),
+                    Page.ocr_status == OcrStatus.PENDING_QUOTA
+                ).count()
+
+                if pending_count >= 100:
+                    raise HTTPException(
+                        status_code=429,  # Too Many Requests
+                        detail={
+                            "error": "pending_quota_limit",
+                            "message": "You have 100 pages pending OCR. Please upgrade to Pro or wait for your quota to reset.",
+                            "pending_count": pending_count,
+                            "quota": quota_status,
+                        }
+                    )
+
+                logger.info(
+                    f"Quota exhausted ({quota_status['used']}/{quota_status['limit']}) - "
+                    f"page uploaded without OCR (will be processed when quota resets)"
                 )
+                ocr_status = OcrStatus.PENDING_QUOTA
+                extracted_text = ""
         else:
             logger.info(f"Skipping OCR for {rm_file.filename} - file unchanged (hash: {file_hash})")
             # File unchanged - reuse existing OCR text and PDF
@@ -280,9 +304,9 @@ async def process_rm_file(
                 s3_key=storage_key,
                 pdf_s3_key=pdf_storage_key,
                 file_hash=file_hash,
-                ocr_status=OcrStatus.COMPLETED if needs_processing else OcrStatus.PENDING,
+                ocr_status=ocr_status,
                 ocr_text=extracted_text,
-                ocr_completed_at=datetime.utcnow() if needs_processing else None,
+                ocr_completed_at=datetime.utcnow() if ocr_status == OcrStatus.COMPLETED else None,
             )
             db.add(page)
         else:
@@ -295,8 +319,8 @@ async def process_rm_file(
             # Only update OCR results if we actually processed the file
             if needs_processing:
                 page.ocr_text = extracted_text
-                page.ocr_status = OcrStatus.COMPLETED
-                page.ocr_completed_at = datetime.utcnow()
+                page.ocr_status = ocr_status
+                page.ocr_completed_at = datetime.utcnow() if ocr_status == OcrStatus.COMPLETED else None
 
         db.commit()
         db.refresh(page)
@@ -354,9 +378,10 @@ async def process_rm_file(
             f"extracted {len(extracted_text)} characters"
         )
 
-        # Queue sync to active integrations if OCR was performed
-        if needs_processing and extracted_text:
-            # Check if user has quota remaining for integration syncing
+        # Queue sync to active integrations only if OCR completed successfully
+        # Don't sync if: quota exhausted (PENDING_QUOTA), processing failed, or no text extracted
+        if ocr_status == OcrStatus.COMPLETED and extracted_text:
+            # Double-check quota for integration syncing
             # If quota exhausted, skip integration sync (per strategy: block integrations when quota exceeded)
             has_quota = quota_service.check_quota(db, current_user.id)
 
