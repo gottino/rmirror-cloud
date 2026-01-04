@@ -3,6 +3,7 @@
 Provides functions to check, consume, and reset user quotas based on subscription tier.
 """
 
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -10,6 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.models.quota_usage import QuotaType, QuotaUsage
 from app.models.subscription import Subscription, SubscriptionTier
+from app.models.user import User
+from app.utils.email import get_email_service
+
+logger = logging.getLogger(__name__)
 
 
 # Tier-based quota limits (pages per month)
@@ -144,6 +149,7 @@ def consume_quota(
 
     Increments the 'used' counter by the specified amount.
     Raises QuotaExceededError if quota would be exceeded.
+    Sends email notifications when crossing 90% or 100% thresholds.
 
     Args:
         db: Database session
@@ -175,6 +181,9 @@ def consume_quota(
     if (quota.used + amount) > quota.limit:
         raise QuotaExceededError(quota)
 
+    # Calculate percentage before consumption
+    percentage_before = quota.percentage_used
+
     # Increment used counter
     quota.used += amount
     quota.updated_at = datetime.utcnow()
@@ -182,7 +191,85 @@ def consume_quota(
     db.commit()
     db.refresh(quota)
 
+    # Calculate percentage after consumption
+    percentage_after = quota.percentage_used
+
+    # Send email notifications when crossing thresholds
+    # Only send emails for free tier users (to avoid spamming Pro users)
+    subscription = db.query(Subscription).filter(
+        Subscription.user_id == user_id
+    ).first()
+
+    if subscription and subscription.tier == SubscriptionTier.FREE:
+        _send_quota_notification_if_needed(
+            db=db,
+            user_id=user_id,
+            quota=quota,
+            percentage_before=percentage_before,
+            percentage_after=percentage_after,
+        )
+
     return quota
+
+
+def _send_quota_notification_if_needed(
+    db: Session,
+    user_id: int,
+    quota: QuotaUsage,
+    percentage_before: float,
+    percentage_after: float,
+) -> None:
+    """
+    Send quota notification email if threshold crossed.
+
+    Sends warning at 90% and exceeded at 100%.
+    Only sends once per threshold to avoid spam.
+
+    Args:
+        db: Database session
+        user_id: User ID
+        quota: QuotaUsage instance
+        percentage_before: Percentage before consumption
+        percentage_after: Percentage after consumption
+    """
+    # Get user info for email
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        logger.warning(f"User {user_id} not found for quota notification")
+        return
+
+    email_service = get_email_service()
+
+    # Format reset date for email
+    reset_date = quota.reset_at.strftime("%B %d, %Y")
+
+    # Check if crossed 100% threshold (quota exhausted)
+    if percentage_before < 100.0 and percentage_after >= 100.0:
+        logger.info(f"Sending quota exceeded email to user {user_id}")
+        try:
+            email_service.send_quota_exceeded_email(
+                user_email=user.email,
+                user_name=user.full_name or user.email,
+                limit=quota.limit,
+                reset_at=reset_date,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send quota exceeded email: {e}")
+
+    # Check if crossed 90% threshold (warning)
+    elif percentage_before < 90.0 and percentage_after >= 90.0:
+        logger.info(f"Sending quota warning email to user {user_id}")
+        try:
+            email_service.send_quota_warning_email(
+                user_email=user.email,
+                user_name=user.full_name or user.email,
+                used=quota.used,
+                limit=quota.limit,
+                percentage=percentage_after,
+                reset_at=reset_date,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send quota warning email: {e}")
 
 
 def reset_quota(

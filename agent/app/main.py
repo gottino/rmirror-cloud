@@ -76,6 +76,16 @@ class Agent:
                 if self.tray_app:
                     self.tray_app.update_status("Connected")
 
+                # Display quota status after successful authentication
+                try:
+                    quota_status = await self.cloud_sync.get_quota_status()
+                    quota_display = self.cloud_sync.format_quota_display(quota_status)
+                    print(f"\n{quota_display}\n")
+                    logger.info(f"Quota: {quota_status['used']}/{quota_status['limit']} pages used")
+                except Exception as quota_error:
+                    logger.warning(f"Could not fetch quota status: {quota_error}")
+                    # Don't block startup if quota fetch fails
+
             except Exception as e:
                 # Authentication failed - log it but keep running
                 print(f"\n⚠️  {e}")

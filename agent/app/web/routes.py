@@ -371,6 +371,26 @@ def register_routes(app: Flask) -> None:
 
         return jsonify({"success": True, "message": "Notebook selection updated"})
 
+    @app.route("/api/quota")
+    def api_quota():
+        """Get quota status from backend."""
+        cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+
+        if not cloud_sync or not cloud_sync.authenticated:
+            return jsonify({"error": "Not authenticated"}), 401
+
+        try:
+            # Fetch quota from backend (this is synchronous, but get_quota_status is async)
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            quota_data = loop.run_until_complete(cloud_sync.get_quota_status())
+            loop.close()
+
+            return jsonify(quota_data)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.route("/health")
     def health():
         """Health check endpoint."""
