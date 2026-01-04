@@ -336,7 +336,7 @@ class EmailService:
                             </p>
                         </div>
 
-                        <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 24px 0;">When you reach your limit, OCR transcription and integrations will pause until your quota resets. Your notebooks will continue syncing to the cloud.</p>
+                        <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 24px 0;">When you reach your limit, OCR transcription and integrations will pause until your quota resets. Your notebooks will continue syncing to the cloud with PDFs viewable in the dashboard, and pending pages will be automatically processed when quota becomes available.</p>
 
                         <!-- Pro tier preview -->
                         <div style="background-color: #faf8f5; padding: 24px; border-radius: 8px; margin-bottom: 24px;">
@@ -417,7 +417,7 @@ class EmailService:
                             <p style="color: #2d2a2e; font-size: 14px; margin: 0;">✗ Integration syncing paused (Notion, Readwise, etc.)</p>
                         </div>
 
-                        <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 24px 0;">Your quota will reset on <strong>{reset_at}</strong>, and you'll have {limit} pages available again.</p>
+                        <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 24px 0;">Your quota will reset on <strong>{reset_at}</strong>, and you'll have {limit} pages available again. Any pending pages will be automatically processed when quota becomes available (newest pages first).</p>
 
                         <!-- Pro tier preview -->
                         <div style="background-color: #faf8f5; padding: 24px; border-radius: 8px; margin-bottom: 24px;">

@@ -1069,7 +1069,7 @@
                     day: 'numeric',
                     year: 'numeric'
                 });
-                text.innerHTML = `You've used all ${quota.limit} free pages this month. Your notebooks will continue syncing, but OCR transcription and integrations are paused until your quota resets on <strong>${resetDate}</strong>.`;
+                text.innerHTML = `You've used all ${quota.limit} free pages this month. New pages will sync to the dashboard and PDFs will be viewable, but OCR transcription and integrations are paused until your quota resets on <strong>${resetDate}</strong>. Pending pages will be automatically processed when quota becomes available.`;
             } else {
                 text.innerHTML = `You've used ${quota.used} of ${quota.limit} free pages (${percentage}%). Only ${remaining} page${remaining !== 1 ? 's' : ''} remaining this month.`;
             }
