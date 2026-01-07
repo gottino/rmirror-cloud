@@ -109,10 +109,10 @@ export function QuotaDisplay({ variant = 'compact', onQuotaExceeded }: QuotaDisp
         </div>
         <div className="flex items-center gap-1">
           <span style={{ fontWeight: 600, color: 'var(--warm-charcoal)' }}>
-            {remaining}
+            {quota.used}
           </span>
           <span style={{ color: 'var(--warm-gray)' }}>
-            / {quota.limit} pages
+            / {quota.limit} pages used
           </span>
         </div>
       </div>

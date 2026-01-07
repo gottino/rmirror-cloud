@@ -2,6 +2,7 @@
 
 import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, CreditCard, Menu, Home as HomeIcon, Folder } from 'lucide-react';
@@ -109,6 +110,7 @@ function findNodeByUuid(nodes: NotebookTreeNode[], uuid: string): NotebookTreeNo
 
 export default function Home() {
   const { getToken, isSignedIn } = useAuth();
+  const router = useRouter();
   const [tree, setTree] = useState<NotebookTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -649,9 +651,16 @@ export default function Home() {
                                     <span style={{ fontSize: '0.7em', color: 'var(--amber-gold)', textAlign: 'center', fontWeight: 500, marginBottom: '0.25rem' }}>
                                       OCR Pending
                                     </span>
-                                    <Link href="/billing" style={{ fontSize: '0.6em', color: 'var(--terracotta)', textAlign: 'center', textDecoration: 'underline' }}>
+                                    <button
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        router.push('/billing');
+                                      }}
+                                      style={{ fontSize: '0.6em', color: 'var(--terracotta)', textAlign: 'center', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                                    >
                                       Upgrade
-                                    </Link>
+                                    </button>
                                   </div>
                                 )}
                               </div>

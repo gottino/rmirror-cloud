@@ -1024,16 +1024,29 @@
         }
 
         // Refresh quota status
-        async function refreshQuotaStatus() {
+        async function refreshQuotaStatus(retryCount = 0) {
+            const quotaStatus = document.getElementById('quota-status');
+
             try {
                 const response = await fetch('/api/quota');
+
+                if (response.status === 401) {
+                    // Not authenticated yet - retry up to 3 times with delay
+                    if (retryCount < 3) {
+                        quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Loading...';
+                        setTimeout(() => refreshQuotaStatus(retryCount + 1), 1000 * (retryCount + 1));
+                        return;
+                    } else {
+                        quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Not Available';
+                        return;
+                    }
+                }
 
                 if (!response.ok) {
                     throw new Error('Failed to fetch quota');
                 }
 
                 const quota = await response.json();
-                const quotaStatus = document.getElementById('quota-status');
 
                 // Store current quota for dismissal tracking
                 localStorage.setItem('current_quota', JSON.stringify(quota));
@@ -1048,7 +1061,7 @@
 
                 // Format display
                 const percentage = Math.round(quota.percentage_used);
-                quotaStatus.innerHTML = `<span class="status-indicator ${indicatorClass}"></span>${quota.used}/${quota.limit} (${percentage}%)`;
+                quotaStatus.innerHTML = `<span class="status-indicator ${indicatorClass}"></span>${quota.used} / ${quota.limit} pages used`;
 
                 // Show quota warning card if >= 80% and not dismissed at this percentage
                 const dismissedAt = parseFloat(localStorage.getItem('quota_warning_dismissed') || '0');
@@ -1061,8 +1074,13 @@
                 }
             } catch (error) {
                 console.error('Failed to fetch quota:', error);
-                const quotaStatus = document.getElementById('quota-status');
-                quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Error';
+                // Show error only if we've retried
+                if (retryCount >= 2) {
+                    quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Error';
+                } else {
+                    quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Loading...';
+                    setTimeout(() => refreshQuotaStatus(retryCount + 1), 1000 * (retryCount + 1));
+                }
             }
         }
 
@@ -1108,7 +1126,7 @@
                 });
                 text.innerHTML = `You've used all ${quota.limit} free pages this month. New pages will sync to the dashboard and PDFs will be viewable, but OCR transcription and integrations are paused until your quota resets on <strong>${resetDate}</strong>. Pending pages will be automatically processed when quota becomes available.`;
             } else {
-                text.innerHTML = `You've used ${quota.used} of ${quota.limit} free pages (${percentage}%). Only ${remaining} page${remaining !== 1 ? 's' : ''} remaining this month.`;
+                text.innerHTML = `You've used <strong>${quota.used} / ${quota.limit} pages</strong> this month (${percentage}%).`;
             }
 
             // Show the card
@@ -1466,6 +1484,21 @@
         // Refresh status on load
         refreshStatus();
         loadNotebookTree();
+
+        // Auto-refresh quota every 30 seconds
+        setInterval(async () => {
+            try {
+                const authResponse = await fetch('/api/auth/status');
+                if (authResponse.ok) {
+                    const authData = await authResponse.json();
+                    if (authData.authenticated) {
+                        await refreshQuotaStatus();
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to auto-refresh quota:', error);
+            }
+        }, 30000); // 30 seconds
     </script>
 </body>
 </html>
