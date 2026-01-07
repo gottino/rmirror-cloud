@@ -292,6 +292,180 @@ class EmailService:
             html_content=html_content
         )
 
+    def send_quota_warning_email(
+        self,
+        user_email: str,
+        user_name: str,
+        used: int,
+        limit: int,
+        percentage: float,
+        reset_at: str
+    ) -> bool:
+        """Send warning email when quota approaching limit (80-90%)"""
+        remaining = limit - used
+
+        html_content = f"""
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 32px;">
+                        <div style="display: inline-block; padding: 12px 24px; background-color: #d4a574; border-radius: 8px; margin-bottom: 16px;">
+                            <p style="color: #ffffff; font-size: 14px; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">⚠️ Quota Warning</p>
+                        </div>
+                        <h1 style="color: #2d2a2e; font-size: 28px; font-weight: 600; margin: 0;">You're Approaching Your Monthly Limit</h1>
+                    </div>
+
+                    <!-- Content card -->
+                    <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">You've used <strong style="color: #d4a574;">{used} of {limit}</strong> free OCR pages this month ({percentage:.0f}%). You have <strong>{remaining}</strong> pages remaining.</p>
+
+                        <!-- Usage stats -->
+                        <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; border-left: 4px solid #d4a574; margin-bottom: 28px;">
+                            <p style="color: #8b8680; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 12px 0;">Monthly Usage</p>
+                            <div style="background-color: #e8e4df; height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 12px;">
+                                <div style="background-color: #d4a574; height: 100%; width: {percentage}%;"></div>
+                            </div>
+                            <p style="color: #2d2a2e; font-size: 14px; margin: 0;">
+                                <strong>{used}/{limit}</strong> pages • Resets {reset_at}
+                            </p>
+                        </div>
+
+                        <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 24px 0;">When you reach your limit, OCR transcription and integrations will pause until your quota resets. Your notebooks will continue syncing to the cloud with PDFs viewable in the dashboard, and pending pages will be automatically processed when quota becomes available.</p>
+
+                        <!-- Pro tier preview -->
+                        <div style="background-color: #faf8f5; padding: 24px; border-radius: 8px; margin-bottom: 24px;">
+                            <div style="display: inline-block; padding: 6px 12px; background-color: #7a9c89; border-radius: 4px; margin-bottom: 12px;">
+                                <p style="color: #ffffff; font-size: 12px; font-weight: 600; margin: 0;">Coming Soon</p>
+                            </div>
+                            <h3 style="color: #2d2a2e; font-size: 18px; font-weight: 600; margin: 0 0 12px 0;">Pro Tier - Launching February 2026</h3>
+                            <ul style="color: #2d2a2e; font-size: 14px; margin: 0 0 16px 0; padding-left: 20px;">
+                                <li style="margin-bottom: 6px;">500 pages/month OCR (16x more)</li>
+                                <li style="margin-bottom: 6px;">Priority processing</li>
+                                <li style="margin-bottom: 6px;">All integrations enabled</li>
+                            </ul>
+                            <p style="color: #8b8680; font-size: 14px; margin: 0;"><strong>Expected: $9/month</strong></p>
+                        </div>
+
+                        <p style="color: #8b8680; font-size: 14px; margin: 0; text-align: center;">
+                            Need more pages now? <a href="mailto:support@rmirror.io" style="color: #c85a54; text-decoration: none; font-weight: 500;">Contact us</a> for early access.
+                        </p>
+                    </div>
+
+                    <!-- Footer -->
+                    <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                        <p style="color: #8b8680; font-size: 14px; margin: 0 0 8px 0;">
+                            Questions? We're here to help.
+                        </p>
+                        <p style="color: #2d2a2e; font-size: 14px; margin: 0; font-weight: 600;">
+                            The rMirror Team
+                        </p>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """
+
+        return self.send_email(
+            to_email=user_email,
+            subject=f"⚠️ You've used {percentage:.0f}% of your monthly quota",
+            html_content=html_content,
+            to_name=user_name
+        )
+
+    def send_quota_exceeded_email(
+        self,
+        user_email: str,
+        user_name: str,
+        limit: int,
+        reset_at: str
+    ) -> bool:
+        """Send notification email when quota exceeded (100%)"""
+
+        html_content = f"""
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 32px;">
+                        <div style="display: inline-block; padding: 12px 24px; background-color: #c85a54; border-radius: 8px; margin-bottom: 16px;">
+                            <p style="color: #ffffff; font-size: 14px; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">🔴 Quota Reached</p>
+                        </div>
+                        <h1 style="color: #2d2a2e; font-size: 28px; font-weight: 600; margin: 0;">Free Tier Limit Reached</h1>
+                    </div>
+
+                    <!-- Content card -->
+                    <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">You've used all <strong style="color: #c85a54;">{limit} free OCR pages</strong> for this month.</p>
+
+                        <!-- Status callout -->
+                        <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; border-left: 4px solid #c85a54; margin-bottom: 28px;">
+                            <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 8px 0;"><strong>What happens now:</strong></p>
+                            <p style="color: #2d2a2e; font-size: 14px; margin: 0 0 12px 0;">✓ Your notebooks continue syncing to the cloud</p>
+                            <p style="color: #2d2a2e; font-size: 14px; margin: 0 0 12px 0;">✓ PDFs available for viewing in dashboard</p>
+                            <p style="color: #2d2a2e; font-size: 14px; margin: 0 0 12px 0;">✗ OCR transcription paused until quota resets</p>
+                            <p style="color: #2d2a2e; font-size: 14px; margin: 0;">✗ Integration syncing paused (Notion, Readwise, etc.)</p>
+                        </div>
+
+                        <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 24px 0;">Your quota will reset on <strong>{reset_at}</strong>, and you'll have {limit} pages available again. Any pending pages will be automatically processed when quota becomes available (newest pages first).</p>
+
+                        <!-- Pro tier preview -->
+                        <div style="background-color: #faf8f5; padding: 24px; border-radius: 8px; margin-bottom: 24px;">
+                            <div style="display: inline-block; padding: 6px 12px; background-color: #7a9c89; border-radius: 4px; margin-bottom: 12px;">
+                                <p style="color: #ffffff; font-size: 12px; font-weight: 600; margin: 0;">Coming Soon</p>
+                            </div>
+                            <h3 style="color: #2d2a2e; font-size: 18px; font-weight: 600; margin: 0 0 12px 0;">Pro Tier - Launching February 2026</h3>
+                            <ul style="color: #2d2a2e; font-size: 14px; margin: 0 0 16px 0; padding-left: 20px;">
+                                <li style="margin-bottom: 6px;">500 pages/month OCR (16x more capacity)</li>
+                                <li style="margin-bottom: 6px;">Priority processing</li>
+                                <li style="margin-bottom: 6px;">All integrations always enabled</li>
+                            </ul>
+                            <p style="color: #8b8680; font-size: 14px; margin: 0;"><strong>Expected: $9/month</strong></p>
+                        </div>
+
+                        <!-- CTA -->
+                        <div style="text-align: center; margin: 24px 0 0 0;">
+                            <p style="color: #8b8680; font-size: 14px; margin: 0 0 16px 0;">
+                                Beta tester who needs more pages now?
+                            </p>
+                            <a href="mailto:support@rmirror.io"
+                               style="display: inline-block; padding: 12px 28px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
+                                Contact Us for Early Access
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Footer -->
+                    <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                        <p style="color: #8b8680; font-size: 14px; margin: 0 0 8px 0;">
+                            Questions? We're here to help.
+                        </p>
+                        <p style="color: #2d2a2e; font-size: 14px; margin: 0; font-weight: 600;">
+                            The rMirror Team
+                        </p>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """
+
+        return self.send_email(
+            to_email=user_email,
+            subject=f"🔴 Monthly quota reached ({limit} pages used)",
+            html_content=html_content,
+            to_name=user_name
+        )
+
 
 # Singleton instance
 _email_service: Optional[EmailService] = None

@@ -8,8 +8,10 @@ from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
@@ -27,11 +29,15 @@ from app.models.sync_record import IntegrationConfig
 from app.models.user import User
 from app.services.fingerprinting import fingerprint_page
 from app.services.sync_queue import queue_sync
+from app.services import quota_service
 from app.storage import StorageService
 from app.utils.files import calculate_file_hash
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["processing"])
+
+# Rate limiter for processing endpoints
+limiter = Limiter(key_func=get_remote_address)
 
 
 class ProcessRMFileResponse(BaseModel):
@@ -52,7 +58,9 @@ class ProcessRMFileRequest(BaseModel):
 
 
 @router.post("/rm-file", response_model=ProcessRMFileResponse)
+@limiter.limit("10/minute")
 async def process_rm_file(
+    request: Request,
     rm_file: UploadFile = File(..., description=".rm file from reMarkable tablet"),
     metadata_file: UploadFile | None = File(None, description="Optional .metadata file"),
     current_user: User = Depends(get_clerk_active_user),
@@ -203,15 +211,60 @@ async def process_rm_file(
 
         extracted_text = ""
         pdf_bytes = None
+        ocr_status = OcrStatus.PENDING
 
         if needs_processing:
-            # Convert .rm to PDF
+            # Convert .rm to PDF (always, regardless of quota)
             logger.info(f"Converting {rm_file.filename} to PDF (file hash changed or new file)")
             pdf_bytes = converter.rm_to_pdf_bytes(temp_rm_path)
 
-            # Extract text via Claude Vision OCR
-            logger.info(f"Extracting text from {rm_file.filename} via OCR")
-            extracted_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
+            # Check quota BEFORE OCR (not before upload)
+            has_quota = quota_service.check_quota(db, current_user.id)
+
+            if has_quota:
+                # Quota available - run OCR
+                logger.info(f"Extracting text from {rm_file.filename} via OCR")
+                extracted_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
+
+                # Consume quota after successful OCR
+                try:
+                    quota_service.consume_quota(db, current_user.id, amount=1)
+                    logger.info(f"Consumed 1 OCR quota unit for user {current_user.id}")
+                    ocr_status = OcrStatus.COMPLETED
+                except quota_service.QuotaExceededError as e:
+                    # Race condition - quota exhausted between check and consume
+                    logger.warning(f"Quota exhausted during processing: {e}")
+                    ocr_status = OcrStatus.PENDING_QUOTA
+                    extracted_text = ""
+            else:
+                # Quota exhausted - skip OCR but keep page
+                quota_status = quota_service.get_quota_status(db, current_user.id)
+
+                # Hard cap: Limit pending pages to prevent abuse
+                pending_count = db.query(Page).filter(
+                    Page.notebook_id.in_(
+                        db.query(Notebook.id).filter(Notebook.user_id == current_user.id)
+                    ),
+                    Page.ocr_status == OcrStatus.PENDING_QUOTA
+                ).count()
+
+                if pending_count >= 100:
+                    raise HTTPException(
+                        status_code=429,  # Too Many Requests
+                        detail={
+                            "error": "pending_quota_limit",
+                            "message": "You have 100 pages pending OCR. Please upgrade to Pro or wait for your quota to reset.",
+                            "pending_count": pending_count,
+                            "quota": quota_status,
+                        }
+                    )
+
+                logger.info(
+                    f"Quota exhausted ({quota_status['used']}/{quota_status['limit']}) - "
+                    f"page uploaded without OCR (will be processed when quota resets)"
+                )
+                ocr_status = OcrStatus.PENDING_QUOTA
+                extracted_text = ""
         else:
             logger.info(f"Skipping OCR for {rm_file.filename} - file unchanged (hash: {file_hash})")
             # File unchanged - reuse existing OCR text and PDF
@@ -251,9 +304,9 @@ async def process_rm_file(
                 s3_key=storage_key,
                 pdf_s3_key=pdf_storage_key,
                 file_hash=file_hash,
-                ocr_status=OcrStatus.COMPLETED if needs_processing else OcrStatus.PENDING,
+                ocr_status=ocr_status,
                 ocr_text=extracted_text,
-                ocr_completed_at=datetime.utcnow() if needs_processing else None,
+                ocr_completed_at=datetime.utcnow() if ocr_status == OcrStatus.COMPLETED else None,
             )
             db.add(page)
         else:
@@ -266,8 +319,8 @@ async def process_rm_file(
             # Only update OCR results if we actually processed the file
             if needs_processing:
                 page.ocr_text = extracted_text
-                page.ocr_status = OcrStatus.COMPLETED
-                page.ocr_completed_at = datetime.utcnow()
+                page.ocr_status = ocr_status
+                page.ocr_completed_at = datetime.utcnow() if ocr_status == OcrStatus.COMPLETED else None
 
         db.commit()
         db.refresh(page)
@@ -325,70 +378,81 @@ async def process_rm_file(
             f"extracted {len(extracted_text)} characters"
         )
 
-        # Queue sync to active integrations if OCR was performed
-        if needs_processing and extracted_text:
-            # Get the page number from the notebook_pages mapping
-            notebook_page = (
-                db.query(NotebookPage)
-                .filter(
-                    NotebookPage.notebook_id == notebook.id,
-                    NotebookPage.page_id == page.id,
+        # Queue sync to active integrations only if OCR completed successfully
+        # Don't sync if: quota exhausted (PENDING_QUOTA), processing failed, or no text extracted
+        if ocr_status == OcrStatus.COMPLETED and extracted_text:
+            # Double-check quota for integration syncing
+            # If quota exhausted, skip integration sync (per strategy: block integrations when quota exceeded)
+            has_quota = quota_service.check_quota(db, current_user.id)
+
+            if not has_quota:
+                logger.warning(
+                    f"Skipping integration sync for user {current_user.id} - quota exhausted. "
+                    "OCR completed but integrations will not be updated."
                 )
-                .first()
-            )
-
-            page_number = notebook_page.page_number if notebook_page else None
-
-            # Get all active integrations for this user
-            active_integrations = (
-                db.query(IntegrationConfig)
-                .filter(
-                    IntegrationConfig.user_id == current_user.id,
-                    IntegrationConfig.is_enabled == True,
+            else:
+                # Get the page number from the notebook_pages mapping
+                notebook_page = (
+                    db.query(NotebookPage)
+                    .filter(
+                        NotebookPage.notebook_id == notebook.id,
+                        NotebookPage.page_id == page.id,
+                    )
+                    .first()
                 )
-                .all()
-            )
 
-            logger.info(f"Found {len(active_integrations)} active integrations for user {current_user.id}")
+                page_number = notebook_page.page_number if notebook_page else None
 
-            # Queue sync for each active integration
-            for integration in active_integrations:
-                try:
-                    # Generate content hash for this page
-                    content_hash = fingerprint_page(
-                        notebook_uuid=notebook_uuid,
-                        page_number=page_number or 0,
-                        ocr_text=extracted_text,
-                        page_uuid=page_uuid,
+                # Get all active integrations for this user
+                active_integrations = (
+                    db.query(IntegrationConfig)
+                    .filter(
+                        IntegrationConfig.user_id == current_user.id,
+                        IntegrationConfig.is_enabled == True,
                     )
+                    .all()
+                )
 
-                    # Queue the sync
-                    queue_entry = queue_sync(
-                        db=db,
-                        user_id=current_user.id,
-                        item_type='page_text',
-                        item_id=str(page.id),
-                        content_hash=content_hash,
-                        target_name=integration.target_name,
-                        page_uuid=page_uuid,
-                        notebook_uuid=notebook_uuid,
-                        page_number=page_number,
-                        metadata={
-                            'notebook_name': notebook.visible_name,
-                            'notebook_id': notebook.id,
-                            'page_id': page.id,
-                        }
-                    )
+                logger.info(f"Found {len(active_integrations)} active integrations for user {current_user.id}")
 
-                    logger.info(
-                        f"Queued sync to {integration.target_name}: "
-                        f"queue_id={queue_entry.id}, status={queue_entry.status}"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to queue sync to {integration.target_name}: {e}")
-                    # Don't fail the whole request if queueing fails
+                # Queue sync for each active integration
+                for integration in active_integrations:
+                    try:
+                        # Generate content hash for this page
+                        content_hash = fingerprint_page(
+                            notebook_uuid=notebook_uuid,
+                            page_number=page_number or 0,
+                            ocr_text=extracted_text,
+                            page_uuid=page_uuid,
+                        )
 
-            db.commit()
+                        # Queue the sync
+                        queue_entry = queue_sync(
+                            db=db,
+                            user_id=current_user.id,
+                            item_type='page_text',
+                            item_id=str(page.id),
+                            content_hash=content_hash,
+                            target_name=integration.target_name,
+                            page_uuid=page_uuid,
+                            notebook_uuid=notebook_uuid,
+                            page_number=page_number,
+                            metadata={
+                                'notebook_name': notebook.visible_name,
+                                'notebook_id': notebook.id,
+                                'page_id': page.id,
+                            }
+                        )
+
+                        logger.info(
+                            f"Queued sync to {integration.target_name}: "
+                            f"queue_id={queue_entry.id}, status={queue_entry.status}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to queue sync to {integration.target_name}: {e}")
+                        # Don't fail the whole request if queueing fails
+
+                db.commit()
 
         return ProcessRMFileResponse(
             success=True,
@@ -504,79 +568,89 @@ async def update_notebook_metadata(
         # Uses NOTEBOOK_METADATA type which doesn't process page content
         if request.document_type == "notebook":
             try:
-                from app.core.unified_sync_manager import UnifiedSyncManager
-                from app.core.sync_engine import SyncItem, ContentFingerprint
-                from app.models.sync_record import SyncItemType
+                # Check if user has quota remaining for integration syncing
+                # If quota exhausted, skip integration sync (per strategy: block integrations when quota exceeded)
+                quota_status = quota_service.get_status(db, current_user.id)
 
-                # Get page count from .content file (no DB query needed)
-                page_count = 0
-                if notebook.content_json:
-                    try:
-                        content_data = json.loads(notebook.content_json)
-                        page_count = content_data.get("pageCount", 0)
-                    except Exception as e:
-                        logger.warning(f"Failed to parse content_json for page count: {e}")
-                        # Fallback: use length of pages array if available
-                        pages_array = content_data.get("pages", [])
-                        if not pages_array and "cPages" in content_data:
-                            pages_array = content_data.get("cPages", {}).get("pages", [])
-                        page_count = len(pages_array)
-
-                # Build lightweight metadata-only data (no page content)
-                notebook_metadata = {
-                    "notebook_uuid": notebook.notebook_uuid,
-                    "notebook_name": notebook.visible_name or "Untitled Notebook",
-                    "title": notebook.visible_name or "Untitled Notebook",
-                    "page_count": page_count,
-                    "full_path": notebook.full_path or "",
-                    "last_opened_at": notebook.last_opened.isoformat() if notebook.last_opened else None,
-                    "last_modified_at": notebook.updated_at.isoformat(),
-                }
-
-                # Calculate metadata-only content hash
-                content_hash = ContentFingerprint.for_notebook_metadata(notebook_metadata)
-
-                # Initialize sync manager
-                sync_manager = UnifiedSyncManager(db, current_user.id)
-
-                # Get enabled integrations
-                integrations = (
-                    db.query(IntegrationConfig)
-                    .filter(
-                        IntegrationConfig.user_id == current_user.id,
-                        IntegrationConfig.is_enabled == True,
+                if quota_status.is_exhausted:
+                    logger.warning(
+                        f"Skipping integration sync for user {current_user.id} - quota exhausted. "
+                        "Metadata updates will not be synced to integrations."
                     )
-                    .all()
-                )
+                else:
+                    from app.core.unified_sync_manager import UnifiedSyncManager
+                    from app.core.sync_engine import SyncItem, ContentFingerprint
+                    from app.models.sync_record import SyncItemType
 
-                # Register sync targets
-                for integration in integrations:
-                    if integration.target_name == "notion":
-                        from app.integrations.notion_sync import NotionSyncTarget
-                        config_dict = integration.get_config()
-                        target = NotionSyncTarget(
-                            access_token=config_dict.get("access_token"),
-                            database_id=config_dict.get("database_id"),
+                    # Get page count from .content file (no DB query needed)
+                    page_count = 0
+                    if notebook.content_json:
+                        try:
+                            content_data = json.loads(notebook.content_json)
+                            page_count = content_data.get("pageCount", 0)
+                        except Exception as e:
+                            logger.warning(f"Failed to parse content_json for page count: {e}")
+                            # Fallback: use length of pages array if available
+                            pages_array = content_data.get("pages", [])
+                            if not pages_array and "cPages" in content_data:
+                                pages_array = content_data.get("cPages", {}).get("pages", [])
+                            page_count = len(pages_array)
+
+                    # Build lightweight metadata-only data (no page content)
+                    notebook_metadata = {
+                        "notebook_uuid": notebook.notebook_uuid,
+                        "notebook_name": notebook.visible_name or "Untitled Notebook",
+                        "title": notebook.visible_name or "Untitled Notebook",
+                        "page_count": page_count,
+                        "full_path": notebook.full_path or "",
+                        "last_opened_at": notebook.last_opened.isoformat() if notebook.last_opened else None,
+                        "last_modified_at": notebook.updated_at.isoformat(),
+                    }
+
+                    # Calculate metadata-only content hash
+                    content_hash = ContentFingerprint.for_notebook_metadata(notebook_metadata)
+
+                    # Initialize sync manager
+                    sync_manager = UnifiedSyncManager(db, current_user.id)
+
+                    # Get enabled integrations
+                    integrations = (
+                        db.query(IntegrationConfig)
+                        .filter(
+                            IntegrationConfig.user_id == current_user.id,
+                            IntegrationConfig.is_enabled == True,
                         )
-                        sync_manager.register_target(target)
-
-                # Sync metadata only (lightweight)
-                for integration in integrations:
-                    # Create metadata-only sync item
-                    sync_item = SyncItem(
-                        item_type=SyncItemType.NOTEBOOK_METADATA,  # Lightweight metadata sync
-                        item_id=notebook.notebook_uuid,
-                        content_hash=content_hash,
-                        data=notebook_metadata,
-                        source_table="notebooks",
-                        created_at=notebook.created_at,
-                        updated_at=notebook.updated_at,
+                        .all()
                     )
 
-                    # Sync the notebook metadata (no page content processing)
-                    await sync_manager.sync_item_to_target(sync_item, integration.target_name)
+                    # Register sync targets
+                    for integration in integrations:
+                        if integration.target_name == "notion":
+                            from app.integrations.notion_sync import NotionSyncTarget
+                            config_dict = integration.get_config()
+                            target = NotionSyncTarget(
+                                access_token=config_dict.get("access_token"),
+                                database_id=config_dict.get("database_id"),
+                            )
+                            sync_manager.register_target(target)
 
-                logger.info(f"Synced metadata (lightweight) for notebook {notebook.notebook_uuid} to {len(integrations)} integrations")
+                    # Sync metadata only (lightweight)
+                    for integration in integrations:
+                        # Create metadata-only sync item
+                        sync_item = SyncItem(
+                            item_type=SyncItemType.NOTEBOOK_METADATA,  # Lightweight metadata sync
+                            item_id=notebook.notebook_uuid,
+                            content_hash=content_hash,
+                            data=notebook_metadata,
+                            source_table="notebooks",
+                            created_at=notebook.created_at,
+                            updated_at=notebook.updated_at,
+                        )
+
+                        # Sync the notebook metadata (no page content processing)
+                        await sync_manager.sync_item_to_target(sync_item, integration.target_name)
+
+                    logger.info(f"Synced metadata (lightweight) for notebook {notebook.notebook_uuid} to {len(integrations)} integrations")
             except Exception as e:
                 logger.warning(f"Failed to sync metadata: {e}")
                 # Don't fail the whole request if sync queueing fails

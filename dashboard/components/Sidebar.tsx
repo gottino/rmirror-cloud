@@ -4,6 +4,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import Image from 'next/image';
 import { HomeIcon, Puzzle, CreditCard, X } from 'lucide-react';
+import { useAuth } from '@clerk/nextjs';
+import { useEffect, useState } from 'react';
+import { getAgentStatus, type AgentStatus } from '@/lib/api';
 
 interface SidebarProps {
   open?: boolean;
@@ -12,6 +15,36 @@ interface SidebarProps {
 
 export default function Sidebar({ open = true, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const { getToken, isSignedIn } = useAuth();
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+
+  // Development mode bypass
+  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
+
+  const fetchAgentStatus = async () => {
+    if (!effectiveIsSignedIn) return;
+
+    try {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+
+      if (!token) return;
+
+      const status = await getAgentStatus(token);
+      setAgentStatus(status);
+    } catch (err) {
+      console.error('Error fetching agent status:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchAgentStatus();
+    // Poll every 60 seconds
+    const interval = setInterval(fetchAgentStatus, 60000);
+    return () => clearInterval(interval);
+  }, [effectiveIsSignedIn]);
 
   const isActive = (path: string) => {
     if (path === '/') {
@@ -65,13 +98,13 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
       <div className="flex-1 flex flex-col">
         <div className="p-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <Link
-            href="/"
+            href="/dashboard"
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
             style={{
-              backgroundColor: isActive('/') && !isActive('/integrations') && !isActive('/billing')
+              backgroundColor: isActive('/dashboard') && !isActive('/integrations') && !isActive('/billing')
                 ? 'var(--primary)'
                 : 'transparent',
-              color: isActive('/') && !isActive('/integrations') && !isActive('/billing')
+              color: isActive('/dashboard') && !isActive('/integrations') && !isActive('/billing')
                 ? 'var(--primary-foreground)'
                 : 'var(--warm-charcoal)',
               fontSize: '0.925em',
@@ -114,6 +147,26 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
             Billing
           </Link>
         </div>
+
+        {/* Agent Status */}
+        {agentStatus && (
+          <div className="p-4 border-t space-y-3" style={{ borderColor: 'var(--border)' }}>
+            <div className="flex items-center space-x-2">
+              <div
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: agentStatus.has_agent_connected ? 'var(--sage-green)' : 'var(--warm-gray)' }}
+              />
+              <span style={{ fontSize: '0.875em', color: 'var(--foreground)', fontWeight: 500 }}>
+                {agentStatus.has_agent_connected ? 'Agent Connected' : 'No Agent'}
+              </span>
+            </div>
+            {agentStatus.has_agent_connected && (
+              <div style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
+                Last sync: a few moments ago
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </aside>
   );

@@ -9,6 +9,38 @@ if (typeof window !== 'undefined') {
   console.log('API_URL configured as:', API_URL);
 }
 
+/**
+ * Handle API response and check for quota exceeded errors
+ */
+async function handleApiResponse<T>(response: Response): Promise<T> {
+  // Check for 402 Payment Required (quota exceeded)
+  if (response.status === 402) {
+    const errorData = await response.json();
+    if (errorData.quota) {
+      throw new QuotaExceededError(errorData.quota);
+    }
+    throw new Error('Quota exceeded');
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || `API error: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+// Export for use in components
+export class QuotaExceededError extends Error {
+  quota: QuotaStatus;
+
+  constructor(quota: QuotaStatus) {
+    super('Quota exceeded');
+    this.name = 'QuotaExceededError';
+    this.quota = quota;
+  }
+}
+
 export interface Notebook {
   id: number;
   visible_name: string;
@@ -70,11 +102,7 @@ export async function getNotebooks(token: string): Promise<Notebook[]> {
     },
   });
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch notebooks');
-  }
-
-  return response.json();
+  return handleApiResponse<Notebook[]>(response);
 }
 
 /**
@@ -87,11 +115,7 @@ export async function getNotebooksTree(token: string): Promise<NotebookTree> {
     },
   });
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch notebook tree');
-  }
-
-  return response.json();
+  return handleApiResponse<NotebookTree>(response);
 }
 
 /**
@@ -104,11 +128,7 @@ export async function getNotebook(id: number, token: string): Promise<NotebookWi
     },
   });
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch notebook');
-  }
-
-  return response.json();
+  return handleApiResponse<NotebookWithPages>(response);
 }
 
 /**
@@ -349,4 +369,44 @@ export async function deleteIntegration(token: string, targetName: string): Prom
   }
 
   return response.json();
+}
+
+// ==================== Quota ====================
+
+export interface QuotaStatus {
+  quota_type: string;
+  used: number;
+  limit: number;
+  remaining: number;
+  percentage_used: number;
+  is_near_limit: boolean;
+  is_exhausted: boolean;
+  reset_at: string;
+  period_start: string;
+}
+
+/**
+ * Get quota status for the current user
+ */
+export async function getQuotaStatus(token: string): Promise<QuotaStatus> {
+  const response = await fetch(`${API_URL}/quota/status`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  return handleApiResponse<QuotaStatus>(response);
+}
+
+/**
+ * Check if user has available quota
+ */
+export async function checkQuota(token: string): Promise<{ has_quota: boolean; quota: QuotaStatus }> {
+  const response = await fetch(`${API_URL}/quota/check`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  return handleApiResponse<{ has_quota: boolean; quota: QuotaStatus }>(response);
 }

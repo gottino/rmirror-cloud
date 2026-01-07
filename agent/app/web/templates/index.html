@@ -557,7 +557,7 @@
                     </button>
                 </div>
             </div>
-            <div class="status-grid">
+            <div class="status-grid" style="grid-template-columns: repeat(5, 1fr);">
                 <div class="status-item">
                     <div class="status-label">Agent</div>
                     <div class="status-value">
@@ -570,6 +570,13 @@
                     <div class="status-value" id="auth-status">
                         <span class="status-indicator yellow"></span>
                         Checking...
+                    </div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Monthly Quota</div>
+                    <div class="status-value" id="quota-status">
+                        <span class="status-indicator yellow"></span>
+                        Loading...
                     </div>
                 </div>
                 <div class="status-item">
@@ -586,6 +593,28 @@
                         {{ 'Enabled' if config.sync.auto_sync else 'Disabled' }}
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Quota Warning Card (shown when quota >= 80%) -->
+        <div class="alert" id="quota-warning-card" style="display: none; padding: 20px; margin-bottom: 24px; position: relative;">
+            <div style="display: flex; align-items: start; gap: 12px;">
+                <div id="quota-warning-icon" style="font-size: 24px; margin-top: 2px;">⚠️</div>
+                <div style="flex: 1;">
+                    <h3 id="quota-warning-title" style="margin: 0 0 8px 0; font-size: 1.1em; font-weight: 600; color: var(--warm-charcoal);"></h3>
+                    <p id="quota-warning-text" style="margin: 0 0 16px 0; font-size: 0.925em; color: var(--warm-gray); line-height: 1.5;"></p>
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <a href="https://rmirror.io/billing" target="_blank" class="button" id="quota-upgrade-btn" style="text-decoration: none; padding: 10px 20px; border-radius: var(--radius); font-size: 0.925em; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; background: var(--primary); color: var(--primary-foreground);">
+                            View Upgrade Options
+                        </a>
+                        <a href="https://rmirror.io/billing" target="_blank" style="font-size: 0.925em; color: var(--terracotta); text-decoration: underline;">
+                            View quota details
+                        </a>
+                    </div>
+                </div>
+                <button onclick="dismissQuotaWarning()" style="background: transparent; border: none; font-size: 1.5em; cursor: pointer; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--warm-gray); border-radius: 50%; transition: all 0.15s;" onmouseover="this.style.background='var(--soft-cream)'" onmouseout="this.style.background='transparent'">
+                    ×
+                </button>
             </div>
         </div>
 
@@ -630,6 +659,28 @@
             <p style="color: var(--warm-gray); margin-bottom: 20px; font-size: 0.925em;">
                 <strong>Initial Sync:</strong> Upload all pages and content for your selected notebooks. Use this for first-time setup or to catch up after being offline. Respects your notebook selection above.
             </p>
+
+            <!-- Page Limit Control -->
+            <div style="margin-bottom: 20px; padding: 16px; background: var(--soft-cream); border-radius: var(--radius); border: 1px solid var(--border);">
+                <label for="max-pages-sync" style="display: block; font-weight: 500; margin-bottom: 8px; color: var(--warm-charcoal); font-size: 0.925em;">
+                    Limit pages per notebook
+                    <span style="font-weight: 400; color: var(--warm-gray); font-size: 0.9em;">(optional)</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <input type="number" id="max-pages-sync"
+                           value="{{ max_pages_per_notebook if max_pages_per_notebook else '' }}"
+                           min="1" max="1000"
+                           placeholder="Unlimited"
+                           style="width: 120px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.925em;">
+                    <span style="color: var(--warm-gray); font-size: 0.875em;">
+                        Sync only the N most recent pages per notebook
+                    </span>
+                </div>
+                <p style="font-size: 0.8em; color: var(--warm-gray); margin-top: 8px; margin-bottom: 0;">
+                    💡 Useful for managing quota with large notebooks. Example: <strong>10</strong> will sync only the 10 newest pages from each notebook.
+                </p>
+            </div>
+
             <div class="button-group">
                 <button onclick="triggerInitialSync()">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -851,6 +902,21 @@
             const originalText = button.innerHTML;
 
             try {
+                // Save max_pages setting before triggering sync
+                const maxPagesInput = document.getElementById('max-pages-sync');
+                const maxPages = maxPagesInput.value && maxPagesInput.value !== '' ? parseInt(maxPagesInput.value) : null;
+
+                // Update config with max_pages setting
+                await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        sync: {
+                            max_pages_per_notebook: maxPages
+                        }
+                    })
+                });
+
                 // Disable button and show loading state
                 button.disabled = true;
                 button.innerHTML = `
@@ -930,15 +996,141 @@
                 if (isAuthenticated) {
                     authStatus.innerHTML = '<span class="status-indicator green"></span>Authenticated';
                     signInBtn.style.display = 'none'; // Hide sign-in button
+
+                    // Fetch quota status when authenticated
+                    await refreshQuotaStatus();
                 } else {
                     authStatus.innerHTML = '<span class="status-indicator red"></span>Not Authenticated';
                     signInBtn.style.display = 'flex'; // Show sign-in button
+
+                    // Clear quota display when not authenticated
+                    const quotaStatus = document.getElementById('quota-status');
+                    quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Not Available';
                 }
 
                 showMessage('Status refreshed', 'success');
             } catch (error) {
                 showMessage('Status refresh failed: ' + error.message, 'error');
             }
+        }
+
+        // Dismiss quota warning
+        function dismissQuotaWarning() {
+            const card = document.getElementById('quota-warning-card');
+            card.style.display = 'none';
+            // Store dismissal in localStorage with current quota percentage
+            const quota = JSON.parse(localStorage.getItem('current_quota') || '{}');
+            localStorage.setItem('quota_warning_dismissed', quota.percentage_used || '0');
+        }
+
+        // Refresh quota status
+        async function refreshQuotaStatus(retryCount = 0) {
+            const quotaStatus = document.getElementById('quota-status');
+
+            try {
+                const response = await fetch('/api/quota');
+
+                if (response.status === 401) {
+                    // Not authenticated yet - retry up to 3 times with delay
+                    if (retryCount < 3) {
+                        quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Loading...';
+                        setTimeout(() => refreshQuotaStatus(retryCount + 1), 1000 * (retryCount + 1));
+                        return;
+                    } else {
+                        quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Not Available';
+                        return;
+                    }
+                }
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch quota');
+                }
+
+                const quota = await response.json();
+
+                // Store current quota for dismissal tracking
+                localStorage.setItem('current_quota', JSON.stringify(quota));
+
+                // Determine color based on usage
+                let indicatorClass = 'green';
+                if (quota.is_exhausted) {
+                    indicatorClass = 'red';
+                } else if (quota.is_near_limit) {
+                    indicatorClass = 'yellow';
+                }
+
+                // Format display
+                const percentage = Math.round(quota.percentage_used);
+                quotaStatus.innerHTML = `<span class="status-indicator ${indicatorClass}"></span>${quota.used} / ${quota.limit} pages used`;
+
+                // Show quota warning card if >= 80% and not dismissed at this percentage
+                const dismissedAt = parseFloat(localStorage.getItem('quota_warning_dismissed') || '0');
+                const shouldShow = quota.percentage_used >= 80 && quota.percentage_used > dismissedAt;
+
+                if (shouldShow) {
+                    updateQuotaWarningCard(quota);
+                } else {
+                    document.getElementById('quota-warning-card').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Failed to fetch quota:', error);
+                // Show error only if we've retried
+                if (retryCount >= 2) {
+                    quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Error';
+                } else {
+                    quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Loading...';
+                    setTimeout(() => refreshQuotaStatus(retryCount + 1), 1000 * (retryCount + 1));
+                }
+            }
+        }
+
+        // Update quota warning card content
+        function updateQuotaWarningCard(quota) {
+            const card = document.getElementById('quota-warning-card');
+            const icon = document.getElementById('quota-warning-icon');
+            const title = document.getElementById('quota-warning-title');
+            const text = document.getElementById('quota-warning-text');
+            const upgradeBtn = document.getElementById('quota-upgrade-btn');
+
+            const percentage = Math.round(quota.percentage_used);
+            const remaining = quota.limit - quota.used;
+            const isExhausted = quota.is_exhausted;
+
+            // Update card styling based on status
+            if (isExhausted) {
+                // Red styling for exhausted
+                card.style.backgroundColor = 'rgba(200, 90, 84, 0.1)';
+                card.style.borderColor = 'var(--destructive)';
+                card.style.borderWidth = '1px';
+                card.style.borderStyle = 'solid';
+                icon.textContent = '🔴';
+                title.textContent = 'Free Tier Quota Exhausted';
+                upgradeBtn.textContent = 'View Upgrade Options';
+            } else {
+                // Yellow styling for approaching limit
+                card.style.backgroundColor = 'rgba(212, 165, 116, 0.1)';
+                card.style.borderColor = 'var(--amber-gold)';
+                card.style.borderWidth = '1px';
+                card.style.borderStyle = 'solid';
+                icon.textContent = '⚠️';
+                title.textContent = 'Approaching Quota Limit';
+                upgradeBtn.textContent = 'Upgrade to Pro';
+            }
+
+            // Update text content
+            if (isExhausted) {
+                const resetDate = new Date(quota.reset_at).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+                text.innerHTML = `You've used all ${quota.limit} free pages this month. New pages will sync to the dashboard and PDFs will be viewable, but OCR transcription and integrations are paused until your quota resets on <strong>${resetDate}</strong>. Pending pages will be automatically processed when quota becomes available.`;
+            } else {
+                text.innerHTML = `You've used <strong>${quota.used} / ${quota.limit} pages</strong> this month (${percentage}%).`;
+            }
+
+            // Show the card
+            card.style.display = 'block';
         }
 
         // Handle form submission
@@ -1292,6 +1484,21 @@
         // Refresh status on load
         refreshStatus();
         loadNotebookTree();
+
+        // Auto-refresh quota every 30 seconds
+        setInterval(async () => {
+            try {
+                const authResponse = await fetch('/api/auth/status');
+                if (authResponse.ok) {
+                    const authData = await authResponse.json();
+                    if (authData.authenticated) {
+                        await refreshQuotaStatus();
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to auto-refresh quota:', error);
+            }
+        }, 30000); // 30 seconds
     </script>
 </body>
 </html>

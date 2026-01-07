@@ -2,10 +2,14 @@
 
 import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, CreditCard, Menu, Home as HomeIcon, Folder } from 'lucide-react';
-import { getNotebooksTree, trackAgentDownload, getAgentStatus, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus } from '@/lib/api';
+import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus } from '@/lib/api';
+import { QuotaWarning } from '@/components/QuotaWarning';
+import { QuotaDisplay } from '@/components/QuotaDisplay';
+import { QuotaExceededModal } from '@/components/QuotaExceededModal';
 
 // Group notebooks by date
 function groupNotebooksByDate(notebooks: NotebookTreeNode[]) {
@@ -106,14 +110,17 @@ function findNodeByUuid(nodes: NotebookTreeNode[], uuid: string): NotebookTreeNo
 
 export default function Home() {
   const { getToken, isSignedIn } = useAuth();
+  const router = useRouter();
   const [tree, setTree] = useState<NotebookTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentFolderPath, setCurrentFolderPath] = useState<string[]>([]); // Array of folder UUIDs
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [quota, setQuota] = useState<QuotaStatus | null>(null);
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
 
   // Development mode bypass
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
@@ -173,9 +180,26 @@ export default function Home() {
     }
   };
 
+  const fetchQuota = async () => {
+    if (!effectiveIsSignedIn) return;
+
+    try {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (!token) return;
+
+      const quotaData = await getQuotaStatus(token);
+      setQuota(quotaData);
+    } catch (err) {
+      console.error('Error fetching quota:', err);
+    }
+  };
+
   useEffect(() => {
     fetchNotebooks();
     fetchAgentStatus();
+    fetchQuota();
   }, [effectiveIsSignedIn]);
 
   // Get current folder node and its contents
@@ -380,27 +404,27 @@ export default function Home() {
             Billing
           </Link>
         </div>
-      </div>
 
-      {/* Status Footer */}
-      {agentStatus && (
-        <div className="p-4 border-t space-y-3" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex items-center space-x-2">
-            <div
-              className="w-2 h-2 rounded-full"
-              style={{ backgroundColor: agentStatus.has_agent_connected ? 'var(--sage-green)' : 'var(--warm-gray)' }}
-            />
-            <span style={{ fontSize: '0.875em', color: 'var(--foreground)', fontWeight: 500 }}>
-              {agentStatus.has_agent_connected ? 'Agent Connected' : 'No Agent'}
-            </span>
-          </div>
-          {agentStatus.has_agent_connected && (
-            <div style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
-              Last sync: a few moments ago
+        {/* Agent Status */}
+        {agentStatus && (
+          <div className="p-4 border-t space-y-3" style={{ borderColor: 'var(--border)' }}>
+            <div className="flex items-center space-x-2">
+              <div
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: agentStatus.has_agent_connected ? 'var(--sage-green)' : 'var(--warm-gray)' }}
+              />
+              <span style={{ fontSize: '0.875em', color: 'var(--foreground)', fontWeight: 500 }}>
+                {agentStatus.has_agent_connected ? 'Agent Connected' : 'No Agent'}
+              </span>
             </div>
-          )}
-        </div>
-      )}
+            {agentStatus.has_agent_connected && (
+              <div style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
+                Last sync: a few moments ago
+              </div>
+            )}
+          </div>
+        )}
+      </div>
       </aside>
     </>
   );
@@ -449,6 +473,9 @@ export default function Home() {
     <div className="flex h-screen">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Quota Warning Banner */}
+        <QuotaWarning onUpgradeClick={() => setShowQuotaModal(true)} />
+
         {/* Header */}
         <header className="bg-white shadow-sm sticky top-0 z-30" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="max-w-full mx-auto px-6 lg:px-8 py-4">
@@ -491,6 +518,9 @@ export default function Home() {
               </div>
 
               <div className="flex items-center space-x-4">
+                {/* Quota Display */}
+                <QuotaDisplay variant="compact" onQuotaExceeded={() => setShowQuotaModal(true)} />
+
                 {isDevelopmentMode ? (
                   <div style={{
                     fontSize: '0.75em',
@@ -617,10 +647,20 @@ export default function Home() {
                                     {notebook.preview}
                                   </p>
                                 ) : (
-                                  <div className="flex items-center justify-center w-full h-full">
-                                    <span style={{ fontSize: '0.75em', color: 'var(--warm-gray)', textAlign: 'center' }}>
-                                      No preview available
+                                  <div className="flex flex-col items-center justify-center w-full h-full px-2">
+                                    <span style={{ fontSize: '0.7em', color: 'var(--amber-gold)', textAlign: 'center', fontWeight: 500, marginBottom: '0.25rem' }}>
+                                      OCR Pending
                                     </span>
+                                    <button
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        router.push('/billing');
+                                      }}
+                                      style={{ fontSize: '0.6em', color: 'var(--terracotta)', textAlign: 'center', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                                    >
+                                      Upgrade
+                                    </button>
                                   </div>
                                 )}
                               </div>
@@ -676,8 +716,10 @@ export default function Home() {
                                       {notebook.preview}
                                     </p>
                                   ) : (
-                                    <div className="flex items-center justify-center w-full h-full">
-                                      <BookOpen className="w-6 h-6" style={{ color: 'var(--warm-gray)' }} />
+                                    <div className="flex flex-col items-center justify-center w-full h-full">
+                                      <span style={{ fontSize: '0.5em', color: 'var(--amber-gold)', textAlign: 'center', fontWeight: 500 }}>
+                                        OCR Pending
+                                      </span>
                                     </div>
                                   )}
                                 </div>
@@ -732,6 +774,13 @@ export default function Home() {
             </>
           )}
         </main>
+
+        {/* Quota Exceeded Modal */}
+        <QuotaExceededModal
+          isOpen={showQuotaModal}
+          onClose={() => setShowQuotaModal(false)}
+          quota={quota}
+        />
       </div>
     </div>
   );

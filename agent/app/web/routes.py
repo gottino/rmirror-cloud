@@ -62,6 +62,7 @@ def register_routes(app: Flask) -> None:
             email=config.api.email,
             remarkable_dir=config.remarkable.source_directory,
             auto_sync=config.sync.auto_sync,
+            max_pages_per_notebook=config.sync.max_pages_per_notebook,
             use_clerk_auth=config.api.use_clerk_auth,
             authenticated=cloud_sync.authenticated if cloud_sync else False,
         )
@@ -146,6 +147,8 @@ def register_routes(app: Flask) -> None:
                 config.sync.batch_size = data["sync"]["batch_size"]
             if "sync_interval" in data["sync"]:
                 config.sync.sync_interval = data["sync"]["sync_interval"]
+            if "max_pages_per_notebook" in data["sync"]:
+                config.sync.max_pages_per_notebook = data["sync"]["max_pages_per_notebook"]
 
         # Save configuration
         config.save()
@@ -370,6 +373,26 @@ def register_routes(app: Flask) -> None:
         config.save()
 
         return jsonify({"success": True, "message": "Notebook selection updated"})
+
+    @app.route("/api/quota")
+    def api_quota():
+        """Get quota status from backend."""
+        cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+
+        if not cloud_sync or not cloud_sync.authenticated:
+            return jsonify({"error": "Not authenticated"}), 401
+
+        try:
+            # Fetch quota from backend (this is synchronous, but get_quota_status is async)
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            quota_data = loop.run_until_complete(cloud_sync.get_quota_status())
+            loop.close()
+
+            return jsonify(quota_data)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     @app.route("/health")
     def health():

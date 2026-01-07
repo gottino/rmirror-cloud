@@ -6,12 +6,16 @@ from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import Page
 from app.models.processing_job import ProcessingJob
+from app.models.quota_usage import QuotaUsage
+from app.models.subscription import Subscription
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.todo import Todo
 from app.models.user import User
 
 __all__ = [
     "User",
+    "Subscription",
+    "QuotaUsage",
     "Notebook",
     "NotebookPage",
     "Page",

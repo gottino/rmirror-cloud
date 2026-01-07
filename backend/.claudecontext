@@ -7,6 +7,8 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - **Framework**: FastAPI with async/await
 - **Database**: PostgreSQL (production), SQLite (local dev)
 - **ORM**: SQLAlchemy 2.0
+- **Migrations**: Alembic (always use `poetry run alembic`)
+- **Package Manager**: Poetry (always use `poetry run` for all commands)
 - **Queue**: SyncQueue table with background worker
 - **OCR**: Mistral OCR API (primary), Claude Vision (fallback)
 - **Deployment**: Hetzner VPS (167.235.74.51) via GitHub Actions
@@ -27,6 +29,8 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 
 ## Database Schema (Key Tables)
 - `users`: User accounts
+- `subscriptions`: User subscriptions (tier, status, billing periods, Stripe IDs)
+- `quota_usage`: OCR quota tracking (limit, used, reset_at by user and quota type)
 - `notebooks`: reMarkable notebooks (uuid, visible_name, parent_uuid)
 - `pages`: Notebook pages (page_number, ocr_text, content_hash)
 - `sync_queue`: Pending sync tasks (item_type, content_hash, status, priority)
@@ -34,6 +38,14 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - `integration_configs`: User integration settings (encrypted credentials)
 
 ## Recent Major Changes
+- **2026-01-04**: Fixed metadata sync endpoint to block ALL integration syncs when quota exhausted (app/api/processing.py:541-628)
+- **2026-01-04**: Integration syncs (including lightweight metadata) now fully respect quota limits
+- **2026-01-03**: Added quota system (subscriptions + quota_usage tables) for 30-page free trial
+- **2026-01-03**: Migration 2d86de0d1c3c - Created subscriptions and quota_usage tables
+- **2026-01-03**: Added Subscription and QuotaUsage models with user relationships
+- **2026-01-03**: Added QuotaService with check/consume/reset/get_status methods
+- **2026-01-03**: OCR processing blocked when quota exhausted (returns HTTP 402 with quota details)
+- **2026-01-03**: Future-proofed for Stripe billing (fields nullable, unused in Phase 1)
 - **2024-12-31**: Separated metadata sync from content sync (NOTEBOOK_METADATA type for lightweight updates)
 - **2024-12-31**: Notebook metadata (lastOpened, page count) now syncs to Notion on every metadata update
 - **2024-12-31**: Added ContentFingerprint.for_notebook_metadata() for metadata-only hashing
@@ -54,10 +66,11 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 3. Review rm-int-src/integrations/notion_incremental.py (working reference implementation)
 
 ### Database Changes
-1. Create Alembic migration if schema changes
-2. Test migration on local SQLite first
+1. Create Alembic migration: `poetry run alembic revision -m "description"`
+2. Test migration on local SQLite: `poetry run alembic upgrade head`
 3. Update models in app/models/
 4. Document in schema docs
+5. Always use `poetry run alembic` for all migration commands
 
 ### Notion Sync Changes
 1. Database is source of truth (SyncRecord table)

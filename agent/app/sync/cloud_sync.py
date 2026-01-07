@@ -3,7 +3,9 @@ Cloud sync client for uploading reMarkable files to rMirror Cloud backend.
 """
 
 import asyncio
+import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +20,14 @@ class CloudSyncError(Exception):
     """Cloud sync error."""
 
     pass
+
+
+class QuotaExceededError(Exception):
+    """Quota exceeded error."""
+
+    def __init__(self, message: str, quota_status: Optional[dict] = None):
+        super().__init__(message)
+        self.quota_status = quota_status
 
 
 class CloudSync:
@@ -127,6 +137,73 @@ class CloudSync:
             raise CloudSyncError("Not authenticated")
 
         return {"Authorization": f"Bearer {self.config.api.token}"}
+
+    def _parse_metadata_file(self, file_path: Path) -> dict:
+        """
+        Parse a .metadata file and convert to backend format.
+
+        Args:
+            file_path: Path to the .metadata file
+
+        Returns:
+            Dictionary with metadata in backend format
+        """
+        with open(file_path, "r") as f:
+            metadata = json.load(f)
+
+        # Extract notebook UUID from filename
+        notebook_uuid = file_path.stem
+
+        # Convert reMarkable timestamps (milliseconds) to ISO 8601
+        def convert_timestamp(timestamp_ms: str) -> Optional[str]:
+            """Convert millisecond timestamp to ISO 8601."""
+            if not timestamp_ms:
+                return None
+            try:
+                timestamp_sec = int(timestamp_ms) / 1000.0
+                dt = datetime.fromtimestamp(timestamp_sec)
+                return dt.isoformat()
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Failed to convert timestamp {timestamp_ms}: {e}")
+                return None
+
+        # Map reMarkable document types to backend types
+        doc_type_map = {
+            "DocumentType": "notebook",
+            "CollectionType": "folder",
+        }
+
+        # Build metadata request
+        metadata_request = {
+            "notebook_uuid": notebook_uuid,
+            "visible_name": metadata.get("visibleName", "Untitled"),
+            "document_type": doc_type_map.get(metadata.get("type"), "notebook"),
+        }
+
+        # Add optional fields
+        parent = metadata.get("parent", "")
+        if parent and parent != "":
+            metadata_request["parent_uuid"] = parent
+
+        if "lastModified" in metadata:
+            metadata_request["last_modified"] = convert_timestamp(metadata["lastModified"])
+
+        if "lastOpened" in metadata:
+            metadata_request["last_opened"] = convert_timestamp(metadata["lastOpened"])
+
+        if "lastOpenedPage" in metadata:
+            metadata_request["last_opened_page"] = metadata["lastOpenedPage"]
+
+        if "version" in metadata:
+            metadata_request["version"] = metadata["version"]
+
+        if "pinned" in metadata:
+            metadata_request["pinned"] = metadata["pinned"]
+
+        if "deleted" in metadata:
+            metadata_request["deleted"] = metadata["deleted"]
+
+        return metadata_request
 
     async def upload_file(
         self, file_path: Path, notebook_uuid: str, file_type: str
@@ -243,7 +320,42 @@ class CloudSync:
                         return {"success": True, "skipped": True, "reason": "notebook_not_found"}
                     raise
 
-            # For other file types (metadata, pagedata), we currently skip them
+            # For .metadata files, upload to the metadata update endpoint
+            elif file_type == "metadata":
+                logger.info(f"📤 Starting upload of .metadata file: {file_path.name}")
+
+                try:
+                    # Parse metadata file
+                    metadata_request = self._parse_metadata_file(file_path)
+
+                    logger.debug(f"POST {self.config.api.url}/processing/metadata/update")
+                    logger.debug(f"Metadata: {metadata_request}")
+
+                    response = await self.client.post(
+                        f"{self.config.api.url}/processing/metadata/update",
+                        json=metadata_request,
+                        headers=self._get_headers(),
+                    )
+
+                    logger.debug(f"Response status: {response.status_code}")
+                    response.raise_for_status()
+
+                    response_data = response.json()
+                    logger.debug(f"Response data: {response_data}")
+
+                    logger.info(f"✓ Metadata update complete: {file_path.name}")
+                    print(f"✓ Metadata updated: {metadata_request['visible_name']}")
+                    return response_data
+
+                except httpx.HTTPStatusError as e:
+                    # If 404, the notebook doesn't exist yet - this is OK
+                    if e.response.status_code == 404:
+                        logger.debug(f"Notebook not found for .metadata file (will be created when pages are uploaded)")
+                        print(f"⏭️  Notebook not found yet (will sync when created)")
+                        return {"success": True, "skipped": True, "reason": "notebook_not_found"}
+                    raise
+
+            # For other file types (pagedata), we currently skip them
             # as they'll be included with the .rm file upload
             else:
                 logger.debug(f"Skipping {file_type} file (handled with .rm upload)")
@@ -262,6 +374,35 @@ class CloudSync:
                 self.authenticated = False
                 await self.authenticate()
                 return await self.upload_file(file_path, notebook_uuid, file_type)
+
+            if e.response.status_code == 402:
+                # Quota exceeded
+                try:
+                    error_data = e.response.json()
+                    quota_info = error_data.get('quota', {})
+
+                    # Format user-friendly message
+                    used = quota_info.get('used', '?')
+                    limit = quota_info.get('limit', '?')
+                    reset_at = quota_info.get('reset_at', 'unknown')
+
+                    message = (
+                        f"⚠️  Monthly quota exceeded ({used}/{limit} pages used).\n"
+                        f"   Quota resets: {reset_at}\n"
+                        f"   Your notebooks continue syncing, but OCR transcription\n"
+                        f"   and integrations are paused until quota resets."
+                    )
+
+                    logger.warning(message)
+                    print(message)
+
+                    raise QuotaExceededError(message, quota_status=quota_info)
+                except (ValueError, KeyError):
+                    # Couldn't parse error response, use generic message
+                    message = "Monthly quota exceeded. Quota will reset at the start of next month."
+                    logger.warning(message)
+                    print(f"⚠️  {message}")
+                    raise QuotaExceededError(message)
 
             raise CloudSyncError(f"Upload failed for {file_path.name}: {e}")
         except httpx.TimeoutException as e:
@@ -407,6 +548,86 @@ class CloudSync:
             raise CloudSyncError(f"Status request failed: {e}")
         except Exception as e:
             raise CloudSyncError(f"Status request error: {e}")
+
+    async def get_quota_status(self) -> dict:
+        """
+        Get quota status from the backend.
+
+        Returns:
+            Quota status data with fields:
+            - quota_type: str (e.g., "ocr")
+            - used: int (pages used)
+            - limit: int (pages allowed)
+            - is_exhausted: bool
+            - is_near_limit: bool
+            - percentage_used: float
+            - reset_at: str (ISO datetime)
+
+        Raises:
+            CloudSyncError: If request fails
+        """
+        await self.ensure_authenticated()
+
+        try:
+            response = await self.client.get(
+                f"{self.config.api.url}/quota/status",
+                headers=self._get_headers(),
+            )
+            response.raise_for_status()
+
+            quota_data = response.json()
+            logger.debug(f"Quota status: {quota_data}")
+            return quota_data
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                # Token expired, re-authenticate and retry
+                self.authenticated = False
+                await self.authenticate()
+                return await self.get_quota_status()
+
+            logger.error(f"Quota status request failed: status={e.response.status_code}")
+            raise CloudSyncError(f"Quota status request failed: {e}")
+        except Exception as e:
+            logger.error(f"Quota status request error: {e}")
+            raise CloudSyncError(f"Quota status request error: {e}")
+
+    def format_quota_display(self, quota_data: dict) -> str:
+        """
+        Format quota data for display.
+
+        Args:
+            quota_data: Quota status from get_quota_status()
+
+        Returns:
+            Formatted string for display
+        """
+        used = quota_data.get('used', 0)
+        limit = quota_data.get('limit', 30)
+        percentage = quota_data.get('percentage_used', 0.0)
+        reset_at = quota_data.get('reset_at', 'unknown')
+        is_exhausted = quota_data.get('is_exhausted', False)
+        is_near_limit = quota_data.get('is_near_limit', False)
+
+        # Color-code based on usage (for terminal output)
+        if is_exhausted:
+            status_emoji = "🔴"
+            status_text = "QUOTA EXCEEDED"
+        elif is_near_limit:
+            status_emoji = "🟡"
+            status_text = "APPROACHING LIMIT"
+        else:
+            status_emoji = "🟢"
+            status_text = "ACTIVE"
+
+        # Format the display
+        remaining = max(0, limit - used)
+        return (
+            f"{status_emoji} Quota Status: {status_text}\n"
+            f"   Pages used: {used}/{limit} ({percentage:.0f}%)\n"
+            f"   Pages remaining: {remaining}\n"
+            f"   Resets: {reset_at}"
+        )
 
     async def close(self) -> None:
         """Close the HTTP client."""

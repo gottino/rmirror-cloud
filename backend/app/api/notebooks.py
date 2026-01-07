@@ -171,27 +171,40 @@ async def get_notebooks_tree(
         if nb.parent_uuid:
             has_children.add(nb.parent_uuid)
 
-    # Get preview text for each notebook (most recent OCR'd page)
+    # Get preview text for each notebook (most recent page)
     preview_map = {}
     for nb in all_notebooks:
         if nb.document_type == "notebook":
-            # Get most recent page with OCR text
-            # Use notebook_pages mapping to get the last page
-            recent_page = (
+            # Get most recent page (regardless of OCR status)
+            most_recent_page = (
                 db.query(Page)
                 .join(NotebookPage, NotebookPage.page_id == Page.id)
-                .filter(
-                    NotebookPage.notebook_id == nb.id,
-                    Page.ocr_text.isnot(None),
-                    Page.ocr_text != "",
-                )
+                .filter(NotebookPage.notebook_id == nb.id)
                 .order_by(NotebookPage.page_number.desc())
                 .first()
             )
-            if recent_page and recent_page.ocr_text:
-                # Get first 100 characters
-                preview_text = recent_page.ocr_text.strip()
-                preview_map[nb.notebook_uuid] = preview_text[:100] + ("..." if len(preview_text) > 100 else "")
+
+            # If most recent page is pending quota, don't show preview
+            # (frontend will show "OCR Pending" message)
+            if most_recent_page and most_recent_page.ocr_status == "pending_quota":
+                preview_map[nb.notebook_uuid] = None
+            else:
+                # Get most recent page with OCR text
+                recent_page = (
+                    db.query(Page)
+                    .join(NotebookPage, NotebookPage.page_id == Page.id)
+                    .filter(
+                        NotebookPage.notebook_id == nb.id,
+                        Page.ocr_text.isnot(None),
+                        Page.ocr_text != "",
+                    )
+                    .order_by(NotebookPage.page_number.desc())
+                    .first()
+                )
+                if recent_page and recent_page.ocr_text:
+                    # Get first 100 characters
+                    preview_text = recent_page.ocr_text.strip()
+                    preview_map[nb.notebook_uuid] = preview_text[:100] + ("..." if len(preview_text) > 100 else "")
 
     # Build tree structure
     def build_tree_node(notebook):

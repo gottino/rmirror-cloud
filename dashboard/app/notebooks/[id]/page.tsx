@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
-import { getNotebook, type NotebookWithPages, type Page } from '@/lib/api';
+import { getNotebook, getQuotaStatus, type NotebookWithPages, type Page, type QuotaStatus } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
 
@@ -14,9 +14,10 @@ interface PageCardProps {
   token: string;
   copiedPageId: number | null;
   setCopiedPageId: (id: number | null) => void;
+  quota: QuotaStatus | null;
 }
 
-function PageCard({ page, token, copiedPageId, setCopiedPageId }: PageCardProps) {
+function PageCard({ page, token, copiedPageId, setCopiedPageId, quota }: PageCardProps) {
   const [showPdf, setShowPdf] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfBlob, setPdfBlob] = useState<string | null>(null);
@@ -168,6 +169,8 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId }: PageCardProps)
                     ? 'rgba(212, 165, 116, 0.15)'
                     : page.ocr_status === 'failed'
                     ? 'rgba(220, 38, 38, 0.15)'
+                    : page.ocr_status === 'pending_quota'
+                    ? 'rgba(212, 165, 116, 0.15)'
                     : 'var(--soft-cream)',
                   color: page.ocr_status === 'completed'
                     ? 'var(--sage-green)'
@@ -175,10 +178,12 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId }: PageCardProps)
                     ? 'var(--amber-gold)'
                     : page.ocr_status === 'failed'
                     ? 'var(--destructive)'
+                    : page.ocr_status === 'pending_quota'
+                    ? 'var(--amber-gold)'
                     : 'var(--warm-gray)'
                 }}
               >
-                {page.ocr_status}
+                {page.ocr_status === 'pending_quota' ? 'Awaiting Quota' : page.ocr_status}
               </span>
             </div>
           </div>
@@ -196,6 +201,27 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId }: PageCardProps)
             <div className="rounded p-4 flex items-center" style={{ backgroundColor: 'rgba(212, 165, 116, 0.1)', border: '1px solid rgba(212, 165, 116, 0.2)' }}>
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 mr-3" style={{ borderColor: 'var(--amber-gold)' }}></div>
               <p style={{ color: 'var(--amber-gold)', fontWeight: 500 }}>Processing OCR...</p>
+            </div>
+          ) : page.ocr_status === 'pending_quota' ? (
+            <div className="rounded p-6 text-center" style={{ backgroundColor: 'rgba(212, 165, 116, 0.1)', border: '1px solid rgba(212, 165, 116, 0.2)' }}>
+              <p style={{ color: 'var(--amber-gold)', fontWeight: 500, marginBottom: '0.75rem', fontSize: '1.125em' }}>OCR Pending - Quota Exhausted</p>
+              <p style={{ color: 'var(--warm-charcoal)', fontSize: '0.875em', marginBottom: '1rem', opacity: 0.9 }}>
+                Your monthly OCR quota has been reached. This page will be automatically processed when your quota resets
+                {quota?.reset_at && (
+                  <> on <strong>{new Date(quota.reset_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong></>
+                )}, or you can upgrade to Pro for more capacity.
+              </p>
+              <a
+                href="/billing"
+                className="inline-block px-4 py-2 rounded-lg transition-colors font-medium"
+                style={{
+                  backgroundColor: 'var(--terracotta)',
+                  color: 'white',
+                  fontSize: '0.875em'
+                }}
+              >
+                Upgrade to Pro
+              </a>
             </div>
           ) : (
             <div className="rounded p-4" style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}>
@@ -264,6 +290,7 @@ export default function NotebookPage() {
   const [error, setError] = useState<string | null>(null);
   const [copiedPageId, setCopiedPageId] = useState<number | null>(null);
   const [authToken, setAuthToken] = useState<string>('');
+  const [quota, setQuota] = useState<QuotaStatus | null>(null);
 
   // Development mode: use JWT token from localStorage
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
@@ -296,6 +323,14 @@ export default function NotebookPage() {
 
         const data = await getNotebook(id, token);
         setNotebook(data);
+
+        // Fetch quota data
+        try {
+          const quotaData = await getQuotaStatus(token);
+          setQuota(quotaData);
+        } catch (quotaErr) {
+          console.error('Error fetching quota:', quotaErr);
+        }
       } catch (err) {
         console.error('Error fetching notebook:', err);
         setError(err instanceof Error ? err.message : 'Failed to fetch notebook');
@@ -431,6 +466,7 @@ export default function NotebookPage() {
                 token={authToken}
                 copiedPageId={copiedPageId}
                 setCopiedPageId={setCopiedPageId}
+                quota={quota}
               />
             ))}
           </div>

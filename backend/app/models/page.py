@@ -17,6 +17,7 @@ class OcrStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+    PENDING_QUOTA = "pending_quota"  # Page uploaded, PDF generated, OCR pending due to quota
 
 
 class Page(Base):
