@@ -62,9 +62,9 @@ jobs:
               "cd /var/www/rmirror-cloud && \
                git fetch origin && \
                git checkout $BRANCH && \
-               git stash && \
-               git pull origin $BRANCH && \
-               git stash pop || true && \
+               git merge --abort 2>/dev/null || true && \
+               git reset --hard origin/$BRANCH && \
+               git clean -fd && \
 
                # Helper function to update or add env variable
                update_env() {
