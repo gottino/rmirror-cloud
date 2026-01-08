@@ -61,7 +61,7 @@ export default function LandingPage() {
         ref={heroRef}
         className="relative overflow-visible py-20 lg:py-28 transition-all duration-1000 ease-out"
         style={{
-          paddingBottom: isScrolled ? '700px' : '5rem'
+          paddingBottom: isScrolled ? '900px' : '5rem'
         }}
       >
         <div className="max-w-7xl mx-auto px-6">
@@ -190,10 +190,10 @@ export default function LandingPage() {
               style={{
                 right: isScrolled ? 'auto' : 0,
                 left: isScrolled ? '50%' : 'auto',
-                width: isScrolled ? '90%' : '50%',
-                maxWidth: isScrolled ? '1200px' : 'none',
+                width: isScrolled ? '85%' : '50%',
+                maxWidth: isScrolled ? '1100px' : 'none',
                 transform: isScrolled
-                  ? 'translateX(-50%) translateY(450px) scale(1.0)'
+                  ? 'translateX(-50%) translateY(550px) scale(0.95)'
                   : 'translateY(0) scale(0.85)',
                 opacity: isScrolled ? 1 : 0.95,
                 zIndex: isScrolled ? 1 : 10
@@ -312,32 +312,50 @@ export default function LandingPage() {
       </section>
 
       {/* Problem Section */}
-      <section className="py-16 lg:py-24">
+      <section className="py-12 lg:py-16">
         <div className="max-w-4xl mx-auto px-6 text-center">
           <h2
-            className="text-3xl lg:text-4xl font-bold mb-6"
+            className="text-4xl lg:text-5xl font-bold mb-8"
             style={{ color: 'var(--warm-charcoal)' }}
           >
             Love your reMarkable, but...
           </h2>
-          <p
-            className="text-lg lg:text-xl leading-relaxed"
-            style={{ color: 'var(--warm-gray)' }}
-          >
-            Your handwritten notes are trapped on the device and the reMarkable apps. 
-            No automatic transcription to text.
-            No seamless integration with your other tools and your workflow. 
-            Notes gathering digital dust and todos remaining undone because they don't show up in your todo app. <span style={{ color: 'var(--terracotta)', fontWeight: 600 }}>Until now.</span>
-          </p>
+          <div className="text-lg lg:text-xl leading-relaxed" style={{ color: 'var(--warm-gray)' }}>
+            <ul className="space-y-3 mb-6">
+              <li className="flex items-start gap-3">
+                <span style={{ color: 'var(--terracotta)' }}>•</span>
+                <span>Your handwritten notes are trapped on the device and the reMarkable apps?</span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span style={{ color: 'var(--terracotta)' }}>•</span>
+                <span>No automatic transcription to text?</span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span style={{ color: 'var(--terracotta)' }}>•</span>
+                <span>No seamless integration with your other tools and your workflow?</span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span style={{ color: 'var(--terracotta)' }}>•</span>
+                <span>Notes gathering digital dust?</span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span style={{ color: 'var(--terracotta)' }}>•</span>
+                <span>Todos remaining undone because they don't show up in your todo app?</span>
+              </li>
+            </ul>
+            <p className="text-center">
+              <span style={{ color: 'var(--terracotta)', fontWeight: 600 }}>Until now.</span>
+            </p>
+          </div>
         </div>
       </section>
 
       {/* How It Works */}
-      <section className="py-16 lg:py-24" style={{ background: 'var(--soft-cream)' }}>
+      <section className="py-12 lg:py-16" style={{ background: 'var(--soft-cream)' }}>
         <div className="max-w-5xl mx-auto px-6">
-          <div className="text-center mb-16">
+          <div className="text-center mb-12">
             <h2
-              className="text-3xl lg:text-4xl font-bold mb-4"
+              className="text-4xl lg:text-5xl font-bold mb-4"
               style={{ color: 'var(--warm-charcoal)' }}
             >
               How It Works
@@ -395,11 +413,11 @@ export default function LandingPage() {
       </section>
 
       {/* Agent in Action */}
-      <section className="py-16 lg:py-24">
+      <section className="py-12 lg:py-16">
         <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-12">
+          <div className="text-center mb-10">
             <h2
-              className="text-3xl lg:text-4xl font-bold mb-4"
+              className="text-4xl lg:text-5xl font-bold mb-4"
               style={{ color: 'var(--warm-charcoal)' }}
             >
               Runs Quietly in the Background
@@ -419,11 +437,11 @@ export default function LandingPage() {
       </section>
 
       {/* Features */}
-      <section className="py-16 lg:py-24" style={{ background: 'var(--soft-cream)' }}>
+      <section className="py-12 lg:py-16" style={{ background: 'var(--soft-cream)' }}>
         <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-16">
+          <div className="text-center mb-12">
             <h2
-              className="text-3xl lg:text-4xl font-bold mb-4"
+              className="text-4xl lg:text-5xl font-bold mb-4"
               style={{ color: 'var(--warm-charcoal)' }}
             >
               Everything You Need
@@ -494,11 +512,11 @@ export default function LandingPage() {
       </section>
 
       {/* OCR in Action */}
-      <section className="py-16 lg:py-24">
+      <section className="py-12 lg:py-16">
         <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-12">
+          <div className="text-center mb-10">
             <h2
-              className="text-3xl lg:text-4xl font-bold mb-4"
+              className="text-4xl lg:text-5xl font-bold mb-4"
               style={{ color: 'var(--warm-charcoal)' }}
             >
               Powerful OCR Search
@@ -518,11 +536,11 @@ export default function LandingPage() {
       </section>
 
       {/* Integrations Showcase */}
-      <section className="py-16 lg:py-24" style={{ background: 'var(--soft-cream)' }}>
+      <section className="py-12 lg:py-16" style={{ background: 'var(--soft-cream)' }}>
         <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-12">
+          <div className="text-center mb-10">
             <h2
-              className="text-3xl lg:text-4xl font-bold mb-4"
+              className="text-4xl lg:text-5xl font-bold mb-4"
               style={{ color: 'var(--warm-charcoal)' }}
             >
               Seamless Integrations
@@ -542,11 +560,11 @@ export default function LandingPage() {
       </section>
 
       {/* Pricing */}
-      <section className="py-16 lg:py-24">
+      <section className="py-12 lg:py-16">
         <div className="max-w-4xl mx-auto px-6">
-          <div className="text-center mb-16">
+          <div className="text-center mb-12">
             <h2
-              className="text-3xl lg:text-4xl font-bold mb-4"
+              className="text-4xl lg:text-5xl font-bold mb-4"
               style={{ color: 'var(--warm-charcoal)' }}
             >
               Simple, Transparent Pricing
@@ -653,10 +671,10 @@ export default function LandingPage() {
       </section>
 
       {/* Social Proof */}
-      <section className="py-16 lg:py-24" style={{ background: 'var(--soft-cream)' }}>
+      <section className="py-12 lg:py-16" style={{ background: 'var(--soft-cream)' }}>
         <div className="max-w-4xl mx-auto px-6 text-center">
           <h2
-            className="text-3xl lg:text-4xl font-bold mb-8"
+            className="text-4xl lg:text-5xl font-bold mb-6"
             style={{ color: 'var(--warm-charcoal)' }}
           >
             Open Source & Self-Hostable
@@ -682,6 +700,69 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* FAQ Section */}
+      <section className="py-12 lg:py-16">
+        <div className="max-w-4xl mx-auto px-6">
+          <div className="text-center mb-12">
+            <h2
+              className="text-4xl lg:text-5xl font-bold mb-4"
+              style={{ color: 'var(--warm-charcoal)' }}
+            >
+              Frequently Asked Questions
+            </h2>
+            <p className="text-lg" style={{ color: 'var(--warm-gray)' }}>
+              Everything you need to know about rMirror
+            </p>
+          </div>
+
+          <div className="space-y-6">
+            {[
+              {
+                question: 'Do I need a reMarkable Cloud subscription?',
+                answer: 'rMirror works with both free and paid reMarkable Cloud plans. The free plan includes basic cloud sync, which is all you need. The agent monitors the local folder where reMarkable syncs your files.'
+              },
+              {
+                question: 'What platforms does the agent support?',
+                answer: 'The rMirror agent is available for macOS only. The web dashboard works on any device with a browser - phone, tablet, or computer.'
+              },
+              {
+                question: 'Is my data secure?',
+                answer: 'Absolutely. All data is encrypted in transit and at rest. Your notebooks are stored securely in the cloud, and you can delete them anytime. For maximum privacy, you can self-host the entire stack since rMirror is open source.'
+              },
+              {
+                question: 'How accurate is the OCR?',
+                answer: 'We use advanced AI-powered OCR that handles most handwriting styles well. Accuracy depends on handwriting legibility, but most users see 85-95% accuracy. The OCR also recognizes formatting like bullet points and headings.'
+              },
+              {
+                question: 'Can I export my data?',
+                answer: 'Yes! You can download all your notebooks and OCR text at any time. Integrations with Notion and Readwise give you additional export options. Plus, being open source means you have full control over your data.'
+              },
+              {
+                question: 'What happens when I hit the free tier limit?',
+                answer: 'You can still upload notebooks and access everything you\'ve already uploaded. New pages won\'t be OCR\'d until your quota resets (monthly). You can upgrade to Pro for unlimited OCR anytime.'
+              }
+            ].map((faq, index) => (
+              <div
+                key={index}
+                className="p-6 rounded-xl"
+                style={{
+                  background: 'white',
+                  border: '1px solid var(--border)',
+                  boxShadow: 'var(--shadow-sm)'
+                }}
+              >
+                <h3 className="text-lg font-semibold mb-3" style={{ color: 'var(--warm-charcoal)' }}>
+                  {faq.question}
+                </h3>
+                <p style={{ color: 'var(--warm-gray)', lineHeight: '1.6' }}>
+                  {faq.answer}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Final CTA */}
       {!isSignedIn && (
         <section className="py-20 lg:py-28">
@@ -693,63 +774,20 @@ export default function LandingPage() {
               Ready to Unlock Your Notes?
             </h2>
             <p className="text-xl mb-10" style={{ color: 'var(--warm-gray)' }}>
-              Join the waitlist and be the first to know when we launch.
+              Start syncing your handwritten notes today - no credit card required.
             </p>
-
-            <form onSubmit={handleSubmit} className="max-w-md mx-auto">
-              <div className="flex flex-col sm:flex-row gap-3">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your.email@example.com"
-                  required
-                  className="flex-1 px-6 py-4 rounded-lg text-lg"
-                  style={{
-                    border: '2px solid var(--border)',
-                    background: 'white',
-                    color: 'var(--warm-charcoal)'
-                  }}
-                />
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{
-                    background: 'var(--terracotta)',
-                    color: 'white',
-                    boxShadow: 'var(--shadow-md)'
-                  }}
-                >
-                  {isSubmitting ? 'Joining...' : 'Join Waitlist'}
-                </button>
-              </div>
-
-              {showSuccess && (
-                <div
-                  className="mt-4 p-4 rounded-lg"
-                  style={{
-                    background: 'rgba(122, 156, 137, 0.1)',
-                    color: 'var(--sage-green)',
-                    border: '1px solid var(--sage-green)'
-                  }}
-                >
-                  Thanks for joining! We'll notify you when we launch.
-                </div>
-              )}
-              {showError && (
-                <div
-                  className="mt-4 p-4 rounded-lg"
-                  style={{
-                    background: 'rgba(220, 38, 38, 0.1)',
-                    color: '#dc2626',
-                    border: '1px solid #dc2626'
-                  }}
-                >
-                  Something went wrong. Please try again.
-                </div>
-              )}
-            </form>
+            <Link
+              href="/sign-up"
+              className="inline-flex items-center gap-2 px-10 py-5 rounded-lg text-xl font-semibold transition-all hover:scale-105"
+              style={{
+                background: 'var(--terracotta)',
+                color: 'white',
+                boxShadow: 'var(--shadow-md)'
+              }}
+            >
+              Start Free
+              <ArrowRight className="w-6 h-6" />
+            </Link>
           </div>
         </section>
       )}
