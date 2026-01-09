@@ -294,6 +294,7 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 
 ## Recent Major Changes
 
+- **2026-01-01**: Implemented standalone .metadata file upload for lightweight metadata sync
 - **2024-12-25**: Implemented initial sync feature (sync existing notebooks on first run)
 - **2024-12-19**: Added PyInstaller build for .app bundle distribution
 - **2024-12-16**: Integrated keyring for secure token storage
@@ -312,6 +313,7 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 - ✅ PyInstaller .app bundle packaging
 - ✅ Initial sync of existing notebooks
 - ✅ OAuth authentication flow
+- ✅ Standalone .metadata file upload for lightweight metadata sync
 
 **In Progress:**
 - 🚧 Error recovery (retry failed uploads)

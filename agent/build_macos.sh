@@ -18,7 +18,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 APP_NAME="rMirror"
-VERSION="1.1.0"
+VERSION="1.2.0"
 BUNDLE_ID="io.rmirror.agent"
 
 # Directories
@@ -153,7 +153,66 @@ fi
 echo -e "${GREEN}✓${NC} DMG created: $DMG_PATH"
 echo ""
 
-# Step 5: Calculate size and checksum
+# Step 5: Sign the DMG (required for notarization)
+echo -e "${YELLOW}→${NC} Signing DMG..."
+if [ -n "$CODESIGN_IDENTITY" ]; then
+    codesign --sign "$CODESIGN_IDENTITY" "$DMG_PATH"
+    echo -e "${GREEN}✓${NC} DMG signed"
+else
+    echo -e "${YELLOW}⚠${NC}  Skipping DMG signing (CODESIGN_IDENTITY not set)"
+fi
+echo ""
+
+# Step 6: Notarize the DMG with Apple
+echo -e "${YELLOW}→${NC} Notarizing with Apple..."
+if [ -n "$CODESIGN_IDENTITY" ]; then
+    echo -e "   This may take several minutes..."
+
+    # Submit for notarization
+    # Note: This requires credentials stored in keychain with profile name "rmirror-notarization"
+    # Store credentials with: xcrun notarytool store-credentials "rmirror-notarization" \
+    #   --apple-id "your@email.com" \
+    #   --team-id "TEAM_ID" \
+    #   --password "app-specific-password"
+
+    NOTARIZE_OUTPUT=$(xcrun notarytool submit "$DMG_PATH" \
+        --keychain-profile "rmirror-notarization" \
+        --wait 2>&1)
+
+    if echo "$NOTARIZE_OUTPUT" | grep -q "status: Accepted"; then
+        echo -e "${GREEN}✓${NC} Notarization successful"
+
+        # Step 7: Staple the notarization ticket
+        echo -e "${YELLOW}→${NC} Stapling notarization ticket..."
+        xcrun stapler staple "$DMG_PATH"
+        echo -e "${GREEN}✓${NC} Notarization ticket stapled"
+    else
+        echo -e "${RED}✗${NC} Notarization failed"
+        echo "$NOTARIZE_OUTPUT"
+        echo -e "${YELLOW}⚠${NC}  The DMG is signed but not notarized"
+        echo -e "   Users may see warnings when opening"
+    fi
+else
+    echo -e "${YELLOW}⚠${NC}  Skipping notarization (CODESIGN_IDENTITY not set)"
+    echo -e "   Keychain profile 'rmirror-notarization' must be configured"
+fi
+echo ""
+
+# Step 8: Verify code signing and notarization
+echo -e "${YELLOW}→${NC} Verifying signatures..."
+echo -e "   App bundle:"
+codesign --verify --deep --strict --verbose=2 "$DIST_DIR/rMirror.app" 2>&1 | head -3
+echo ""
+echo -e "   DMG:"
+codesign --verify --verbose=2 "$DMG_PATH" 2>&1 | head -3
+echo ""
+if [ -n "$CODESIGN_IDENTITY" ]; then
+    echo -e "   Notarization status:"
+    xcrun stapler validate "$DMG_PATH" 2>&1 | head -3
+fi
+echo ""
+
+# Step 9: Calculate size and checksum
 DMG_SIZE=$(du -h "$DMG_PATH" | cut -f1)
 DMG_SHA256=$(shasum -a 256 "$DMG_PATH" | cut -d' ' -f1)
 
@@ -166,6 +225,13 @@ echo -e "App:      $DIST_DIR/rMirror.app"
 echo -e "Installer: $DMG_PATH"
 echo -e "Size:      $DMG_SIZE"
 echo -e "SHA256:    $DMG_SHA256"
+echo ""
+if [ -n "$CODESIGN_IDENTITY" ]; then
+    echo -e "${GREEN}✓${NC} Signed with: $CODESIGN_IDENTITY"
+    if echo "$NOTARIZE_OUTPUT" | grep -q "status: Accepted" 2>/dev/null; then
+        echo -e "${GREEN}✓${NC} Notarized and stapled"
+    fi
+fi
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo -e "1. Test the installer: open $DMG_PATH"
