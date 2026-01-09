@@ -135,7 +135,7 @@ export default function Home() {
         await trackAgentDownload(token);
       }
     }
-    window.location.href = 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.0.0/rMirror-1.0.0.dmg';
+    window.location.href = 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.0.0/rMirror-1.2.0.dmg';
   };
 
   const fetchNotebooks = async () => {
@@ -617,16 +617,27 @@ export default function Home() {
                       </h3>
 
                       {viewMode === 'grid' ? (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
                           {groupNotebooks.map((notebook) => (
                             <Link
                               key={notebook.notebook_uuid}
                               href={`/notebooks/${notebook.id}`}
-                              className="p-4 rounded-lg transition-all hover:shadow-md group"
+                              className="p-5 rounded-lg transition-all group"
                               style={{
                                 backgroundColor: 'var(--card)',
                                 border: '1px solid var(--border)',
-                                cursor: 'pointer'
+                                cursor: 'pointer',
+                                boxShadow: 'var(--shadow-md)'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.boxShadow = 'var(--shadow-lg)';
+                                e.currentTarget.style.transform = 'translateY(-4px)';
+                                e.currentTarget.style.borderColor = 'var(--terracotta)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.boxShadow = 'var(--shadow-md)';
+                                e.currentTarget.style.transform = 'translateY(0)';
+                                e.currentTarget.style.borderColor = 'var(--border)';
                               }}
                             >
                               <div className="aspect-[3/4] rounded mb-3 flex items-start p-3 overflow-hidden"
@@ -685,19 +696,30 @@ export default function Home() {
                           ))}
                         </div>
                       ) : (
-                        <div className="space-y-2">
+                        <div className="space-y-3">
                           {groupNotebooks.map((notebook) => (
                             <Link
                               key={notebook.notebook_uuid}
                               href={`/notebooks/${notebook.id}`}
-                              className="flex items-center justify-between p-4 rounded-lg transition-all hover:bg-[var(--soft-cream)] group"
+                              className="flex items-center justify-between p-5 rounded-lg transition-all group"
                               style={{
                                 backgroundColor: 'var(--card)',
                                 border: '1px solid var(--border)',
-                                cursor: 'pointer'
+                                cursor: 'pointer',
+                                boxShadow: 'var(--shadow-sm)'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.boxShadow = 'var(--shadow-md)';
+                                e.currentTarget.style.transform = 'translateX(6px)';
+                                e.currentTarget.style.borderColor = 'var(--terracotta)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+                                e.currentTarget.style.transform = 'translateX(0)';
+                                e.currentTarget.style.borderColor = 'var(--border)';
                               }}
                             >
-                              <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <div className="flex items-center gap-4 flex-1 min-w-0">
                                 <div className="w-12 h-16 rounded flex items-start p-2 flex-shrink-0 overflow-hidden"
                                   style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
                                 >
