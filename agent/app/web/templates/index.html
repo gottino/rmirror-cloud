@@ -86,11 +86,52 @@
             margin-bottom: 24px;
         }
 
-        h1 {
-            font-size: 2.5em;
-            font-weight: 600;
+        .logo-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
             margin-bottom: 8px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .logo-icon svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        h1 {
+            font-size: 1.75em;
+            font-weight: 600;
+            margin: 0;
             color: var(--warm-charcoal);
+        }
+
+        .app-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            background: var(--soft-cream);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 0.75em;
+            font-weight: 500;
+            color: var(--warm-gray);
+            margin-left: auto;
+        }
+
+        .app-badge .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--sage-green);
         }
 
         h2 {
@@ -153,26 +194,51 @@
         .status-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
+            gap: 20px;
         }
 
         .status-item {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 10px;
+            padding: 16px;
+            background: var(--soft-cream);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            transition: all 0.2s ease;
+        }
+
+        .status-item:hover {
+            background: #f5f3f0;
+            box-shadow: var(--shadow-sm);
+            transform: translateY(-1px);
+        }
+
+        /* Emphasize quota item */
+        .status-item.quota-item {
+            grid-column: span 1;
+            background: linear-gradient(135deg, var(--soft-cream) 0%, #fefdfb 100%);
+            border: 1px solid rgba(200, 90, 84, 0.15);
+        }
+
+        .status-item.quota-item:hover {
+            background: linear-gradient(135deg, #f5f3f0 0%, var(--soft-cream) 100%);
+            box-shadow: 0 4px 12px rgba(200, 90, 84, 0.1);
         }
 
         .status-label {
             color: var(--warm-gray);
-            font-size: 0.875em;
-            font-weight: 500;
+            font-size: 0.8em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
 
         .status-value {
             display: flex;
             align-items: center;
             gap: 8px;
-            font-size: 0.875em;
+            font-size: 0.925em;
             font-weight: 500;
             color: var(--foreground);
         }
@@ -194,6 +260,102 @@
 
         .status-indicator.yellow {
             background: var(--amber-gold);
+        }
+
+        /* Progress bar for quota display */
+        .quota-progress-container {
+            margin-top: 8px;
+            width: 100%;
+        }
+
+        .quota-progress-bar {
+            height: 6px;
+            width: 100%;
+            background: var(--soft-cream);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .quota-progress-fill {
+            height: 100%;
+            width: 0%;
+            transition: width 0.5s ease-in-out, background-color 0.3s ease;
+            border-radius: 3px;
+        }
+
+        /* Status icons (replacing dots) */
+        .status-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+        }
+
+        .status-icon svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Skeleton loader */
+        .skeleton {
+            background: linear-gradient(90deg, var(--soft-cream) 0%, #f0ede8 50%, var(--soft-cream) 100%);
+            background-size: 200% 100%;
+            animation: skeleton-loading 1.5s ease-in-out infinite;
+            border-radius: 4px;
+        }
+
+        .skeleton-text {
+            height: 16px;
+            width: 100%;
+            display: inline-block;
+        }
+
+        .skeleton-text.short {
+            width: 60%;
+        }
+
+        @keyframes skeleton-loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* Loading spinner */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--soft-cream);
+            border-top-color: var(--terracotta);
+            border-radius: 50%;
+            animation: spinner-rotate 0.8s linear infinite;
+        }
+
+        @keyframes spinner-rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* Button loading state */
+        button.loading {
+            position: relative;
+            color: transparent;
+            pointer-events: none;
+        }
+
+        button.loading::after {
+            content: "";
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            top: 50%;
+            left: 50%;
+            margin-left: -8px;
+            margin-top: -8px;
+            border: 2px solid var(--primary-foreground);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spinner-rotate 0.8s linear infinite;
         }
 
         .form-group {
@@ -274,10 +436,96 @@
             background: #b88d52;
         }
 
+        /* Outline/Tertiary button style */
+        button.outline {
+            background: transparent;
+            color: var(--warm-gray);
+            border: 1px solid var(--border);
+        }
+
+        button.outline:hover {
+            background: var(--soft-cream);
+            border-color: var(--warm-gray);
+            color: var(--warm-charcoal);
+            box-shadow: none;
+        }
+
+        button.outline:active {
+            background: #f0ede8;
+        }
+
+        /* Large primary button */
+        button.primary-lg {
+            width: 100%;
+            padding: 14px 24px;
+            font-size: 1em;
+            justify-content: center;
+        }
+
         .button-group {
             display: flex;
             gap: 10px;
             margin-top: 20px;
+        }
+
+        /* Secondary button group for less prominent actions */
+        .button-group-secondary {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        /* Action section styling */
+        .action-section {
+            margin-top: 20px;
+        }
+
+        .page-limit-control {
+            margin-bottom: 20px;
+            padding: 16px;
+            background: var(--soft-cream);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+        }
+
+        .page-limit-label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--warm-charcoal);
+            font-size: 0.925em;
+        }
+
+        .page-limit-optional {
+            font-weight: 400;
+            color: var(--warm-gray);
+            font-size: 0.9em;
+        }
+
+        .page-limit-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .page-limit-input {
+            width: 120px;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.925em;
+        }
+
+        .page-limit-hint {
+            color: var(--warm-gray);
+            font-size: 0.875em;
+        }
+
+        .page-limit-tip {
+            font-size: 0.8em;
+            color: var(--warm-gray);
+            margin-top: 8px;
+            margin-bottom: 0;
         }
 
         .alert {
@@ -514,7 +762,141 @@
             text-transform: uppercase;
             letter-spacing: 0.05em;
             margin-bottom: 10px;
-            padding: 0 12px;
+            padding: 8px 12px;
+            background: var(--soft-cream);
+            border-left: 3px solid var(--terracotta);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        /* Notebook selection enhancements */
+        .notebook-selection-description {
+            color: var(--warm-gray);
+            margin-bottom: 20px;
+            font-size: 0.925em;
+        }
+
+        .selection-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .quota-impact-item {
+            background: linear-gradient(135deg, var(--soft-cream) 0%, #fefdfb 100%);
+            border: 1px solid rgba(200, 90, 84, 0.15);
+        }
+
+        .quota-impact-item.warning {
+            border-color: var(--amber-gold);
+            background: linear-gradient(135deg, rgba(212, 165, 116, 0.1) 0%, var(--soft-cream) 100%);
+        }
+
+        .quota-impact-item.danger {
+            border-color: var(--destructive);
+            background: linear-gradient(135deg, rgba(220, 38, 38, 0.08) 0%, var(--soft-cream) 100%);
+        }
+
+        .quota-impact-value {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .quota-impact-value.ok {
+            color: var(--sage-green);
+        }
+
+        .quota-impact-value.warning {
+            color: var(--amber-gold);
+        }
+
+        .quota-impact-value.danger {
+            color: var(--destructive);
+        }
+
+        /* Quick filter buttons */
+        .filter-buttons {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            padding: 6px 12px;
+            font-size: 0.8em;
+            background: transparent;
+            color: var(--warm-gray);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-weight: 500;
+        }
+
+        .filter-btn:hover {
+            background: var(--soft-cream);
+            border-color: var(--warm-gray);
+            color: var(--warm-charcoal);
+            transform: none;
+            box-shadow: none;
+        }
+
+        .filter-btn.active {
+            background: var(--terracotta);
+            color: white;
+            border-color: var(--terracotta);
+        }
+
+        .filter-btn.active:hover {
+            background: #b34e49;
+            border-color: #b34e49;
+        }
+
+        /* Sync all checkbox */
+        .sync-all-option {
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .sync-all-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 0.925em;
+        }
+
+        .sync-all-label input {
+            margin-right: 10px;
+            width: 16px;
+            height: 16px;
+        }
+
+        /* Notebook tree container */
+        .notebook-tree {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 12px;
+            background: var(--soft-cream);
+        }
+
+        .notebook-tree-loading {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--warm-gray);
+        }
+
+        .notebook-tree-loading .spinner {
+            width: 24px;
+            height: 24px;
+            margin-bottom: 12px;
         }
 
         /* Settings modal section headers */
@@ -527,12 +909,123 @@
         .settings-content h3:first-of-type {
             margin-top: 0;
         }
+
+        /* Quota Warning Card */
+        .quota-warning-card {
+            display: none;
+            padding: 20px;
+            margin-bottom: 24px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--amber-gold);
+            background: rgba(212, 165, 116, 0.1);
+        }
+
+        .quota-warning-card.visible {
+            display: block;
+        }
+
+        .quota-warning-card.exhausted {
+            border-color: var(--destructive);
+            background: rgba(200, 90, 84, 0.1);
+        }
+
+        .quota-warning-layout {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .quota-warning-icon {
+            flex-shrink: 0;
+            width: 28px;
+            height: 28px;
+            margin-top: 2px;
+        }
+
+        .quota-warning-icon svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .quota-warning-icon.warning {
+            color: var(--amber-gold);
+        }
+
+        .quota-warning-icon.exhausted {
+            color: var(--destructive);
+        }
+
+        .quota-warning-content {
+            flex: 1;
+        }
+
+        .quota-warning-title {
+            margin: 0 0 8px 0;
+            font-size: 1.1em;
+            font-weight: 600;
+            color: var(--warm-charcoal);
+        }
+
+        .quota-warning-text {
+            margin: 0 0 16px 0;
+            font-size: 0.925em;
+            color: var(--warm-gray);
+            line-height: 1.5;
+        }
+
+        .quota-warning-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .quota-warning-link {
+            font-size: 0.925em;
+            color: var(--terracotta);
+            text-decoration: underline;
+        }
+
+        .quota-warning-link:hover {
+            color: #b34e49;
+        }
+
+        .quota-warning-dismiss {
+            background: transparent;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--warm-gray);
+            border-radius: 50%;
+            transition: all 0.15s;
+            flex-shrink: 0;
+        }
+
+        .quota-warning-dismiss:hover {
+            color: var(--warm-charcoal);
+            background: var(--soft-cream);
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>rMirror Agent</h1>
+            <div class="logo-header">
+                <div class="logo-icon">
+                    <img src="{{ url_for('static', filename='rm-icon.png') }}" alt="rMirror" width="40" height="40">
+                </div>
+                <h1>rMirror</h1>
+                <div class="app-badge">
+                    <span class="status-dot"></span>
+                    Agent
+                </div>
+            </div>
             <p class="subtitle">Seamless cloud sync for your reMarkable notebooks</p>
         </header>
 
@@ -557,7 +1050,7 @@
                     </button>
                 </div>
             </div>
-            <div class="status-grid" style="grid-template-columns: repeat(5, 1fr);">
+            <div class="status-grid">
                 <div class="status-item">
                     <div class="status-label">Agent</div>
                     <div class="status-value">
@@ -568,15 +1061,20 @@
                 <div class="status-item">
                     <div class="status-label">Authentication</div>
                     <div class="status-value" id="auth-status">
-                        <span class="status-indicator yellow"></span>
-                        Checking...
+                        <span class="spinner"></span>
+                        <span class="skeleton-text short skeleton"></span>
                     </div>
                 </div>
-                <div class="status-item">
+                <div class="status-item quota-item">
                     <div class="status-label">Monthly Quota</div>
                     <div class="status-value" id="quota-status">
-                        <span class="status-indicator yellow"></span>
-                        Loading...
+                        <span class="spinner"></span>
+                        <span class="skeleton-text skeleton"></span>
+                    </div>
+                    <div class="quota-progress-container" id="quota-progress-container" style="display: none;">
+                        <div class="quota-progress-bar">
+                            <div class="quota-progress-fill" id="quota-progress-fill"></div>
+                        </div>
                     </div>
                 </div>
                 <div class="status-item">
@@ -597,22 +1095,24 @@
         </div>
 
         <!-- Quota Warning Card (shown when quota >= 80%) -->
-        <div class="alert" id="quota-warning-card" style="display: none; padding: 20px; margin-bottom: 24px; position: relative;">
-            <div style="display: flex; align-items: start; gap: 12px;">
-                <div id="quota-warning-icon" style="font-size: 24px; margin-top: 2px;">⚠️</div>
-                <div style="flex: 1;">
-                    <h3 id="quota-warning-title" style="margin: 0 0 8px 0; font-size: 1.1em; font-weight: 600; color: var(--warm-charcoal);"></h3>
-                    <p id="quota-warning-text" style="margin: 0 0 16px 0; font-size: 0.925em; color: var(--warm-gray); line-height: 1.5;"></p>
-                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                        <a href="https://rmirror.io/billing" target="_blank" class="button" id="quota-upgrade-btn" style="text-decoration: none; padding: 10px 20px; border-radius: var(--radius); font-size: 0.925em; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; background: var(--primary); color: var(--primary-foreground);">
+        <div class="quota-warning-card" id="quota-warning-card">
+            <div class="quota-warning-layout">
+                <div class="quota-warning-icon warning" id="quota-warning-icon">
+                    <!-- SVG will be inserted by JavaScript -->
+                </div>
+                <div class="quota-warning-content">
+                    <h3 class="quota-warning-title" id="quota-warning-title"></h3>
+                    <p class="quota-warning-text" id="quota-warning-text"></p>
+                    <div class="quota-warning-actions">
+                        <a href="https://rmirror.io/billing" target="_blank" class="button" id="quota-upgrade-btn" style="text-decoration: none;">
                             View Upgrade Options
                         </a>
-                        <a href="https://rmirror.io/billing" target="_blank" style="font-size: 0.925em; color: var(--terracotta); text-decoration: underline;">
+                        <a href="https://rmirror.io/billing" target="_blank" class="quota-warning-link">
                             View quota details
                         </a>
                     </div>
                 </div>
-                <button onclick="dismissQuotaWarning()" style="background: transparent; border: none; font-size: 1.5em; cursor: pointer; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--warm-gray); border-radius: 50%; transition: all 0.15s;" onmouseover="this.style.background='var(--soft-cream)'" onmouseout="this.style.background='transparent'">
+                <button class="quota-warning-dismiss" onclick="dismissQuotaWarning()" aria-label="Dismiss warning">
                     ×
                 </button>
             </div>
@@ -621,9 +1121,10 @@
         <!-- Notebook Selection Card -->
         <div class="card">
             <h2>Notebook Selection</h2>
-            <p style="color: #666; margin-bottom: 20px;">Choose which notebooks to sync to stay within your plan limits.</p>
+            <p class="notebook-selection-description">Choose which notebooks to sync to stay within your plan limits.</p>
 
-            <div class="status-grid" style="margin-bottom: 20px;">
+            <!-- Selection Stats -->
+            <div class="selection-stats">
                 <div class="status-item">
                     <div class="status-label">Total Pages</div>
                     <div class="status-value" id="total-pages">-</div>
@@ -632,66 +1133,112 @@
                     <div class="status-label">Selected Pages</div>
                     <div class="status-value" id="selected-pages">-</div>
                 </div>
-            </div>
-
-            <div style="margin-bottom: 15px;">
-                <label style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="sync-all" style="margin-right: 10px;">
-                    <span>Sync all notebooks</span>
-                </label>
-            </div>
-
-            <div id="notebook-tree" style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 10px; background: #f9f9f9;">
-                <div style="text-align: center; padding: 20px; color: #999;">
-                    Loading notebooks...
+                <div class="status-item quota-impact-item" id="quota-impact-item">
+                    <div class="status-label">Quota Impact</div>
+                    <div class="status-value quota-impact-value" id="quota-impact">-</div>
                 </div>
             </div>
 
-            <div class="button-group" style="margin-top: 15px;">
-                <button onclick="saveNotebookSelection()">Save Selection</button>
-                <button class="secondary" onclick="loadNotebookTree()">Refresh</button>
+            <!-- Quick Filters -->
+            <div class="filter-buttons">
+                <button class="filter-btn active" onclick="filterNotebooks('all')" id="filter-all">All Notebooks</button>
+                <button class="filter-btn" onclick="filterNotebooks('week')" id="filter-week">Last 7 Days</button>
+                <button class="filter-btn" onclick="filterNotebooks('month')" id="filter-month">This Month</button>
+                <button class="filter-btn" onclick="filterNotebooks('none')" id="filter-none">Clear Selection</button>
+            </div>
+
+            <!-- Sync All Option -->
+            <div class="sync-all-option">
+                <label class="sync-all-label">
+                    <input type="checkbox" id="sync-all">
+                    <span>Sync all notebooks automatically</span>
+                </label>
+            </div>
+
+            <!-- Notebook Tree -->
+            <div id="notebook-tree" class="notebook-tree">
+                <div class="notebook-tree-loading">
+                    <div class="spinner"></div>
+                    <div>Loading notebooks...</div>
+                </div>
+            </div>
+
+            <div class="button-group" style="margin-top: 16px;">
+                <button onclick="saveNotebookSelection()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                        <polyline points="17 21 17 13 7 13 7 21"/>
+                        <polyline points="7 3 7 8 15 8"/>
+                    </svg>
+                    Save Selection
+                </button>
+                <button class="outline" onclick="loadNotebookTree()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"/>
+                        <polyline points="1 20 1 14 7 14"/>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                    </svg>
+                    Refresh
+                </button>
             </div>
         </div>
 
         <!-- Actions Card -->
         <div class="card">
             <h2>Actions</h2>
-            <p style="color: var(--warm-gray); margin-bottom: 20px; font-size: 0.925em;">
-                <strong>Initial Sync:</strong> Upload all pages and content for your selected notebooks. Use this for first-time setup or to catch up after being offline. Respects your notebook selection above.
+            <p class="subtitle" style="margin-bottom: 20px;">
+                <strong>Initial Sync:</strong> Upload all pages and content for your selected notebooks. Use this for first-time setup or to catch up after being offline.
             </p>
 
             <!-- Page Limit Control -->
-            <div style="margin-bottom: 20px; padding: 16px; background: var(--soft-cream); border-radius: var(--radius); border: 1px solid var(--border);">
-                <label for="max-pages-sync" style="display: block; font-weight: 500; margin-bottom: 8px; color: var(--warm-charcoal); font-size: 0.925em;">
+            <div class="page-limit-control">
+                <label for="max-pages-sync" class="page-limit-label">
                     Limit pages per notebook
-                    <span style="font-weight: 400; color: var(--warm-gray); font-size: 0.9em;">(optional)</span>
+                    <span class="page-limit-optional">(optional)</span>
                 </label>
-                <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="page-limit-row">
                     <input type="number" id="max-pages-sync"
+                           class="page-limit-input"
                            value="{{ max_pages_per_notebook if max_pages_per_notebook else '' }}"
                            min="1" max="1000"
-                           placeholder="Unlimited"
-                           style="width: 120px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.925em;">
-                    <span style="color: var(--warm-gray); font-size: 0.875em;">
+                           placeholder="Unlimited">
+                    <span class="page-limit-hint">
                         Sync only the N most recent pages per notebook
                     </span>
                 </div>
-                <p style="font-size: 0.8em; color: var(--warm-gray); margin-top: 8px; margin-bottom: 0;">
-                    💡 Useful for managing quota with large notebooks. Example: <strong>10</strong> will sync only the 10 newest pages from each notebook.
+                <p class="page-limit-tip">
+                    Useful for managing quota with large notebooks. Example: <strong>10</strong> will sync only the 10 newest pages from each notebook.
                 </p>
             </div>
 
-            <div class="button-group">
-                <button onclick="triggerInitialSync()">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <!-- Primary Action -->
+            <div class="action-section">
+                <button class="primary-lg" onclick="triggerInitialSync()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                         <polyline points="7 10 12 15 17 10"/>
                         <line x1="12" y1="15" x2="12" y2="3"/>
                     </svg>
                     Initial Sync
                 </button>
-                <button class="secondary" onclick="triggerSync()">Sync Now</button>
-                <button class="secondary" onclick="refreshStatus()">Refresh Status</button>
+            </div>
+
+            <!-- Secondary Actions -->
+            <div class="button-group-secondary">
+                <button class="outline" onclick="triggerSync()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
+                    </svg>
+                    Sync Now
+                </button>
+                <button class="outline" onclick="refreshStatus()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"/>
+                        <polyline points="1 20 1 14 7 14"/>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                    </svg>
+                    Refresh Status
+                </button>
             </div>
         </div>
     </div>
@@ -1017,10 +1564,35 @@
         // Dismiss quota warning
         function dismissQuotaWarning() {
             const card = document.getElementById('quota-warning-card');
-            card.style.display = 'none';
+            card.classList.remove('visible');
             // Store dismissal in localStorage with current quota percentage
             const quota = JSON.parse(localStorage.getItem('current_quota') || '{}');
             localStorage.setItem('quota_warning_dismissed', quota.percentage_used || '0');
+        }
+
+        // Get quota icon SVG based on status
+        function getQuotaIcon(status) {
+            if (status === 'green') {
+                // CheckCircle icon
+                return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>`;
+            } else if (status === 'yellow') {
+                // AlertTriangle icon
+                return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>`;
+            } else {
+                // XCircle icon
+                return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="15" y1="9" x2="9" y2="15"/>
+                    <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>`;
+            }
         }
 
         // Refresh quota status
@@ -1033,11 +1605,18 @@
                 if (response.status === 401) {
                     // Not authenticated yet - retry up to 3 times with delay
                     if (retryCount < 3) {
-                        quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Loading...';
+                        quotaStatus.innerHTML = '<span class="spinner"></span><span class="skeleton-text short skeleton"></span>';
                         setTimeout(() => refreshQuotaStatus(retryCount + 1), 1000 * (retryCount + 1));
                         return;
                     } else {
-                        quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Not Available';
+                        // Not authenticated - show helpful message
+                        quotaStatus.innerHTML = `<span class="status-icon" style="color: var(--warm-gray)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"/>
+                                <line x1="12" y1="8" x2="12" y2="12"/>
+                                <line x1="12" y1="16" x2="12.01" y2="16"/>
+                            </svg>
+                        </span>Sign in to view quota`;
                         return;
                     }
                 }
@@ -1051,17 +1630,31 @@
                 // Store current quota for dismissal tracking
                 localStorage.setItem('current_quota', JSON.stringify(quota));
 
-                // Determine color based on usage
+                // Determine color based on percentage (align with dashboard)
+                const percentage = Math.round(quota.percentage_used);
                 let indicatorClass = 'green';
-                if (quota.is_exhausted) {
+                let colorValue = 'var(--sage-green)';
+
+                if (percentage >= 91) {
                     indicatorClass = 'red';
-                } else if (quota.is_near_limit) {
+                    colorValue = 'var(--destructive)';
+                } else if (percentage >= 67) {
                     indicatorClass = 'yellow';
+                    colorValue = 'var(--amber-gold)';
                 }
 
-                // Format display
-                const percentage = Math.round(quota.percentage_used);
-                quotaStatus.innerHTML = `<span class="status-indicator ${indicatorClass}"></span>${quota.used} / ${quota.limit} pages used`;
+                // Format display with icon instead of dot
+                const iconSvg = getQuotaIcon(indicatorClass);
+                quotaStatus.innerHTML = `<span class="status-icon" style="color: ${colorValue}">${iconSvg}</span>${quota.used} / ${quota.limit} pages used`;
+
+                // Update progress bar
+                const progressContainer = document.getElementById('quota-progress-container');
+                const progressFill = document.getElementById('quota-progress-fill');
+                if (progressContainer && progressFill) {
+                    progressContainer.style.display = 'block';
+                    progressFill.style.width = `${Math.min(percentage, 100)}%`;
+                    progressFill.style.backgroundColor = colorValue;
+                }
 
                 // Show quota warning card if >= 80% and not dismissed at this percentage
                 const dismissedAt = parseFloat(localStorage.getItem('quota_warning_dismissed') || '0');
@@ -1070,17 +1663,45 @@
                 if (shouldShow) {
                     updateQuotaWarningCard(quota);
                 } else {
-                    document.getElementById('quota-warning-card').style.display = 'none';
+                    document.getElementById('quota-warning-card').classList.remove('visible');
                 }
+
+                // Refresh quota impact preview now that quota data is available
+                updateSelectedPagesCount();
             } catch (error) {
                 console.error('Failed to fetch quota:', error);
                 // Show error only if we've retried
                 if (retryCount >= 2) {
-                    quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Error';
+                    quotaStatus.innerHTML = `<span class="status-icon" style="color: var(--destructive)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="15" y1="9" x2="9" y2="15"/>
+                            <line x1="9" y1="9" x2="15" y2="15"/>
+                        </svg>
+                    </span>Connection error`;
                 } else {
-                    quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Loading...';
+                    quotaStatus.innerHTML = '<span class="spinner"></span><span class="skeleton-text short skeleton"></span>';
                     setTimeout(() => refreshQuotaStatus(retryCount + 1), 1000 * (retryCount + 1));
                 }
+            }
+        }
+
+        // Get warning icon SVG (larger version for warning card)
+        function getWarningIcon(isExhausted) {
+            if (isExhausted) {
+                // XCircle icon for exhausted
+                return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="15" y1="9" x2="9" y2="15"/>
+                    <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>`;
+            } else {
+                // AlertTriangle icon for warning
+                return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>`;
             }
         }
 
@@ -1093,26 +1714,21 @@
             const upgradeBtn = document.getElementById('quota-upgrade-btn');
 
             const percentage = Math.round(quota.percentage_used);
-            const remaining = quota.limit - quota.used;
             const isExhausted = quota.is_exhausted;
 
-            // Update card styling based on status
+            // Update card and icon styling using CSS classes
             if (isExhausted) {
-                // Red styling for exhausted
-                card.style.backgroundColor = 'rgba(200, 90, 84, 0.1)';
-                card.style.borderColor = 'var(--destructive)';
-                card.style.borderWidth = '1px';
-                card.style.borderStyle = 'solid';
-                icon.textContent = '🔴';
+                card.classList.add('exhausted');
+                icon.classList.remove('warning');
+                icon.classList.add('exhausted');
+                icon.innerHTML = getWarningIcon(true);
                 title.textContent = 'Free Tier Quota Exhausted';
                 upgradeBtn.textContent = 'View Upgrade Options';
             } else {
-                // Yellow styling for approaching limit
-                card.style.backgroundColor = 'rgba(212, 165, 116, 0.1)';
-                card.style.borderColor = 'var(--amber-gold)';
-                card.style.borderWidth = '1px';
-                card.style.borderStyle = 'solid';
-                icon.textContent = '⚠️';
+                card.classList.remove('exhausted');
+                icon.classList.remove('exhausted');
+                icon.classList.add('warning');
+                icon.innerHTML = getWarningIcon(false);
                 title.textContent = 'Approaching Quota Limit';
                 upgradeBtn.textContent = 'Upgrade to Pro';
             }
@@ -1129,8 +1745,8 @@
                 text.innerHTML = `You've used <strong>${quota.used} / ${quota.limit} pages</strong> this month (${percentage}%).`;
             }
 
-            // Show the card
-            card.style.display = 'block';
+            // Show the card using CSS class
+            card.classList.add('visible');
         }
 
         // Handle form submission
@@ -1427,24 +2043,146 @@
             updateSelectedPagesCount();
         }
 
-        // Update selected pages count
+        // Update selected pages count and quota impact
         async function updateSelectedPagesCount() {
+            let selectedCount = 0;
+
             if (syncAll) {
                 const response = await fetch('/api/notebooks/tree');
                 const data = await response.json();
-                document.getElementById('selected-pages').textContent = data.stats.total_pages || '0';
+                selectedCount = data.stats.total_pages || 0;
             } else {
                 // Calculate from selected notebooks
-                let totalPages = 0;
                 notebookTree.forEach(group => {
                     group.notebooks.forEach(notebook => {
                         if (selectedNotebooks.has(notebook.uuid) && notebook.pageCount) {
-                            totalPages += notebook.pageCount;
+                            selectedCount += notebook.pageCount;
                         }
                     });
                 });
-                document.getElementById('selected-pages').textContent = totalPages;
             }
+
+            document.getElementById('selected-pages').textContent = selectedCount;
+            updateQuotaImpact(selectedCount);
+        }
+
+        // Update quota impact preview
+        function updateQuotaImpact(selectedPages) {
+            const quotaImpactEl = document.getElementById('quota-impact');
+            const quotaImpactItem = document.getElementById('quota-impact-item');
+            const quota = JSON.parse(localStorage.getItem('current_quota') || '{}');
+
+            if (!quota.limit) {
+                quotaImpactEl.innerHTML = '<span style="color: var(--warm-gray)">Sign in to view</span>';
+                return;
+            }
+
+            const remaining = quota.limit - quota.used;
+            const wouldUse = Math.min(selectedPages, remaining);
+            const afterSync = quota.used + wouldUse;
+            const percentage = Math.round((afterSync / quota.limit) * 100);
+
+            // Determine status
+            let statusClass = 'ok';
+            let iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>`;
+
+            if (selectedPages > remaining) {
+                statusClass = 'danger';
+                iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="15" y1="9" x2="9" y2="15"/>
+                    <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>`;
+                quotaImpactItem.classList.remove('warning');
+                quotaImpactItem.classList.add('danger');
+            } else if (percentage >= 67) {
+                statusClass = 'warning';
+                iconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>`;
+                quotaImpactItem.classList.remove('danger');
+                quotaImpactItem.classList.add('warning');
+            } else {
+                quotaImpactItem.classList.remove('warning', 'danger');
+            }
+
+            quotaImpactEl.className = `status-value quota-impact-value ${statusClass}`;
+
+            if (selectedPages > remaining) {
+                quotaImpactEl.innerHTML = `${iconSvg} ${remaining} of ${selectedPages} pages fit`;
+            } else {
+                quotaImpactEl.innerHTML = `${iconSvg} ${selectedPages} → ${afterSync}/${quota.limit}`;
+            }
+        }
+
+        // Filter notebooks by time period
+        function filterNotebooks(period) {
+            // Update filter button states
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('filter-' + (period === 'week' ? 'week' : period === 'month' ? 'month' : period === 'none' ? 'none' : 'all')).classList.add('active');
+
+            const now = new Date();
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+            // Clear current selection if not "all"
+            if (period !== 'all') {
+                selectedNotebooks.clear();
+            }
+
+            notebookTree.forEach(group => {
+                group.notebooks.forEach(notebook => {
+                    const lastOpened = new Date(notebook.lastOpened);
+                    let shouldSelect = false;
+
+                    switch (period) {
+                        case 'all':
+                            shouldSelect = true;
+                            break;
+                        case 'week':
+                            shouldSelect = lastOpened >= weekAgo;
+                            break;
+                        case 'month':
+                            shouldSelect = lastOpened >= monthStart;
+                            break;
+                        case 'none':
+                            shouldSelect = false;
+                            break;
+                    }
+
+                    if (shouldSelect) {
+                        selectedNotebooks.add(notebook.uuid);
+                    }
+
+                    // Update checkbox in tree
+                    const checkbox = document.getElementById('nb-' + notebook.uuid);
+                    if (checkbox) {
+                        checkbox.checked = shouldSelect;
+                    }
+                });
+            });
+
+            // Update group checkboxes
+            notebookTree.forEach(group => {
+                const groupCheckbox = document.querySelector(`#notebooks-${group.group}`)?.previousSibling?.querySelector('input[type="checkbox"]');
+                if (groupCheckbox) {
+                    groupCheckbox.checked = isGroupSelected(group.notebooks);
+                }
+            });
+
+            // Disable sync all when using filters (except 'all')
+            if (period !== 'all') {
+                syncAll = false;
+                document.getElementById('sync-all').checked = false;
+                updateTreeCheckboxes();
+            }
+
+            updateSelectedPagesCount();
         }
 
         // Save notebook selection
