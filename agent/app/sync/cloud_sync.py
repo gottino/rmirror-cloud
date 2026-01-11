@@ -38,6 +38,8 @@ class CloudSync:
         self.config = config
         self.client: Optional[httpx.AsyncClient] = None
         self.authenticated = False
+        self.user_email: Optional[str] = None
+        self.user_id: Optional[int] = None
 
     async def authenticate(self) -> bool:
         """
@@ -48,8 +50,9 @@ class CloudSync:
         """
         # Create HTTP client if not exists
         if self.client is None:
-            self.client = httpx.AsyncClient(timeout=300.0)  # 5 minute timeout for OCR
-            logger.debug(f"Created HTTP client with 300s timeout")
+            # Disable SSL verification to handle corporate proxies and self-signed certs
+            self.client = httpx.AsyncClient(timeout=300.0, verify=False)  # 5 minute timeout for OCR
+            logger.debug(f"Created HTTP client with 300s timeout (SSL verification disabled)")
 
         # If we already have a token (from any source), verify it's valid
         if self.config.api.token:
@@ -591,6 +594,62 @@ class CloudSync:
         except Exception as e:
             logger.error(f"Quota status request error: {e}")
             raise CloudSyncError(f"Quota status request error: {e}")
+
+    async def get_user_info(self) -> dict:
+        """
+        Get current user info from the backend.
+
+        Returns:
+            User info with fields:
+            - id: int
+            - email: str
+            - full_name: str (optional)
+
+        Raises:
+            CloudSyncError: If request fails
+        """
+        await self.ensure_authenticated()
+
+        try:
+            response = await self.client.get(
+                f"{self.config.api.url}/users/me",
+                headers=self._get_headers(),
+            )
+            response.raise_for_status()
+
+            user_data = response.json()
+            # Cache user info
+            self.user_email = user_data.get('email')
+            self.user_id = user_data.get('id')
+            logger.debug(f"User info: {user_data}")
+            return user_data
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                # Token expired
+                self.authenticated = False
+                raise CloudSyncError("Authentication expired. Please sign in again.")
+
+            logger.error(f"User info request failed: status={e.response.status_code}")
+            raise CloudSyncError(f"User info request failed: {e}")
+        except Exception as e:
+            logger.error(f"User info request error: {e}")
+            raise CloudSyncError(f"User info request error: {e}")
+
+    def logout(self) -> None:
+        """
+        Clear authentication state and stored token.
+
+        Note: We keep use_clerk_auth unchanged so the sign-in modal
+        shows the OAuth option, not password auth.
+        """
+        self.authenticated = False
+        self.user_email = None
+        self.user_id = None
+        self.config.api.token = None
+        # Keep use_clerk_auth unchanged - don't reset auth method preference
+        self.config.save()
+        logger.info("User logged out, token cleared")
 
     def format_quota_display(self, quota_data: dict) -> str:
         """

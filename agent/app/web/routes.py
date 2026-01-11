@@ -319,7 +319,38 @@ def register_routes(app: Flask) -> None:
             "use_clerk_auth": config.api.use_clerk_auth,
             "has_token": bool(config.api.token),
             "clerk_frontend_api": config.api.clerk_frontend_api,
+            "email": cloud_sync.user_email if cloud_sync else None,
         })
+
+    @app.route("/api/auth/me")
+    def api_auth_me():
+        """Get current user info from backend."""
+        import asyncio
+        cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+
+        if not cloud_sync or not cloud_sync.authenticated:
+            return jsonify({"error": "Not authenticated"}), 401
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                user_data = loop.run_until_complete(cloud_sync.get_user_info())
+                return jsonify(user_data)
+            finally:
+                loop.close()
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/auth/logout", methods=["POST"])
+    def api_auth_logout():
+        """Sign out and clear stored token."""
+        cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+
+        if cloud_sync:
+            cloud_sync.logout()
+
+        return jsonify({"success": True, "message": "Signed out successfully"})
 
     @app.route("/api/notebooks/tree")
     def api_notebooks_tree():

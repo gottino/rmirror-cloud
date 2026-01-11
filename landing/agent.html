@@ -219,7 +219,7 @@
 
     <script>
         // API URL for backend
-        const API_URL = 'https://api.rmirror.io';
+        const API_URL = 'https://rmirror.io/v1';
 
         window.addEventListener('load', async () => {
             const clerk = window.Clerk;
@@ -238,13 +238,21 @@
             const callbackUrl = params.get('callback') || 'http://localhost:5555/auth/callback';
 
             function showError(message) {
+                // Hide the status spinner and user info success box
                 statusText.parentElement.style.display = 'none';
+                document.querySelector('.user-info').style.display = 'none';
+                document.querySelector('.success-icon').style.display = 'none';
+                // Show error message and retry button
                 errorMessage.style.display = 'block';
                 errorText.textContent = message;
                 retryBtn.style.display = 'block';
             }
 
             function showStatus(message) {
+                // Restore user info if hidden
+                document.querySelector('.user-info').style.display = 'block';
+                document.querySelector('.success-icon').style.display = 'block';
+                // Hide error, show status
                 errorMessage.style.display = 'none';
                 statusText.parentElement.style.display = 'block';
                 statusText.textContent = message;

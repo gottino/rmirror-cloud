@@ -1042,6 +1042,14 @@
                     <button class="sign-in-button" id="sign-in-btn" onclick="openAuth()" style="display: none;">
                         Sign In
                     </button>
+                    <button class="settings-button" id="sign-out-btn" onclick="signOut()" style="display: none; margin-right: 8px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                            <polyline points="16 17 21 12 16 7"/>
+                            <line x1="21" y1="12" x2="9" y2="12"/>
+                        </svg>
+                        Sign Out
+                    </button>
                     <button class="settings-button" onclick="openSettings()">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
@@ -1304,17 +1312,19 @@
             {% if use_clerk_auth %}
             <!-- Clerk Authentication -->
             <div style="text-align: center; padding: 20px 0;">
-                <p style="margin-bottom: 30px; color: #666; font-size: 1.05em;">
+                <p style="margin-bottom: 20px; color: var(--warm-charcoal); font-size: 1.05em;">
                     Sign in with your rMirror account to start syncing your notebooks to the cloud.
                 </p>
-                <button onclick="openAuthPage()" style="background: #667eea; font-size: 1.1em; padding: 14px 28px;">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: middle; margin-right: 8px;">
-                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                <p style="margin-bottom: 30px; color: var(--warm-gray); font-size: 0.9em;">
+                    You can use Google or email &amp; password.
+                </p>
+                <button onclick="openAuthPage()" class="primary-lg" style="max-width: 280px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 8px;">
+                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                        <polyline points="10 17 15 12 10 7"/>
+                        <line x1="15" y1="12" x2="3" y2="12"/>
                     </svg>
-                    Sign in with Google
+                    Sign in to rMirror
                 </button>
             </div>
             {% else %}
@@ -1351,6 +1361,40 @@
         function closeAuthIfClickedOutside(event) {
             if (event.target.id === 'auth-overlay') {
                 closeAuth();
+            }
+        }
+
+        // Sign out user
+        async function signOut() {
+            try {
+                const response = await fetch('/api/auth/logout', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    // Update UI immediately
+                    const authStatus = document.getElementById('auth-status');
+                    const signInBtn = document.getElementById('sign-in-btn');
+                    const signOutBtn = document.getElementById('sign-out-btn');
+                    const quotaStatus = document.getElementById('quota-status');
+                    const progressContainer = document.getElementById('quota-progress-container');
+
+                    authStatus.innerHTML = '<span class="status-indicator red"></span>Not Authenticated';
+                    signInBtn.style.display = 'flex';
+                    signOutBtn.style.display = 'none';
+                    quotaStatus.innerHTML = '<span class="status-indicator yellow"></span>Not Available';
+                    if (progressContainer) {
+                        progressContainer.style.display = 'none';
+                    }
+
+                    // Hide quota warning card
+                    document.getElementById('quota-warning-card').classList.remove('visible');
+
+                    showMessage('Signed out successfully', 'success');
+                } else {
+                    showMessage('Sign out failed', 'error');
+                }
+            } catch (error) {
+                showMessage('Sign out failed: ' + error.message, 'error');
             }
         }
 
@@ -1540,18 +1584,40 @@
                 // Update authentication status
                 const authStatus = document.getElementById('auth-status');
                 const signInBtn = document.getElementById('sign-in-btn');
+                const signOutBtn = document.getElementById('sign-out-btn');
 
                 const isAuthenticated = statusData.authentication.authenticated || authData.authenticated;
 
                 if (isAuthenticated) {
-                    authStatus.innerHTML = '<span class="status-indicator green"></span>Authenticated';
+                    // Try to fetch user info for email display
+                    let userEmail = authData.email || statusData.authentication.email;
+
+                    if (!userEmail) {
+                        try {
+                            const userRes = await fetch('/api/auth/me');
+                            if (userRes.ok) {
+                                const userData = await userRes.json();
+                                userEmail = userData.email;
+                            }
+                        } catch (e) {
+                            console.log('Could not fetch user info:', e);
+                        }
+                    }
+
+                    if (userEmail) {
+                        authStatus.innerHTML = `<span class="status-indicator green"></span>${userEmail}`;
+                    } else {
+                        authStatus.innerHTML = '<span class="status-indicator green"></span>Authenticated';
+                    }
                     signInBtn.style.display = 'none'; // Hide sign-in button
+                    signOutBtn.style.display = 'flex'; // Show sign-out button
 
                     // Fetch quota status when authenticated
                     await refreshQuotaStatus();
                 } else {
                     authStatus.innerHTML = '<span class="status-indicator red"></span>Not Authenticated';
                     signInBtn.style.display = 'flex'; // Show sign-in button
+                    signOutBtn.style.display = 'none'; // Hide sign-out button
 
                     // Clear quota display when not authenticated
                     const quotaStatus = document.getElementById('quota-status');
