@@ -1,18 +1,22 @@
 """Authentication endpoints."""
 
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth import get_password_hash, verify_password
+from app.auth.clerk import get_clerk_user
 from app.auth.jwt import create_access_token
 from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import LoginRequest, Token
 from app.schemas.user import User as UserSchema
 from app.schemas.user import UserCreate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -102,3 +106,34 @@ async def login(
     access_token = create_access_token(data={"sub": str(user.id)})
 
     return Token(access_token=access_token)
+
+
+@router.post("/agent-token", response_model=Token)
+async def create_agent_token(
+    request: Request,
+    user: User = Depends(get_clerk_user),
+) -> Token:
+    """
+    Exchange a Clerk session token for a long-lived agent JWT.
+
+    This endpoint is called by the agent auth bridge page after
+    the user signs in with Clerk. It issues a 30-day JWT that
+    the agent stores in the system keychain.
+
+    Security:
+    - Requires valid Clerk session token (verified by get_clerk_user)
+    - Issued token includes 'type': 'agent' claim for audit purposes
+    - Token is bound to user ID, not Clerk session
+    - All issuances are logged for audit
+    """
+    # Audit log: who requested an agent token and from where
+    client_ip = request.client.host if request.client else "unknown"
+    logger.info(
+        f"Agent token issued: user_id={user.id}, email={user.email}, ip={client_ip}"
+    )
+
+    access_token = create_access_token(
+        data={"sub": str(user.id), "type": "agent"},
+        expires_delta=timedelta(days=30),
+    )
+    return Token(access_token=access_token, token_type="bearer")

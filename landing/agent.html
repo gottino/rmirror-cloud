@@ -131,6 +131,20 @@
             margin-bottom: 0;
         }
 
+        .error-message {
+            background: #fdeaea;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+            display: none;
+        }
+
+        .error-message p {
+            color: #c0392b;
+            margin-bottom: 0;
+        }
+
         button {
             background: #667eea;
             color: white;
@@ -193,6 +207,10 @@
                 <p id="status-text">Sending credentials to your local agent...</p>
             </div>
 
+            <div class="error-message" id="error-message">
+                <p id="error-text"></p>
+            </div>
+
             <button id="retry-btn" style="display: none;" onclick="sendTokenToAgent()">
                 Retry Connection
             </button>
@@ -200,6 +218,9 @@
     </div>
 
     <script>
+        // API URL for backend
+        const API_URL = 'https://api.rmirror.io';
+
         window.addEventListener('load', async () => {
             const clerk = window.Clerk;
             await clerk.load();
@@ -208,23 +229,76 @@
             const initialContent = document.getElementById('initial-content');
             const signedInContent = document.getElementById('signed-in-content');
             const statusText = document.getElementById('status-text');
+            const errorMessage = document.getElementById('error-message');
+            const errorText = document.getElementById('error-text');
             const retryBtn = document.getElementById('retry-btn');
+
+            // Get callback URL from query params (passed by agent)
+            const params = new URLSearchParams(window.location.search);
+            const callbackUrl = params.get('callback') || 'http://localhost:5555/auth/callback';
+
+            function showError(message) {
+                statusText.parentElement.style.display = 'none';
+                errorMessage.style.display = 'block';
+                errorText.textContent = message;
+                retryBtn.style.display = 'block';
+            }
+
+            function showStatus(message) {
+                errorMessage.style.display = 'none';
+                statusText.parentElement.style.display = 'block';
+                statusText.textContent = message;
+                retryBtn.style.display = 'none';
+            }
 
             async function sendTokenToAgent() {
                 try {
-                    statusText.textContent = 'Sending credentials to your local agent...';
-                    retryBtn.style.display = 'none';
+                    showStatus('Getting authentication token...');
 
-                    // Get the session token
-                    const token = await clerk.session.getToken();
+                    // Validate callback URL is localhost only (security)
+                    let callbackHostname;
+                    try {
+                        const url = new URL(callbackUrl);
+                        callbackHostname = url.hostname;
+                    } catch (e) {
+                        showError('Invalid callback URL format');
+                        return;
+                    }
 
-                    // Redirect to local agent with token in URL
-                    // This avoids CORS issues with Cloudflare
-                    window.location.href = `http://localhost:5555/auth/callback?token=${encodeURIComponent(token)}`;
+                    if (!['localhost', '127.0.0.1'].includes(callbackHostname)) {
+                        showError('Invalid callback URL: must be localhost');
+                        return;
+                    }
+
+                    // Get the Clerk session token (short-lived)
+                    const clerkToken = await clerk.session.getToken();
+
+                    showStatus('Exchanging for agent token...');
+
+                    // Exchange Clerk token for long-lived agent token (30 days)
+                    const response = await fetch(`${API_URL}/auth/agent-token`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${clerkToken}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        showError(`Failed to get agent token: ${errorData.detail || response.statusText}`);
+                        return;
+                    }
+
+                    const { access_token } = await response.json();
+
+                    showStatus('Sending credentials to your local agent...');
+
+                    // Redirect to local agent with the long-lived token
+                    window.location.href = `${callbackUrl}?token=${encodeURIComponent(access_token)}`;
                 } catch (error) {
-                    console.error('Error getting token:', error);
-                    statusText.textContent = '✗ Failed to get authentication token. Please try signing in again.';
-                    retryBtn.style.display = 'block';
+                    console.error('Error in auth flow:', error);
+                    showError('Failed to complete authentication. Please try again.');
                 }
             }
 

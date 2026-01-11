@@ -1416,7 +1416,10 @@
             fetch('/api/auth/status')
                 .then(res => res.json())
                 .then(data => {
-                    const authUrl = data.clerk_frontend_api + '/agent';
+                    // Build callback URL with dynamic port
+                    const port = window.location.port || '5555';
+                    const callback = encodeURIComponent(`http://localhost:${port}/auth/callback`);
+                    const authUrl = `${data.clerk_frontend_api}/agent?callback=${callback}`;
                     window.open(authUrl, '_blank', 'width=500,height=700');
                 })
                 .catch(error => {
