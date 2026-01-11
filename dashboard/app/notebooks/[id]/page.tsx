@@ -5,7 +5,10 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
+import { ChevronRight, Download, Calendar, Clock } from 'lucide-react';
 import { getNotebook, getQuotaStatus, type NotebookWithPages, type Page, type QuotaStatus } from '@/lib/api';
+import Sidebar from '@/components/Sidebar';
+import { QuotaDisplay } from '@/components/QuotaDisplay';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
 
@@ -342,54 +345,31 @@ export default function NotebookPage() {
     fetchNotebook();
   }, [params.id, effectiveIsSignedIn, getToken, router, isDevelopmentMode]);
 
-  // Header component that's always visible
-  const Header = () => (
-    <header className="bg-white shadow-sm sticky top-0 z-50" style={{ borderBottom: '1px solid var(--border)' }}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        <div className="flex items-center justify-between">
-          <Link href="/dashboard" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
-            <h1 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
-          </Link>
-          <div className="flex items-center space-x-4">
-            {isDevelopmentMode ? (
-              <div style={{
-                fontSize: '0.75em',
-                color: 'var(--warm-gray)',
-                padding: '0.5rem',
-                backgroundColor: 'var(--soft-cream)',
-                borderRadius: 'var(--radius)',
-                border: '1px solid var(--border)'
-              }}>
-                DEV MODE
-              </div>
-            ) : (
-              isSignedIn && <UserButton afterSignOutUrl="/" />
-            )}
-          </div>
-        </div>
-      </div>
-    </header>
-  );
+  // Handle download
+  const handleDownload = () => {
+    // TODO: Implement download functionality
+    alert('Download functionality coming soon!');
+  };
 
   if (loading) {
     return (
-      <>
-        <Header />
-        <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
+      <div className="flex h-screen">
+        <Sidebar />
+        <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--terracotta)' }}></div>
             <p className="mt-4" style={{ color: 'var(--warm-gray)' }}>Loading notebook...</p>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
   if (error || !notebook) {
     return (
-      <>
-        <Header />
-        <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: 'var(--background)' }}>
+      <div className="flex h-screen">
+        <Sidebar />
+        <div className="flex-1 flex items-center justify-center px-4">
           <div className="text-center max-w-md">
             <div style={{ color: 'var(--destructive)', fontSize: '3rem', marginBottom: '1rem' }}>✗</div>
             <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>Error</h2>
@@ -406,7 +386,7 @@ export default function NotebookPage() {
             </Link>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
@@ -414,65 +394,135 @@ export default function NotebookPage() {
   const sortedPages = [...notebook.pages].sort((a, b) => b.page_number - a.page_number);
 
   return (
-    <>
-      <Header />
-      <div className="min-h-screen" style={{ backgroundColor: 'var(--background)' }}>
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          {/* Back link and notebook header */}
-          <div className="mb-8">
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center mb-4 hover:opacity-80 transition-opacity"
-              style={{ color: 'var(--terracotta)', fontSize: '0.925em', fontWeight: 500 }}
-            >
-              ← Back to notebooks
-            </Link>
+    <div className="flex h-screen">
+      <Sidebar />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header */}
+        <header className="bg-white shadow-sm sticky top-0 z-30" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="max-w-full mx-auto px-6 lg:px-8 py-4">
+            <div className="flex items-center justify-between gap-4">
+              {/* Breadcrumb navigation */}
+              <div className="flex items-center gap-2" style={{ fontSize: '0.875em', color: 'var(--warm-gray)' }}>
+                <Link href="/dashboard" className="hover:text-[var(--terracotta)] transition-colors">
+                  All Notebooks
+                </Link>
+                <ChevronRight className="w-4 h-4" />
+                <span style={{ color: 'var(--warm-charcoal)', fontWeight: 500 }}>
+                  {notebook.visible_name || notebook.title || 'Untitled'}
+                </span>
+              </div>
 
-          <h1 style={{ fontSize: '2rem', fontWeight: 600, color: 'var(--warm-charcoal)', marginBottom: '0.5rem' }}>
-            {notebook.visible_name || notebook.title || 'Untitled'}
-          </h1>
+              <div className="flex items-center space-x-4">
+                {/* Quota Display */}
+                <QuotaDisplay variant="compact" />
 
-          <div className="flex items-center gap-4" style={{ fontSize: '0.875em', color: 'var(--warm-gray)' }}>
-            {notebook.author && (
-              <span>
-                <span style={{ fontWeight: 500 }}>Author:</span> {notebook.author}
-              </span>
+                {isDevelopmentMode ? (
+                  <div style={{
+                    fontSize: '0.75em',
+                    color: 'var(--warm-gray)',
+                    padding: '0.5rem',
+                    backgroundColor: 'var(--soft-cream)',
+                    borderRadius: 'var(--radius)',
+                    border: '1px solid var(--border)'
+                  }}>
+                    DEV MODE
+                  </div>
+                ) : (
+                  isSignedIn && <UserButton afterSignOutUrl="/" />
+                )}
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Main content */}
+        <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
+          <div className="max-w-4xl mx-auto">
+            {/* Notebook header with metadata and actions */}
+            <div className="mb-8">
+              <h1 style={{ fontSize: '2.25rem', fontWeight: 600, color: 'var(--warm-charcoal)', marginBottom: '1rem' }}>
+                {notebook.visible_name || notebook.title || 'Untitled'}
+              </h1>
+
+              {/* Metadata row */}
+              <div className="flex flex-wrap items-center gap-6 mb-4" style={{ fontSize: '0.875em', color: 'var(--warm-gray)' }}>
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4" />
+                  <span>
+                    Created {notebook.created_at ? new Date(notebook.created_at).toLocaleDateString('en-US', {
+                      year: 'numeric', month: 'short', day: 'numeric'
+                    }) : 'Unknown'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4" />
+                  <span>
+                    Last synced {notebook.last_synced_at ? new Date(notebook.last_synced_at).toLocaleDateString('en-US', {
+                      year: 'numeric', month: 'short', day: 'numeric'
+                    }) : 'Never'}
+                  </span>
+                </div>
+                <span>
+                  <strong>{notebook.pages.length}</strong> {notebook.pages.length === 1 ? 'page' : 'pages'}
+                </span>
+                <span>
+                  <strong style={{ textTransform: 'capitalize' }}>{notebook.document_type}</strong>
+                </span>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex gap-3">
+                <button
+                  onClick={handleDownload}
+                  className="px-4 py-2 rounded-lg transition-all flex items-center gap-2"
+                  style={{
+                    backgroundColor: 'var(--terracotta)',
+                    color: 'white',
+                    fontSize: '0.875em',
+                    fontWeight: 500,
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.opacity = '0.9';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.opacity = '1';
+                  }}
+                >
+                  <Download className="w-4 h-4" />
+                  Export Notebook
+                </button>
+              </div>
+            </div>
+
+            {/* Pages */}
+            {sortedPages.length === 0 ? (
+              <div className="text-center py-12 rounded-lg" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+                  No pages found
+                </h3>
+                <p style={{ color: 'var(--warm-gray)' }}>
+                  This notebook doesn't have any pages yet.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {sortedPages.map((page) => (
+                  <PageCard
+                    key={page.id}
+                    page={page}
+                    token={authToken}
+                    copiedPageId={copiedPageId}
+                    setCopiedPageId={setCopiedPageId}
+                    quota={quota}
+                  />
+                ))}
+              </div>
             )}
-            <span>
-              <span style={{ fontWeight: 500 }}>Type:</span> {notebook.document_type.toUpperCase()}
-            </span>
-            <span>
-              <span style={{ fontWeight: 500 }}>Pages:</span> {notebook.pages.length}
-            </span>
           </div>
-        </div>
-
-        {/* Pages */}
-        {sortedPages.length === 0 ? (
-          <div className="text-center py-12 rounded-lg" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-              No pages found
-            </h3>
-            <p style={{ color: 'var(--warm-gray)' }}>
-              This notebook doesn't have any pages yet.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {sortedPages.map((page) => (
-              <PageCard
-                key={page.id}
-                page={page}
-                token={authToken}
-                copiedPageId={copiedPageId}
-                setCopiedPageId={setCopiedPageId}
-                quota={quota}
-              />
-            ))}
-          </div>
-        )}
-        </div>
+        </main>
       </div>
-    </>
+    </div>
   );
 }
