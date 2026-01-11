@@ -146,12 +146,21 @@ logging:
 
 ## Authentication Flow
 
-1. User clicks "Connect to Cloud" in web UI
-2. Opens browser to backend OAuth page
-3. User authenticates with Clerk
-4. Backend redirects back with auth token
-5. Agent stores token in system keychain (secure)
-6. Token included in all API requests
+The agent uses long-lived JWT tokens (30 days) obtained via Clerk OAuth:
+
+1. User clicks "Sign in" in web UI
+2. Agent opens `https://rmirror.io/agent?callback=http://localhost:{PORT}/auth/callback`
+3. User authenticates with Clerk (Google OAuth)
+4. Bridge page exchanges Clerk session token for 30-day agent JWT
+5. Bridge page redirects to agent callback with token
+6. Agent stores token in system keychain (secure)
+7. Token included in all API requests
+
+**Token Details**:
+- Expiration: 30 days (vs ~1 hour for Clerk session tokens)
+- Type: Custom JWT with `type: "agent"` claim
+- Storage: macOS Keychain via `keyring` library
+- Refresh: Re-authenticate when token expires
 
 ```python
 # Store token (keyring)
@@ -294,6 +303,9 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 
 ## Recent Major Changes
 
+- **2026-01-11**: Agent v1.3.1 with long-lived token authentication (30-day JWT vs hourly Clerk sessions)
+- **2026-01-11**: Authentication flow updated to use dynamic callback URL with port
+- **2026-01-11**: UI improvements Phase 1 & 2 (quota progress bars, SVG icons, skeleton loaders)
 - **2026-01-01**: Implemented standalone .metadata file upload for lightweight metadata sync
 - **2024-12-25**: Implemented initial sync feature (sync existing notebooks on first run)
 - **2024-12-19**: Added PyInstaller build for .app bundle distribution
