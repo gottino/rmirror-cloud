@@ -6,15 +6,15 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from app.api import api_router
 from app.config import get_settings
+from app.middleware.rate_limit import get_rate_limit_key
 
 settings = get_settings()
 
-# Rate limiter setup
-limiter = Limiter(key_func=get_remote_address)
+# Rate limiter setup - uses user ID for authenticated requests, IP for unauthenticated
+limiter = Limiter(key_func=get_rate_limit_key)
 
 
 @asynccontextmanager

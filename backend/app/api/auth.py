@@ -5,12 +5,14 @@ from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from slowapi import Limiter
 from sqlalchemy.orm import Session
 
 from app.auth import get_password_hash, verify_password
 from app.auth.clerk import get_clerk_user
 from app.auth.jwt import create_access_token
 from app.database import get_db
+from app.middleware.rate_limit import AUTH_ENDPOINT_LIMIT, get_rate_limit_key
 from app.models.user import User
 from app.schemas.auth import LoginRequest, Token
 from app.schemas.user import User as UserSchema
@@ -20,9 +22,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Rate limiter for auth endpoints - strict limits to prevent brute force
+limiter = Limiter(key_func=get_rate_limit_key)
+
 
 @router.post("/register", response_model=UserSchema, status_code=status.HTTP_201_CREATED)
+@limiter.limit(AUTH_ENDPOINT_LIMIT)
 async def register(
+    request: Request,
     user_data: UserCreate,
     db: Annotated[Session, Depends(get_db)],
 ):
@@ -63,7 +70,9 @@ async def register(
 
 
 @router.post("/login", response_model=Token)
+@limiter.limit(AUTH_ENDPOINT_LIMIT)
 async def login(
+    request: Request,
     login_data: LoginRequest,
     db: Annotated[Session, Depends(get_db)],
 ):
@@ -109,6 +118,7 @@ async def login(
 
 
 @router.post("/agent-token", response_model=Token)
+@limiter.limit(AUTH_ENDPOINT_LIMIT)
 async def create_agent_token(
     request: Request,
     user: User = Depends(get_clerk_user),
