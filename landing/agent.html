@@ -195,25 +195,46 @@
         </div>
 
         <div class="signed-in-content" id="signed-in-content">
-            <div class="success-icon">✓</div>
+            <!-- Account selection (shown first) -->
+            <div id="account-selection">
+                <div class="success-icon" style="font-size: 48px;">👤</div>
 
-            <div class="user-info">
-                <h2>Successfully Signed In</h2>
-                <p>Welcome, <strong id="user-name"></strong>!</p>
-                <p id="user-email"></p>
+                <div class="user-info" style="background: #f5f5f7;">
+                    <h2 style="color: #1d1d1f;">Continue as</h2>
+                    <p><strong id="user-name"></strong></p>
+                    <p id="user-email" style="color: #86868b;"></p>
+                </div>
+
+                <button onclick="proceedWithCurrentUser()" style="margin-bottom: 12px;">
+                    Continue
+                </button>
+
+                <button onclick="useDifferentAccount()" style="background: transparent; color: #667eea; border: 1px solid #667eea;">
+                    Use Different Account
+                </button>
             </div>
 
-            <div class="status-message">
-                <p id="status-text">Sending credentials to your local agent...</p>
-            </div>
+            <!-- Sending state (shown after clicking Continue) -->
+            <div id="sending-state" style="display: none;">
+                <div class="success-icon">✓</div>
 
-            <div class="error-message" id="error-message">
-                <p id="error-text"></p>
-            </div>
+                <div class="user-info">
+                    <h2>Authenticated</h2>
+                    <p>Signed in as <strong id="user-name-sending"></strong></p>
+                </div>
 
-            <button id="retry-btn" style="display: none;" onclick="sendTokenToAgent()">
-                Retry Connection
-            </button>
+                <div class="status-message">
+                    <p id="status-text">Sending credentials to your local agent...</p>
+                </div>
+
+                <div class="error-message" id="error-message">
+                    <p id="error-text"></p>
+                </div>
+
+                <button id="retry-btn" style="display: none;" onclick="sendTokenToAgent()">
+                    Retry Connection
+                </button>
+            </div>
         </div>
     </div>
 
@@ -310,20 +331,33 @@
                 }
             }
 
-            function updateUI(user) {
+            function updateUI(user, autoSend = false) {
+                const accountSelection = document.getElementById('account-selection');
+                const sendingState = document.getElementById('sending-state');
+
                 if (user) {
                     // User is signed in
                     initialContent.style.display = 'none';
                     signedInContent.style.display = 'block';
 
-                    // Update user info
-                    document.getElementById('user-name').textContent =
-                        user.firstName || user.username || 'User';
-                    document.getElementById('user-email').textContent =
-                        user.primaryEmailAddress?.emailAddress || '';
+                    // Update user info in both places
+                    const displayName = user.firstName || user.username || 'User';
+                    const email = user.primaryEmailAddress?.emailAddress || '';
 
-                    // Send token to local agent
-                    sendTokenToAgent();
+                    document.getElementById('user-name').textContent = displayName;
+                    document.getElementById('user-email').textContent = email;
+                    document.getElementById('user-name-sending').textContent = displayName;
+
+                    if (autoSend) {
+                        // User just signed in - proceed automatically
+                        accountSelection.style.display = 'none';
+                        sendingState.style.display = 'block';
+                        sendTokenToAgent();
+                    } else {
+                        // Existing session - show account selection
+                        accountSelection.style.display = 'block';
+                        sendingState.style.display = 'none';
+                    }
                 } else {
                     // User is not signed in, show sign-in
                     initialContent.style.display = 'block';
@@ -337,8 +371,25 @@
                 }
             }
 
-            // Make sendTokenToAgent available globally for retry button
+            // Proceed with current account
+            function proceedWithCurrentUser() {
+                const accountSelection = document.getElementById('account-selection');
+                const sendingState = document.getElementById('sending-state');
+                accountSelection.style.display = 'none';
+                sendingState.style.display = 'block';
+                sendTokenToAgent();
+            }
+
+            // Sign out and show sign-in form
+            async function useDifferentAccount() {
+                await clerk.signOut();
+                // UI will update via the listener
+            }
+
+            // Make functions available globally
             window.sendTokenToAgent = sendTokenToAgent;
+            window.proceedWithCurrentUser = proceedWithCurrentUser;
+            window.useDifferentAccount = useDifferentAccount;
 
             // Update UI based on auth state
             updateUI(clerk.user);
