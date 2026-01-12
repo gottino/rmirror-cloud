@@ -303,6 +303,10 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 
 ## Recent Major Changes
 
+- **2026-01-12**: Fixed event loop closure errors in Flask routes (added threading lock + httpx client lifecycle management)
+- **2026-01-12**: Fixed page UUID extraction from reMarkable .content file (handles dict format with 'id' field)
+- **2026-01-12**: Fixed ensure_authenticated to recreate httpx client when invalidated after each request
+- **2026-01-12**: Designed metadata-first sync architecture (concept: dev-context/concepts/metadata-first-sync-architecture.md)
 - **2026-01-11**: Agent v1.3.1 with long-lived token authentication (30-day JWT vs hourly Clerk sessions)
 - **2026-01-11**: Authentication flow updated to use dynamic callback URL with port
 - **2026-01-11**: UI improvements Phase 1 & 2 (quota progress bars, SVG icons, skeleton loaders)

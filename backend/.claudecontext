@@ -38,6 +38,8 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - `integration_configs`: User integration settings (encrypted credentials)
 
 ## Recent Major Changes
+- **2026-01-12**: Fixed Clerk webhook to auto-create free tier subscription for new users (app/api/webhooks/clerk.py)
+- **2026-01-12**: Designed metadata-first sync architecture (concept: dev-context/concepts/metadata-first-sync-architecture.md)
 - **2026-01-11**: Added `/auth/agent-token` endpoint for long-lived agent JWT tokens (30 days vs ~1 hour Clerk sessions)
 - **2026-01-11**: Agent token issuance includes audit logging (user_id, email, client IP)
 - **2026-01-04**: Fixed metadata sync endpoint to block ALL integration syncs when quota exhausted (app/api/processing.py:541-628)
