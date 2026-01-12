@@ -210,6 +210,14 @@ The dashboard is tightly coupled with the backend API. When working on features 
 
 ## Recent Major Changes
 
+- **2026-01-12**: Implemented metadata-first sync UI support
+  - Added `NOT_SYNCED` page status handling in PageCard component (gray placeholder with upload icon)
+  - Created SyncProgress component showing "X/Y pages synced" with progress bar
+  - Updated notebook card previews to show "Syncing..." vs "OCR Pending" based on sync_progress
+  - Added SyncProgress interface to lib/api.ts
+  - Backend returns sync_progress in /notebooks/tree response
+  - Files: app/notebooks/[id]/page.tsx, app/dashboard/page.tsx, lib/api.ts
+  - Commit: 6145364
 - **2026-01-03 to 2026-01-04**: Implemented quota system frontend (Day 3) - COMPLETE
   - Created QuotaDisplay component with usage bar and color-coded status (compact and full variants)
   - Added QuotaWarning banner that shows when quota is >80% used (dismissible)
@@ -245,10 +253,10 @@ The dashboard is tightly coupled with the backend API. When working on features 
 - ✅ Responsive sidebar navigation
 - ✅ Quota system frontend (display, warning, modal, billing page)
 - ✅ 402 error handling for quota exceeded
+- ✅ Metadata-first sync UI (NOT_SYNCED pages, SyncProgress component)
 
 **In Progress:**
 - 🚧 Quota system waitlist API endpoint
-- 🚧 Real-time sync status indicators
 - 🚧 Rich text editor for page annotations
 - 🚧 Search functionality
 

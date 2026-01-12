@@ -660,13 +660,13 @@ export default function Home() {
                                 ) : notebook.sync_progress && notebook.sync_progress.not_synced_pages > 0 ? (
                                   <div className="flex flex-col items-center justify-center w-full h-full px-2">
                                     <svg className="w-6 h-6 mb-2" style={{ color: 'var(--warm-gray)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                                     </svg>
                                     <span style={{ fontSize: '0.7em', color: 'var(--warm-gray)', textAlign: 'center', fontWeight: 500, marginBottom: '0.25rem' }}>
-                                      Syncing...
+                                      Awaiting upload
                                     </span>
                                     <span style={{ fontSize: '0.6em', color: 'var(--warm-gray)', textAlign: 'center' }}>
-                                      {notebook.sync_progress.synced_pages}/{notebook.sync_progress.total_pages} pages
+                                      {notebook.sync_progress.synced_pages}/{notebook.sync_progress.total_pages} ready
                                     </span>
                                   </div>
                                 ) : notebook.sync_progress && notebook.sync_progress.pending_quota_pages > 0 ? (
@@ -768,10 +768,10 @@ export default function Home() {
                                   ) : notebook.sync_progress && notebook.sync_progress.not_synced_pages > 0 ? (
                                     <div className="flex flex-col items-center justify-center w-full h-full">
                                       <svg className="w-4 h-4 mb-1" style={{ color: 'var(--warm-gray)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                                       </svg>
                                       <span style={{ fontSize: '0.45em', color: 'var(--warm-gray)', textAlign: 'center', fontWeight: 500 }}>
-                                        Syncing
+                                        Pending
                                       </span>
                                     </div>
                                   ) : (

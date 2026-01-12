@@ -321,7 +321,7 @@ function SyncProgress({ pages }: SyncProgressProps) {
       <div className="flex items-center gap-3 mb-3">
         <CloudUpload className="w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
         <span style={{ fontSize: '0.925em', fontWeight: 500, color: 'var(--warm-charcoal)' }}>
-          Syncing pages from your reMarkable...
+          {notSyncedCount} {notSyncedCount === 1 ? 'page' : 'pages'} awaiting upload from your reMarkable
         </span>
       </div>
       <div className="flex items-center gap-4">
@@ -337,7 +337,7 @@ function SyncProgress({ pages }: SyncProgressProps) {
         </div>
         {/* Progress text */}
         <span style={{ fontSize: '0.875em', color: 'var(--warm-gray)', minWidth: '100px', textAlign: 'right' }}>
-          {syncedCount} / {totalPages} pages synced
+          {syncedCount} / {totalPages} uploaded
         </span>
       </div>
     </div>

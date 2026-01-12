@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_active_user
+from app.auth.clerk import get_clerk_active_user
 from app.database import get_db
 from app.models.sync_record import IntegrationConfig
 from app.models.user import User
@@ -79,7 +79,7 @@ class CreateDatabaseResponse(BaseModel):
 
 @router.get("/oauth/authorize", response_model=OAuthUrlResponse)
 async def get_authorization_url(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
 ):
     """
     Generate Notion OAuth authorization URL.
@@ -108,7 +108,7 @@ async def get_authorization_url(
 @router.post("/oauth/callback", response_model=OAuthCallbackResponse)
 async def oauth_callback(
     request: OAuthCallbackRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -187,7 +187,7 @@ async def oauth_callback(
 
 @router.get("/databases", response_model=List[NotionDatabase])
 async def list_databases(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -235,7 +235,7 @@ async def list_databases(
 
 @router.get("/pages", response_model=List[NotionPage])
 async def list_pages(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -284,7 +284,7 @@ async def list_pages(
 @router.post("/databases/create", response_model=CreateDatabaseResponse)
 async def create_database(
     request: CreateDatabaseRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -391,7 +391,7 @@ async def create_database(
 async def select_database(
     database_id: str,
     database_type: str = Query(default="notebooks", description="Type of database: 'notebooks' or 'todos'"),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """

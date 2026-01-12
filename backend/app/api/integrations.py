@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_active_user
+from app.auth.clerk import get_clerk_active_user
 from app.core.unified_sync_manager import UnifiedSyncManager
 from app.database import get_db
 from app.integrations.notion_sync import NotionSyncTarget
@@ -59,7 +59,7 @@ class IntegrationTestResponse(BaseModel):
 @router.post("/", response_model=IntegrationConfigResponse)
 async def create_integration(
     request: IntegrationConfigRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -121,7 +121,7 @@ async def create_integration(
 
 @router.get("/", response_model=List[IntegrationConfigResponse])
 async def list_integrations(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -160,7 +160,7 @@ async def list_integrations(
 )
 async def get_integration(
     target_name: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """Get a specific integration configuration."""
@@ -201,7 +201,7 @@ async def get_integration(
 async def update_integration(
     target_name: str,
     request: IntegrationConfigRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """Update an existing integration configuration."""
@@ -250,7 +250,7 @@ async def update_integration(
 @router.delete("/{target_name}")
 async def delete_integration(
     target_name: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """Delete an integration configuration."""
@@ -286,7 +286,7 @@ async def delete_integration(
 @router.post("/{target_name}/test", response_model=IntegrationTestResponse)
 async def test_integration(
     target_name: str,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
     """
