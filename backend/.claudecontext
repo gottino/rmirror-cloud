@@ -40,6 +40,9 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - `integration_configs`: User integration settings (encrypted credentials)
 
 ## Recent Major Changes
+- **2026-01-12**: Fixed UUID truncation bug in processing.py - rstrip() → removesuffix() for .metadata/.rm extension removal
+  - rstrip(".metadata") removes chars in set {'.','m','e','t','a','d'}, truncating UUIDs ending in those letters
+  - Caused duplicate notebooks with truncated UUIDs (e.g., "...24ba" vs "...24b")
 - **2026-01-12**: Implemented metadata-first sync backend (Phase 1 of two-phase sync architecture):
   - Added `NOT_SYNCED` OcrStatus enum value for page stubs (app/models/page.py)
   - Created `POST /sync/metadata` endpoint (app/api/sync.py) for bulk notebook/page registration

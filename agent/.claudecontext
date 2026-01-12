@@ -303,6 +303,10 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 
 ## Recent Major Changes
 
+- **2026-01-12**: Fixed deleted pages being included in sync
+  - Pages in .content file with 'deleted': {'value': 1} are now filtered out
+  - Fixes incorrect page counts (e.g., 511 vs 504 for notebooks with deleted pages)
+  - Updated metadata_sync.py and initial_sync.py to skip deleted entries
 - **2026-01-12**: Released v1.4.0 with metadata-first sync architecture
   - New `MetadataSync` class syncs notebook structure first (fast, ~100/min rate limit)
   - `InitialSync` now runs Phase 1 (metadata) then Phase 2 (content) with rate limit handling
