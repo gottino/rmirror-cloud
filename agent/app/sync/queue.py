@@ -1,5 +1,9 @@
 """
 Sync queue for batching and deduplicating file uploads.
+
+Uses two-phase sync architecture:
+1. Sync metadata for notebook (fast, creates structure)
+2. Upload page content (slow, with OCR)
 """
 
 import asyncio
@@ -12,6 +16,7 @@ from typing import Optional
 
 from app.config import Config
 from app.sync.cloud_sync import CloudSync, CloudSyncError
+from app.sync.metadata_sync import MetadataSync
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +56,7 @@ class SyncQueue:
         """Initialize sync queue."""
         self.config = config
         self.cloud_sync = cloud_sync
+        self.metadata_sync = MetadataSync(config, cloud_sync)
 
         self.queue: asyncio.Queue[SyncItem] = asyncio.Queue()
         self.recent_syncs: dict[tuple[str, str], datetime] = {}  # (file_path, uuid) -> timestamp
@@ -115,7 +121,10 @@ class SyncQueue:
 
     async def _process_batch(self, items: list[SyncItem]) -> dict:
         """
-        Process a batch of sync items.
+        Process a batch of sync items using two-phase sync.
+
+        Phase 1: Sync metadata for notebooks with .rm files (fast)
+        Phase 2: Upload file content (slow, with OCR)
 
         Args:
             items: List of sync items to process
@@ -138,7 +147,22 @@ class SyncQueue:
 
         logger.debug(f"Batch contains {len(notebooks)} notebooks")
 
-        # Process each notebook
+        # Phase 1: Sync metadata for notebooks that have .rm files
+        # This ensures the notebook structure exists before uploading content
+        notebooks_with_rm = [
+            uuid for uuid, items in notebooks.items()
+            if any(item.file_type == "rm" for item in items)
+        ]
+
+        if notebooks_with_rm:
+            logger.info(f"Phase 1: Syncing metadata for {len(notebooks_with_rm)} notebook(s)")
+            try:
+                await self.metadata_sync.run(notebooks_with_rm)
+            except Exception as e:
+                logger.warning(f"Metadata sync failed (continuing with content upload): {e}")
+                print(f"⚠️  Metadata sync failed: {e}")
+
+        # Phase 2: Process each notebook's files
         for notebook_uuid, notebook_items in notebooks.items():
             logger.info(f"Syncing {len(notebook_items)} files for notebook {notebook_uuid[:8]}...")
             print(f"\n📤 Syncing {len(notebook_items)} files for notebook {notebook_uuid[:8]}...")

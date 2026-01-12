@@ -303,10 +303,14 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 
 ## Recent Major Changes
 
+- **2026-01-12**: Implemented two-phase metadata-first sync architecture
+  - New `MetadataSync` class syncs notebook structure first (fast, ~100/min rate limit)
+  - `InitialSync` now runs Phase 1 (metadata) then Phase 2 (content) with rate limit handling
+  - `SyncQueue` automatically syncs metadata before uploading .rm files
+  - Exponential backoff (10s base, 2x multiplier) on 429 rate limit errors
 - **2026-01-12**: Fixed event loop closure errors in Flask routes (added threading lock + httpx client lifecycle management)
 - **2026-01-12**: Fixed page UUID extraction from reMarkable .content file (handles dict format with 'id' field)
 - **2026-01-12**: Fixed ensure_authenticated to recreate httpx client when invalidated after each request
-- **2026-01-12**: Designed metadata-first sync architecture (concept: dev-context/concepts/metadata-first-sync-architecture.md)
 - **2026-01-11**: Agent v1.3.1 with long-lived token authentication (30-day JWT vs hourly Clerk sessions)
 - **2026-01-11**: Authentication flow updated to use dynamic callback URL with port
 - **2026-01-11**: UI improvements Phase 1 & 2 (quota progress bars, SVG icons, skeleton loaders)
@@ -329,13 +333,14 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 - ✅ PyInstaller .app bundle packaging
 - ✅ Initial sync of existing notebooks
 - ✅ OAuth authentication flow
-- ✅ Standalone .metadata file upload for lightweight metadata sync
+- ✅ Two-phase metadata-first sync (fast notebook structure, slow content upload)
+- ✅ Rate limit handling with exponential backoff
 
 **In Progress:**
-- 🚧 Error recovery (retry failed uploads)
 - 🚧 Sync status UI improvements
 
 **Planned:**
+- ⏳ Dashboard sync progress indicator
 - ⏳ Auto-update mechanism
 - ⏳ Pause/resume sync
 - ⏳ Selective sync (choose which notebooks to upload)

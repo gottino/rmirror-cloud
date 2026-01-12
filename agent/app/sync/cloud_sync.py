@@ -22,6 +22,14 @@ class CloudSyncError(Exception):
     pass
 
 
+class RateLimitError(Exception):
+    """Rate limit exceeded error (429)."""
+
+    def __init__(self, message: str, retry_after: Optional[int] = None):
+        super().__init__(message)
+        self.retry_after = retry_after or 10  # Default 10 seconds
+
+
 class QuotaExceededError(Exception):
     """Quota exceeded error."""
 
@@ -414,6 +422,15 @@ class CloudSync:
                     logger.warning(message)
                     print(f"⚠️  {message}")
                     raise QuotaExceededError(message)
+
+            if e.response.status_code == 429:
+                # Rate limit exceeded - raise specific error for retry handling
+                retry_after = int(e.response.headers.get("Retry-After", 10))
+                logger.warning(f"Rate limit exceeded. Retry-After: {retry_after}s")
+                raise RateLimitError(
+                    f"Rate limit exceeded for {file_path.name}",
+                    retry_after=retry_after
+                )
 
             raise CloudSyncError(f"Upload failed for {file_path.name}: {e}")
         except httpx.TimeoutException as e:

@@ -1,8 +1,12 @@
 """
 Initial sync module for uploading all notebooks when agent first starts.
 
-This handles the case where the agent hasn't been running for a while
-or is running for the first time and needs to catch up.
+This implements a two-phase sync architecture:
+- Phase 1 (Metadata): Fast sync of notebook structure and page UUIDs
+- Phase 2 (Content): Slower upload of .rm files with OCR processing
+
+This approach ensures users see their notebooks immediately in the dashboard,
+while content syncs in the background with proper rate limit handling.
 """
 
 import asyncio
@@ -13,13 +17,20 @@ from typing import List, Optional
 
 from app.config import Config
 from app.remarkable.metadata_scanner import MetadataScanner
-from app.sync.cloud_sync import CloudSync
+from app.sync.cloud_sync import CloudSync, CloudSyncError, QuotaExceededError, RateLimitError
+from app.sync.metadata_sync import MetadataSync
 
 logger = logging.getLogger(__name__)
 
 
 class InitialSync:
-    """Handles initial synchronization of all notebooks to the cloud."""
+    """
+    Handles initial synchronization of all notebooks to the cloud.
+
+    Uses a two-phase approach:
+    1. Metadata sync (fast): Creates notebook structure immediately
+    2. Content sync (slow): Uploads pages with rate limit handling
+    """
 
     def __init__(self, config: Config, cloud_sync: CloudSync):
         """
@@ -32,13 +43,14 @@ class InitialSync:
         self.config = config
         self.cloud_sync = cloud_sync
         self.remarkable_folder = Path(config.remarkable.source_directory)
+        self.metadata_sync = MetadataSync(config, cloud_sync)
 
     async def run(self, selected_notebook_uuids: Optional[List[str]] = None) -> dict:
         """
-        Perform initial sync of all notebooks.
+        Perform initial sync of all notebooks using two-phase approach.
 
-        Uploads all .rm files and .content files for selected notebooks.
-        This ensures the backend has the complete state of all notebooks.
+        Phase 1: Sync metadata (fast) - notebooks appear in dashboard immediately
+        Phase 2: Sync content (slow) - upload .rm files with rate limit handling
 
         Args:
             selected_notebook_uuids: List of notebook UUIDs to sync (None = all)
@@ -46,11 +58,28 @@ class InitialSync:
         Returns:
             Statistics dictionary with sync results
         """
-        logger.info("Starting initial sync...")
+        logger.info("Starting initial sync (two-phase)...")
         print("\n" + "=" * 70)
-        print("  📚 Initial Sync - Uploading Notebooks")
+        print("  📚 Initial Sync - Two-Phase Upload")
         print("=" * 70)
-        print()
+
+        # ================================================================
+        # PHASE 1: Metadata Sync (Fast)
+        # ================================================================
+        try:
+            metadata_result = await self.metadata_sync.run(selected_notebook_uuids)
+            phase1_success = metadata_result.get("success", False)
+        except Exception as e:
+            logger.error(f"Phase 1 (metadata sync) failed: {e}", exc_info=True)
+            print(f"\n  ❌ Phase 1 failed: {e}")
+            print("     Continuing with Phase 2 (content sync)...")
+            phase1_success = False
+            metadata_result = {}
+
+        # ================================================================
+        # PHASE 2: Content Sync (Slow, with rate limiting)
+        # ================================================================
+        print("\n  📤 Phase 2: Uploading page content...")
 
         # Scan for notebooks
         scanner = MetadataScanner(self.remarkable_folder)
@@ -61,31 +90,52 @@ class InitialSync:
             notebooks = [nb for nb in notebooks if nb.uuid in selected_notebook_uuids]
 
         if not notebooks:
-            print("⚠️  No notebooks to sync")
-            return {"notebooks": 0, "pages": 0, "failed": 0}
+            print("  ⚠️  No notebooks to sync")
+            return {
+                "notebooks": 0,
+                "pages": 0,
+                "failed": 0,
+                "rate_limited": 0,
+                "phase1": metadata_result,
+            }
 
-        print(f"Found {len(notebooks)} notebook(s) to sync")
+        print(f"  Found {len(notebooks)} notebook(s) for content sync")
         print()
 
         stats = {
             "notebooks": 0,
             "pages": 0,
             "failed": 0,
+            "skipped": 0,
+            "rate_limited": 0,
         }
 
-        # Sync each notebook
+        # Track if we hit rate limits to show summary message
+        rate_limit_hit = False
+
+        # Sync each notebook's content
         for i, notebook in enumerate(notebooks, 1):
             try:
                 print(f"[{i}/{len(notebooks)}] {notebook.name}")
                 print(f"   UUID: {notebook.uuid}")
                 print(f"   Pages: {notebook.page_count or 0}")
 
-                nb_stats = await self._sync_notebook(notebook.uuid)
+                nb_stats = await self._sync_notebook_content(notebook.uuid)
                 stats["notebooks"] += 1
                 stats["pages"] += nb_stats["uploaded"]
                 stats["failed"] += nb_stats["failed"]
+                stats["skipped"] += nb_stats.get("skipped", 0)
+                stats["rate_limited"] += nb_stats.get("rate_limited", 0)
+
+                if nb_stats.get("rate_limited", 0) > 0:
+                    rate_limit_hit = True
 
                 print()
+
+            except QuotaExceededError as e:
+                logger.warning(f"Quota exceeded during sync of {notebook.uuid}")
+                print(f"   ⚠️  Quota exceeded - stopping content sync")
+                break
 
             except Exception as e:
                 logger.error(f"Failed to sync notebook {notebook.uuid}: {e}", exc_info=True)
@@ -93,41 +143,55 @@ class InitialSync:
                 print()
                 stats["failed"] += 1
 
+        # ================================================================
+        # Summary
+        # ================================================================
         print("=" * 70)
-        print(f"  ✅ Initial Sync Complete")
-        print(f"     Notebooks: {stats['notebooks']}")
-        print(f"     Pages: {stats['pages']}")
-        if stats['failed'] > 0:
+        print("  ✅ Initial Sync Complete")
+        if phase1_success:
+            print(f"     Phase 1: {metadata_result.get('notebooks_created', 0)} notebooks created, "
+                  f"{metadata_result.get('pages_registered', 0)} pages registered")
+        print(f"     Phase 2: {stats['pages']} pages uploaded")
+        if stats["failed"] > 0:
             print(f"     Failed: {stats['failed']}")
+        if stats["rate_limited"] > 0:
+            print(f"     Rate limited: {stats['rate_limited']} (will retry on next sync)")
+        if rate_limit_hit:
+            print("\n  💡 Tip: Some pages were rate limited. They'll sync on the next run.")
         print("=" * 70)
         print()
 
-        return stats
+        return {
+            **stats,
+            "phase1": metadata_result,
+        }
 
-    async def _sync_notebook(self, notebook_uuid: str) -> dict:
+    async def _sync_notebook_content(self, notebook_uuid: str) -> dict:
         """
-        Sync a single notebook.
+        Sync a single notebook's content (Phase 2).
 
         Uploads pages (.rm files) in order from newest to oldest (based on .content file),
-        respects max_pages_per_notebook config, then uploads .content file for mapping.
+        respects max_pages_per_notebook config. Page mappings are already established
+        by Phase 1 metadata sync, so we don't need to upload .content file.
 
         Args:
             notebook_uuid: UUID of the notebook
 
         Returns:
-            Statistics dictionary
+            Statistics dictionary with uploaded, failed, skipped, rate_limited counts
         """
         notebook_dir = self.remarkable_folder / notebook_uuid
 
         # Check if notebook directory exists
         if not notebook_dir.exists() or not notebook_dir.is_dir():
             logger.warning(f"Notebook directory not found: {notebook_dir}")
-            return {"uploaded": 0, "failed": 0, "skipped": 0}
+            return {"uploaded": 0, "failed": 0, "skipped": 0, "rate_limited": 0}
 
         stats = {
             "uploaded": 0,
             "failed": 0,
             "skipped": 0,
+            "rate_limited": 0,
             "failed_pages": [],  # Track which pages failed
         }
 
@@ -136,7 +200,7 @@ class InitialSync:
 
         if not all_page_files:
             logger.info(f"No pages found in notebook {notebook_uuid}")
-            return {"uploaded": 0, "failed": 0, "skipped": 0}
+            return {"uploaded": 0, "failed": 0, "skipped": 0, "rate_limited": 0}
 
         # 2. Read .content file to get authoritative page order
         # In reMarkable's .content file, pages array is ordered oldest to newest
@@ -203,46 +267,81 @@ class InitialSync:
         else:
             page_files_to_upload = ordered_page_files
 
-        # 6. Upload pages in order (newest first)
+        # 6. Upload pages in order (newest first) with rate limit handling
         if page_files_to_upload:
             print(f"   📤 Uploading {len(page_files_to_upload)} page(s) (newest first)...")
 
             for page_file in page_files_to_upload:
                 try:
-                    await self.cloud_sync.upload_file(page_file, notebook_uuid, "rm")
+                    result = await self._upload_with_retry(page_file, notebook_uuid)
+                    if result.get("rate_limited"):
+                        stats["rate_limited"] += 1
+                        # Don't continue trying if we're rate limited
+                        remaining = len(page_files_to_upload) - stats["uploaded"] - stats["rate_limited"]
+                        if remaining > 0:
+                            print(f"   ⏸️  Rate limited. {remaining} page(s) will sync later.")
+                        break
                     stats["uploaded"] += 1
+                except QuotaExceededError:
+                    # Re-raise to stop the entire sync
+                    raise
                 except Exception as e:
                     logger.error(f"Failed to upload {page_file.name}: {e}")
                     stats["failed"] += 1
                     stats["failed_pages"].append(page_file.stem)
 
-        # 7. Upload .content file to establish page ordering in backend
-        if content_file.exists():
-            try:
-                print(f"   📋 Uploading .content file...")
-                result = await self.cloud_sync.upload_file(content_file, notebook_uuid, "content")
+        # Note: .content file upload is no longer needed here.
+        # Phase 1 (metadata sync) establishes page mappings via /sync/metadata endpoint.
 
-                # Check if it was skipped (notebook doesn't exist yet)
-                if result.get("skipped"):
-                    logger.debug(f"Content file skipped: {result.get('reason')}")
-                else:
-                    pages_mapped = result.get("pages_mapped", 0)
-                    if pages_mapped > 0:
-                        print(f"   ✓ Mapped {pages_mapped} pages")
-
-            except Exception as e:
-                logger.error(f"Failed to upload content file: {e}")
-                stats["failed"] += 1
-
-        # 8. Report results
+        # 7. Report results
         if stats["failed"] > 0:
             print(f"   ⚠️  {stats['failed']} page(s) failed to upload")
             if stats["failed_pages"]:
                 logger.warning(f"Failed pages: {stats['failed_pages'][:5]}{'...' if len(stats['failed_pages']) > 5 else ''}")
 
-        print(f"   ✓ Uploaded {stats['uploaded']} page(s)")
+        if stats["uploaded"] > 0:
+            print(f"   ✓ Uploaded {stats['uploaded']} page(s)")
 
         return stats
+
+    async def _upload_with_retry(
+        self, page_file: Path, notebook_uuid: str, max_retries: int = 2
+    ) -> dict:
+        """
+        Upload a page file with exponential backoff on rate limit.
+
+        Args:
+            page_file: Path to the .rm file
+            notebook_uuid: UUID of the notebook
+            max_retries: Maximum number of retries on rate limit (default: 2)
+
+        Returns:
+            Dictionary with upload result. Includes "rate_limited": True if
+            all retries exhausted due to rate limiting.
+
+        Raises:
+            QuotaExceededError: If quota is exceeded
+            CloudSyncError: If upload fails for other reasons
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                result = await self.cloud_sync.upload_file(page_file, notebook_uuid, "rm")
+                return result
+
+            except RateLimitError as e:
+                # Rate limited - retry with exponential backoff
+                if attempt < max_retries:
+                    delay = e.retry_after * (2 ** attempt)
+                    logger.info(f"Rate limited. Waiting {delay}s before retry (attempt {attempt + 1}/{max_retries})...")
+                    print(f"   ⏳ Rate limited. Waiting {delay}s...")
+                    await asyncio.sleep(delay)
+                else:
+                    # All retries exhausted
+                    logger.warning(f"Rate limit exceeded after {max_retries} retries for {page_file.name}")
+                    return {"rate_limited": True}
+
+        # Should not reach here, but just in case
+        return {"rate_limited": True}
 
 
 async def perform_initial_sync_if_needed(config: Config, cloud_sync: CloudSync) -> bool:
