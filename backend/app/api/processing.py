@@ -117,7 +117,7 @@ async def process_rm_file(
             try:
                 # Extract notebook UUID from metadata filename (format: UUID.metadata)
                 if metadata_file.filename and metadata_file.filename.endswith(".metadata"):
-                    notebook_uuid = metadata_file.filename.rstrip(".metadata")
+                    notebook_uuid = metadata_file.filename.removesuffix(".metadata")
                     logger.info(f"Extracted notebook UUID from metadata filename: {notebook_uuid}")
 
                 metadata_content = await metadata_file.read()
@@ -137,7 +137,7 @@ async def process_rm_file(
                 logger.warning(f"Failed to parse metadata file: {e}")
 
         # Extract page UUID from .rm filename
-        page_uuid = rm_file.filename.rstrip(".rm")
+        page_uuid = rm_file.filename.removesuffix(".rm")
 
         # Generate notebook UUID if not provided via metadata
         if not notebook_uuid:
