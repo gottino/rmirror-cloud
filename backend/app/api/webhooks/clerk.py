@@ -11,6 +11,7 @@ from svix.webhooks import Webhook, WebhookVerificationError
 from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
+from app.models.subscription import Subscription, SubscriptionTier, SubscriptionStatus
 from app.utils.email import get_email_service
 
 router = APIRouter()
@@ -155,6 +156,19 @@ async def handle_user_created(data: dict, db: Session):
     db.refresh(new_user)
 
     print(f"Created user: {new_user.email} (Clerk ID: {clerk_user_id})")
+
+    # Create free tier subscription for new user
+    from datetime import timedelta
+    subscription = Subscription(
+        user_id=new_user.id,
+        tier=SubscriptionTier.FREE,
+        status=SubscriptionStatus.ACTIVE,
+        current_period_start=datetime.utcnow(),
+        current_period_end=datetime.utcnow() + timedelta(days=30),
+    )
+    db.add(subscription)
+    db.commit()
+    print(f"Created free tier subscription for user {new_user.id}")
 
     # Send welcome email to new user
     try:
