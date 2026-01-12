@@ -2,12 +2,39 @@
 Flask routes for rMirror Agent web UI.
 """
 
+import asyncio
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Generator
 
 from flask import Flask, jsonify, render_template, request
 
 from app.config import Config
 from app.sync.cloud_sync import CloudSync, CloudSyncError
+
+
+@contextmanager
+def run_async_safely(cloud_sync: CloudSync) -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """
+    Context manager to safely run async code in Flask.
+
+    Creates a new event loop, yields it, then closes the httpx client
+    before closing the loop to prevent "Event loop is closed" errors.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        yield loop
+    finally:
+        # Close the httpx client BEFORE closing the loop
+        # This prevents "Event loop is closed" errors on subsequent requests
+        if cloud_sync and cloud_sync.client:
+            try:
+                loop.run_until_complete(cloud_sync.client.aclose())
+            except Exception:
+                pass  # Ignore errors during cleanup
+            cloud_sync.client = None
+        loop.close()
 
 
 async def register_agent_with_backend(
@@ -158,18 +185,12 @@ def register_routes(app: Flask) -> None:
     @app.route("/api/sync/status")
     def api_sync_status():
         """Get sync status from backend."""
-        import asyncio
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
 
         try:
-            # Run async function in sync context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
+            with run_async_safely(cloud_sync) as loop:
                 status = loop.run_until_complete(cloud_sync.get_sync_status())
                 return jsonify(status)
-            finally:
-                loop.close()
         except CloudSyncError as e:
             return jsonify({"error": str(e)}), 500
 
@@ -187,7 +208,6 @@ def register_routes(app: Flask) -> None:
         This uploads all pages and .content files for selected notebooks.
         Useful for first-time setup or catching up after being offline.
         """
-        import asyncio
         from app.sync.initial_sync import InitialSync
 
         config: Config = app.config["AGENT_CONFIG"]
@@ -205,17 +225,13 @@ def register_routes(app: Flask) -> None:
             # Run initial sync
             initial_sync = InitialSync(config, cloud_sync)
 
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
+            with run_async_safely(cloud_sync) as loop:
                 stats = loop.run_until_complete(initial_sync.run(selected_uuids))
                 return jsonify({
                     "success": True,
                     "message": "Initial sync complete",
                     "stats": stats,
                 })
-            finally:
-                loop.close()
 
         except Exception as e:
             app.logger.error(f"Initial sync failed: {e}", exc_info=True)
@@ -224,14 +240,10 @@ def register_routes(app: Flask) -> None:
     @app.route("/api/test-connection", methods=["POST"])
     def api_test_connection():
         """Test connection to backend API."""
-        import asyncio
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
 
         try:
-            # Run async function in sync context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
+            with run_async_safely(cloud_sync) as loop:
                 loop.run_until_complete(cloud_sync.authenticate())
                 return jsonify(
                     {
@@ -239,8 +251,6 @@ def register_routes(app: Flask) -> None:
                         "message": f"Successfully authenticated as {cloud_sync.config.api.email}",
                     }
                 )
-            finally:
-                loop.close()
         except CloudSyncError as e:
             return jsonify({"success": False, "message": str(e)}), 401
 
@@ -252,7 +262,6 @@ def register_routes(app: Flask) -> None:
         Expected query parameter:
         ?token=clerk_jwt_token
         """
-        import asyncio
         import platform
 
         config: Config = app.config["AGENT_CONFIG"]
@@ -274,26 +283,23 @@ def register_routes(app: Flask) -> None:
             cloud_sync.authenticated = True
 
             # Register agent with backend
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
             try:
-                # Get agent info
-                agent_version = "1.0.0"
-                agent_platform = platform.system()
-                agent_hostname = platform.node()
+                with run_async_safely(cloud_sync) as loop:
+                    # Get agent info
+                    agent_version = "1.0.0"
+                    agent_platform = platform.system()
+                    agent_hostname = platform.node()
 
-                # Register with backend
-                loop.run_until_complete(register_agent_with_backend(
-                    cloud_sync,
-                    agent_version,
-                    agent_platform,
-                    agent_hostname
-                ))
+                    # Register with backend
+                    loop.run_until_complete(register_agent_with_backend(
+                        cloud_sync,
+                        agent_version,
+                        agent_platform,
+                        agent_hostname
+                    ))
             except Exception as e:
                 # Log error but don't fail authentication
                 app.logger.error(f"Failed to register agent: {e}")
-            finally:
-                loop.close()
 
             # Start file watcher now that we're authenticated
             agent = app.config.get("AGENT")
@@ -325,20 +331,15 @@ def register_routes(app: Flask) -> None:
     @app.route("/api/auth/me")
     def api_auth_me():
         """Get current user info from backend."""
-        import asyncio
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
 
         if not cloud_sync or not cloud_sync.authenticated:
             return jsonify({"error": "Not authenticated"}), 401
 
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
+            with run_async_safely(cloud_sync) as loop:
                 user_data = loop.run_until_complete(cloud_sync.get_user_info())
                 return jsonify(user_data)
-            finally:
-                loop.close()
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
@@ -414,15 +415,11 @@ def register_routes(app: Flask) -> None:
             return jsonify({"error": "Not authenticated"}), 401
 
         try:
-            # Fetch quota from backend (this is synchronous, but get_quota_status is async)
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            quota_data = loop.run_until_complete(cloud_sync.get_quota_status())
-            loop.close()
-
-            return jsonify(quota_data)
+            with run_async_safely(cloud_sync) as loop:
+                quota_data = loop.run_until_complete(cloud_sync.get_quota_status())
+                return jsonify(quota_data)
         except Exception as e:
+            print(f"Quota status request error: {e}")
             return jsonify({"error": str(e)}), 500
 
     @app.route("/health")
