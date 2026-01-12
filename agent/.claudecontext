@@ -8,7 +8,7 @@ This is the **macOS agent** for rMirror - a Python application that monitors the
 
 - **Python 3.11+**: Core language
 - **watchdog**: File system monitoring for reMarkable folder changes
-- **Flask**: Web UI server (localhost:9090) for configuration
+- **Flask**: Web UI server (localhost:5555) for configuration
 - **httpx**: Async HTTP client for API calls
 - **rumps**: macOS menu bar app integration
 - **Click**: CLI interface
@@ -108,7 +108,7 @@ POST /api/pages
 ### 4. Web UI (`app/web/`)
 
 Flask web server for configuration:
-- Runs on `localhost:9090`
+- Runs on `localhost:5555`
 - Shows sync status, settings
 - OAuth flow for backend authentication
 - Runs in background thread (non-blocking)
@@ -136,7 +136,7 @@ api:
 # Web UI
 web:
   host: "localhost"
-  port: 9090
+  port: 5555
 
 # Logging
 logging:
@@ -187,7 +187,7 @@ poetry install
 poetry run python -m app.main --foreground --debug
 
 # Access web UI
-open http://localhost:9090
+open http://localhost:5555
 ```
 
 ### Building .app Bundle
@@ -329,7 +329,7 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 
 **Implemented:**
 - ✅ File watcher with watchdog (monitors reMarkable folder)
-- ✅ Flask web UI (localhost:9090) for settings
+- ✅ Flask web UI (localhost:5555) for settings
 - ✅ Menu bar integration with rumps
 - ✅ Cloud sync via HTTP API
 - ✅ Secure token storage with keyring

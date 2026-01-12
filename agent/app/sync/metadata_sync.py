@@ -252,11 +252,16 @@ class MetadataSync:
                 pages_array = content_data.get("cPages", {}).get("pages", [])
 
             # Extract page UUIDs - pages can be plain strings or dicts with 'id' field
+            # Skip deleted pages (they have 'deleted': {'value': 1} or similar)
             page_uuids = []
             for page_entry in pages_array:
                 if isinstance(page_entry, str):
                     page_uuids.append(page_entry)
                 elif isinstance(page_entry, dict) and "id" in page_entry:
+                    # Check if page is deleted
+                    deleted = page_entry.get("deleted", {})
+                    if isinstance(deleted, dict) and deleted.get("value"):
+                        continue  # Skip deleted pages
                     page_uuids.append(page_entry["id"])
 
             logger.debug(f"Found {len(page_uuids)} pages in .content for {notebook_uuid}")
