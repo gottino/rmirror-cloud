@@ -130,7 +130,15 @@ class CloudSync:
         )
 
     async def ensure_authenticated(self) -> None:
-        """Ensure we have a valid authentication token."""
+        """Ensure we have a valid authentication token and HTTP client."""
+        # Always create a new HTTP client if it doesn't exist
+        # This is necessary because Flask creates a new event loop for each request,
+        # and httpx clients are bound to the event loop they were created in
+        if not self.client:
+            self.client = httpx.AsyncClient(timeout=300.0, verify=False)
+            logger.debug("Created new HTTP client for current event loop")
+
+        # Re-authenticate if needed
         if not self.authenticated or not self.config.api.token:
             await self.authenticate()
 

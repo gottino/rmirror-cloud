@@ -153,7 +153,13 @@ class InitialSync:
                 if not pages_array and "cPages" in content_data:
                     pages_array = content_data.get("cPages", {}).get("pages", [])
 
-                page_order = pages_array
+                # Extract page UUIDs - pages can be plain strings or dicts with 'id' field
+                for page_entry in pages_array:
+                    if isinstance(page_entry, str):
+                        page_order.append(page_entry)
+                    elif isinstance(page_entry, dict) and "id" in page_entry:
+                        page_order.append(page_entry["id"])
+
                 logger.debug(f"Found {len(page_order)} pages in .content file for {notebook_uuid}")
 
             except Exception as e:

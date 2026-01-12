@@ -3,6 +3,7 @@ Flask routes for rMirror Agent web UI.
 """
 
 import asyncio
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
@@ -12,29 +13,30 @@ from flask import Flask, jsonify, render_template, request
 from app.config import Config
 from app.sync.cloud_sync import CloudSync, CloudSyncError
 
+# Lock to prevent concurrent async operations from interfering with each other
+# This is necessary because Flask uses multiple threads but httpx clients are
+# bound to the event loop they were created in
+_async_lock = threading.Lock()
+
 
 @contextmanager
 def run_async_safely(cloud_sync: CloudSync) -> Generator[asyncio.AbstractEventLoop, None, None]:
     """
     Context manager to safely run async code in Flask.
 
-    Creates a new event loop, yields it, then closes the httpx client
-    before closing the loop to prevent "Event loop is closed" errors.
+    Uses a lock to ensure only one async operation runs at a time, preventing
+    concurrent requests from interfering with each other's httpx clients.
     """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        yield loop
-    finally:
-        # Close the httpx client BEFORE closing the loop
-        # This prevents "Event loop is closed" errors on subsequent requests
-        if cloud_sync and cloud_sync.client:
-            try:
-                loop.run_until_complete(cloud_sync.client.aclose())
-            except Exception:
-                pass  # Ignore errors during cleanup
-            cloud_sync.client = None
-        loop.close()
+    with _async_lock:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            yield loop
+        finally:
+            # Invalidate the client reference so it gets recreated on next request
+            if cloud_sync:
+                cloud_sync.client = None
+            loop.close()
 
 
 async def register_agent_with_backend(
