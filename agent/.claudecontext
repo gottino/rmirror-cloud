@@ -303,11 +303,14 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 
 ## Recent Major Changes
 
-- **2026-01-12**: Implemented two-phase metadata-first sync architecture
+- **2026-01-12**: Released v1.4.0 with metadata-first sync architecture
   - New `MetadataSync` class syncs notebook structure first (fast, ~100/min rate limit)
   - `InitialSync` now runs Phase 1 (metadata) then Phase 2 (content) with rate limit handling
   - `SyncQueue` automatically syncs metadata before uploading .rm files
-  - Exponential backoff (10s base, 2x multiplier) on 429 rate limit errors
+  - `RateLimitError` exception class for proper 429 error propagation
+  - Exponential backoff (10s base, 2x multiplier) on rate limit errors
+  - Built, signed, and notarized macOS installer v1.4.0
+  - Dashboard download link updated to v1.4.0
 - **2026-01-12**: Fixed event loop closure errors in Flask routes (added threading lock + httpx client lifecycle management)
 - **2026-01-12**: Fixed page UUID extraction from reMarkable .content file (handles dict format with 'id' field)
 - **2026-01-12**: Fixed ensure_authenticated to recreate httpx client when invalidated after each request
