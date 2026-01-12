@@ -108,8 +108,8 @@ class InitialSync:
         """
         Sync a single notebook.
 
-        Uploads all pages (.rm files) and then the .content file for mapping.
-        Respects max_pages_per_notebook config to limit pages uploaded.
+        Uploads pages (.rm files) in order from newest to oldest (based on .content file),
+        respects max_pages_per_notebook config, then uploads .content file for mapping.
 
         Args:
             notebook_uuid: UUID of the notebook
@@ -128,49 +128,78 @@ class InitialSync:
             "uploaded": 0,
             "failed": 0,
             "skipped": 0,
+            "failed_pages": [],  # Track which pages failed
         }
 
-        # 1. Get page files and determine which ones to upload
+        # 1. Get all page files
         all_page_files = list(notebook_dir.glob("*.rm"))
-        page_files_to_upload = all_page_files
 
-        # Check if we should limit pages per notebook
+        if not all_page_files:
+            logger.info(f"No pages found in notebook {notebook_uuid}")
+            return {"uploaded": 0, "failed": 0, "skipped": 0}
+
+        # 2. Read .content file to get authoritative page order
+        # In reMarkable's .content file, pages array is ordered oldest to newest
+        content_file = self.remarkable_folder / f"{notebook_uuid}.content"
+        page_order = []  # List of page UUIDs in order (oldest to newest)
+
+        if content_file.exists():
+            try:
+                with open(content_file, 'r') as f:
+                    content_data = json.load(f)
+
+                # Get pages array (try both locations for different reMarkable versions)
+                pages_array = content_data.get("pages", [])
+                if not pages_array and "cPages" in content_data:
+                    pages_array = content_data.get("cPages", {}).get("pages", [])
+
+                page_order = pages_array
+                logger.debug(f"Found {len(page_order)} pages in .content file for {notebook_uuid}")
+
+            except Exception as e:
+                logger.warning(f"Failed to read .content file for {notebook_uuid}: {e}")
+
+        # 3. Create UUID to file mapping
+        page_file_map = {pf.stem: pf for pf in all_page_files}
+
+        # 4. Sort page files: newest first (reverse of .content order)
+        # This ensures newest pages are uploaded first and get OCR priority
+        if page_order:
+            # Build ordered list from .content (reversed = newest first)
+            ordered_page_files = []
+            for uuid in reversed(page_order):
+                if uuid in page_file_map:
+                    ordered_page_files.append(page_file_map[uuid])
+
+            # Add any orphaned pages (in .rm folder but not in .content) at the end
+            orphaned_uuids = set(page_file_map.keys()) - set(page_order)
+            if orphaned_uuids:
+                logger.warning(f"Found {len(orphaned_uuids)} orphaned pages not in .content file")
+                for uuid in orphaned_uuids:
+                    ordered_page_files.append(page_file_map[uuid])
+        else:
+            # No .content file or empty - fall back to file modification time (newest first)
+            logger.warning(f"No page order from .content, falling back to file mtime")
+            ordered_page_files = sorted(
+                all_page_files,
+                key=lambda p: p.stat().st_mtime,
+                reverse=True  # Newest first
+            )
+
+        # 5. Apply page limit (take from front = newest pages)
         max_pages = self.config.sync.max_pages_per_notebook
-        if max_pages is not None and max_pages > 0 and len(all_page_files) > max_pages:
-            # Read .content file to get page ordering
-            content_file = self.remarkable_folder / f"{notebook_uuid}.content"
-            if content_file.exists():
-                try:
-                    with open(content_file, 'r') as f:
-                        content_data = json.load(f)
+        if max_pages is not None and max_pages > 0 and len(ordered_page_files) > max_pages:
+            skipped_count = len(ordered_page_files) - max_pages
+            page_files_to_upload = ordered_page_files[:max_pages]  # Take first N (newest)
+            stats["skipped"] = skipped_count
+            print(f"   ⚡ Limiting to {max_pages} most recent pages (skipping {skipped_count} older pages)")
+            logger.info(f"Limited notebook {notebook_uuid} to {max_pages} newest pages")
+        else:
+            page_files_to_upload = ordered_page_files
 
-                    # Get pages array (try both locations)
-                    pages_array = content_data.get("pages", [])
-                    if not pages_array and "cPages" in content_data:
-                        pages_array = content_data.get("cPages", {}).get("pages", [])
-
-                    if pages_array:
-                        # Take the last N pages (newest pages are at the end)
-                        newest_page_uuids = pages_array[-max_pages:]
-                        newest_page_uuids_set = set(newest_page_uuids)
-
-                        # Filter to only include newest pages
-                        page_files_to_upload = [
-                            pf for pf in all_page_files
-                            if pf.stem in newest_page_uuids_set
-                        ]
-
-                        skipped_count = len(all_page_files) - len(page_files_to_upload)
-                        print(f"   ⚡ Limiting to {max_pages} most recent pages (skipping {skipped_count} older pages)")
-                        logger.info(f"Limited notebook {notebook_uuid} to {max_pages} newest pages")
-
-                except Exception as e:
-                    logger.warning(f"Failed to read .content file for page limiting: {e}")
-                    # Fall back to uploading all pages
-                    print(f"   ⚠️  Could not limit pages (will upload all)")
-
+        # 6. Upload pages in order (newest first)
         if page_files_to_upload:
-            print(f"   📤 Uploading {len(page_files_to_upload)} page(s)...")
+            print(f"   📤 Uploading {len(page_files_to_upload)} page(s) (newest first)...")
 
             for page_file in page_files_to_upload:
                 try:
@@ -179,9 +208,9 @@ class InitialSync:
                 except Exception as e:
                     logger.error(f"Failed to upload {page_file.name}: {e}")
                     stats["failed"] += 1
+                    stats["failed_pages"].append(page_file.stem)
 
-        # 2. Upload .content file to establish page ordering
-        content_file = self.remarkable_folder / f"{notebook_uuid}.content"
+        # 7. Upload .content file to establish page ordering in backend
         if content_file.exists():
             try:
                 print(f"   📋 Uploading .content file...")
@@ -198,6 +227,12 @@ class InitialSync:
             except Exception as e:
                 logger.error(f"Failed to upload content file: {e}")
                 stats["failed"] += 1
+
+        # 8. Report results
+        if stats["failed"] > 0:
+            print(f"   ⚠️  {stats['failed']} page(s) failed to upload")
+            if stats["failed_pages"]:
+                logger.warning(f"Failed pages: {stats['failed_pages'][:5]}{'...' if len(stats['failed_pages']) > 5 else ''}")
 
         print(f"   ✓ Uploaded {stats['uploaded']} page(s)")
 

@@ -570,9 +570,9 @@ async def update_notebook_metadata(
             try:
                 # Check if user has quota remaining for integration syncing
                 # If quota exhausted, skip integration sync (per strategy: block integrations when quota exceeded)
-                quota_status = quota_service.get_status(db, current_user.id)
+                quota_status = quota_service.get_quota_status(db, current_user.id)
 
-                if quota_status.is_exhausted:
+                if quota_status["is_exhausted"]:
                     logger.warning(
                         f"Skipping integration sync for user {current_user.id} - quota exhausted. "
                         "Metadata updates will not be synced to integrations."
