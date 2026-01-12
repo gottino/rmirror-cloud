@@ -171,10 +171,32 @@ async def get_notebooks_tree(
         if nb.parent_uuid:
             has_children.add(nb.parent_uuid)
 
-    # Get preview text for each notebook (most recent page)
+    # Get preview text and sync progress for each notebook
     preview_map = {}
+    sync_progress_map = {}
     for nb in all_notebooks:
         if nb.document_type == "notebook":
+            # Get all pages for this notebook to calculate sync progress
+            all_pages = (
+                db.query(Page)
+                .join(NotebookPage, NotebookPage.page_id == Page.id)
+                .filter(NotebookPage.notebook_id == nb.id)
+                .all()
+            )
+
+            # Calculate sync progress
+            total_pages = len(all_pages)
+            not_synced_count = sum(1 for p in all_pages if p.ocr_status == "not_synced")
+            pending_quota_count = sum(1 for p in all_pages if p.ocr_status == "pending_quota")
+            synced_count = total_pages - not_synced_count
+
+            sync_progress_map[nb.notebook_uuid] = {
+                "total_pages": total_pages,
+                "synced_pages": synced_count,
+                "not_synced_pages": not_synced_count,
+                "pending_quota_pages": pending_quota_count,
+            }
+
             # Get most recent page (regardless of OCR status)
             most_recent_page = (
                 db.query(Page)
@@ -220,6 +242,7 @@ async def get_notebooks_tree(
             "last_synced_at": notebook.last_synced_at.isoformat() if notebook.last_synced_at else None,
             "is_folder": notebook.notebook_uuid in has_children,
             "preview": preview_map.get(notebook.notebook_uuid),
+            "sync_progress": sync_progress_map.get(notebook.notebook_uuid),
             "children": [],
         }
         return node

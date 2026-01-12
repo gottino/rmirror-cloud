@@ -657,6 +657,34 @@ export default function Home() {
                                   }}>
                                     {notebook.preview}
                                   </p>
+                                ) : notebook.sync_progress && notebook.sync_progress.not_synced_pages > 0 ? (
+                                  <div className="flex flex-col items-center justify-center w-full h-full px-2">
+                                    <svg className="w-6 h-6 mb-2" style={{ color: 'var(--warm-gray)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                    </svg>
+                                    <span style={{ fontSize: '0.7em', color: 'var(--warm-gray)', textAlign: 'center', fontWeight: 500, marginBottom: '0.25rem' }}>
+                                      Syncing...
+                                    </span>
+                                    <span style={{ fontSize: '0.6em', color: 'var(--warm-gray)', textAlign: 'center' }}>
+                                      {notebook.sync_progress.synced_pages}/{notebook.sync_progress.total_pages} pages
+                                    </span>
+                                  </div>
+                                ) : notebook.sync_progress && notebook.sync_progress.pending_quota_pages > 0 ? (
+                                  <div className="flex flex-col items-center justify-center w-full h-full px-2">
+                                    <span style={{ fontSize: '0.7em', color: 'var(--amber-gold)', textAlign: 'center', fontWeight: 500, marginBottom: '0.25rem' }}>
+                                      OCR Pending
+                                    </span>
+                                    <button
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        router.push('/billing');
+                                      }}
+                                      style={{ fontSize: '0.6em', color: 'var(--terracotta)', textAlign: 'center', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                                    >
+                                      Upgrade
+                                    </button>
+                                  </div>
                                 ) : (
                                   <div className="flex flex-col items-center justify-center w-full h-full px-2">
                                     <span style={{ fontSize: '0.7em', color: 'var(--amber-gold)', textAlign: 'center', fontWeight: 500, marginBottom: '0.25rem' }}>
@@ -737,6 +765,15 @@ export default function Home() {
                                     }}>
                                       {notebook.preview}
                                     </p>
+                                  ) : notebook.sync_progress && notebook.sync_progress.not_synced_pages > 0 ? (
+                                    <div className="flex flex-col items-center justify-center w-full h-full">
+                                      <svg className="w-4 h-4 mb-1" style={{ color: 'var(--warm-gray)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                      </svg>
+                                      <span style={{ fontSize: '0.45em', color: 'var(--warm-gray)', textAlign: 'center', fontWeight: 500 }}>
+                                        Syncing
+                                      </span>
+                                    </div>
                                   ) : (
                                     <div className="flex flex-col items-center justify-center w-full h-full">
                                       <span style={{ fontSize: '0.5em', color: 'var(--amber-gold)', textAlign: 'center', fontWeight: 500 }}>

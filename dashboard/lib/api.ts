@@ -73,6 +73,13 @@ export interface NotebookWithPages extends Notebook {
   pages: Page[];
 }
 
+export interface SyncProgress {
+  total_pages: number;
+  synced_pages: number;
+  not_synced_pages: number;
+  pending_quota_pages: number;
+}
+
 export interface NotebookTreeNode {
   id: number;
   notebook_uuid: string;
@@ -84,6 +91,7 @@ export interface NotebookTreeNode {
   last_synced_at: string | null;
   is_folder: boolean;
   preview: string | null;
+  sync_progress: SyncProgress | null;
   children: NotebookTreeNode[];
 }
 

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
-import { ChevronRight, Download, Calendar, Clock } from 'lucide-react';
+import { ChevronRight, Download, Calendar, Clock, CloudUpload } from 'lucide-react';
 import { getNotebook, getQuotaStatus, type NotebookWithPages, type Page, type QuotaStatus } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
@@ -174,6 +174,8 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId, quota }: PageCar
                     ? 'rgba(220, 38, 38, 0.15)'
                     : page.ocr_status === 'pending_quota'
                     ? 'rgba(212, 165, 116, 0.15)'
+                    : page.ocr_status === 'not_synced'
+                    ? 'rgba(156, 163, 175, 0.15)'
                     : 'var(--soft-cream)',
                   color: page.ocr_status === 'completed'
                     ? 'var(--sage-green)'
@@ -183,10 +185,12 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId, quota }: PageCar
                     ? 'var(--destructive)'
                     : page.ocr_status === 'pending_quota'
                     ? 'var(--amber-gold)'
+                    : page.ocr_status === 'not_synced'
+                    ? 'var(--warm-gray)'
                     : 'var(--warm-gray)'
                 }}
               >
-                {page.ocr_status === 'pending_quota' ? 'Awaiting Quota' : page.ocr_status}
+                {page.ocr_status === 'pending_quota' ? 'Awaiting Quota' : page.ocr_status === 'not_synced' ? 'Not Synced' : page.ocr_status}
               </span>
             </div>
           </div>
@@ -225,6 +229,18 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId, quota }: PageCar
               >
                 Upgrade to Pro
               </a>
+            </div>
+          ) : page.ocr_status === 'not_synced' ? (
+            <div className="rounded p-6 text-center" style={{ backgroundColor: 'rgba(156, 163, 175, 0.1)', border: '1px solid rgba(156, 163, 175, 0.2)' }}>
+              <div className="flex items-center justify-center mb-3">
+                <svg className="w-8 h-8" style={{ color: 'var(--warm-gray)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+              </div>
+              <p style={{ color: 'var(--warm-gray)', fontWeight: 500, marginBottom: '0.5rem', fontSize: '1em' }}>Not synced yet</p>
+              <p style={{ color: 'var(--warm-gray)', fontSize: '0.875em', opacity: 0.8 }}>
+                This page is waiting to be uploaded from your reMarkable device.
+              </p>
             </div>
           ) : (
             <div className="rounded p-4" style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}>
@@ -279,6 +295,50 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId, quota }: PageCar
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Sync progress component shows progress when pages are being synced
+interface SyncProgressProps {
+  pages: Page[];
+}
+
+function SyncProgress({ pages }: SyncProgressProps) {
+  if (pages.length === 0) return null;
+
+  const notSyncedCount = pages.filter(p => p.ocr_status === 'not_synced').length;
+  const syncedCount = pages.filter(p => p.ocr_status !== 'not_synced').length;
+  const totalPages = pages.length;
+  const progressPercent = totalPages > 0 ? Math.round((syncedCount / totalPages) * 100) : 0;
+
+  // Only show if there are not_synced pages
+  if (notSyncedCount === 0) return null;
+
+  return (
+    <div className="rounded-lg p-4 mb-6" style={{ backgroundColor: 'rgba(156, 163, 175, 0.1)', border: '1px solid rgba(156, 163, 175, 0.2)' }}>
+      <div className="flex items-center gap-3 mb-3">
+        <CloudUpload className="w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
+        <span style={{ fontSize: '0.925em', fontWeight: 500, color: 'var(--warm-charcoal)' }}>
+          Syncing pages from your reMarkable...
+        </span>
+      </div>
+      <div className="flex items-center gap-4">
+        {/* Progress bar */}
+        <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(156, 163, 175, 0.2)' }}>
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{
+              width: `${progressPercent}%`,
+              backgroundColor: progressPercent === 100 ? 'var(--sage-green)' : 'var(--terracotta)'
+            }}
+          />
+        </div>
+        {/* Progress text */}
+        <span style={{ fontSize: '0.875em', color: 'var(--warm-gray)', minWidth: '100px', textAlign: 'right' }}>
+          {syncedCount} / {totalPages} pages synced
+        </span>
       </div>
     </div>
   );
@@ -495,6 +555,9 @@ export default function NotebookPage() {
                 </button>
               </div>
             </div>
+
+            {/* Sync Progress */}
+            <SyncProgress pages={notebook.pages} />
 
             {/* Pages */}
             {sortedPages.length === 0 ? (
