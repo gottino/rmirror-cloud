@@ -201,11 +201,12 @@ async def process_rm_file(
             Page.page_uuid == page_uuid
         ).first()
 
-        # Check if we need to process this file (new file or file hash changed)
+        # Check if we need to process this file (new file, file hash changed, or stub from metadata sync)
         needs_processing = (
             page is None or
             page.file_hash != file_hash or
             page.ocr_status == OcrStatus.FAILED or
+            page.ocr_status == OcrStatus.NOT_SYNCED or  # Page stub from metadata sync
             (page.ocr_status == OcrStatus.COMPLETED and not page.ocr_text)
         )
 

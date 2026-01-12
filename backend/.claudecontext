@@ -14,6 +14,8 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - **Deployment**: Hetzner VPS (167.235.74.51) via GitHub Actions
 
 ## Key Architecture Patterns
+- **Two-phase sync**: Phase 1 (metadata) creates notebook/page stubs instantly, Phase 2 (content) uploads .rm files with OCR
+- **NOT_SYNCED status**: Page stubs created by metadata sync, awaiting content upload
 - **Background sync worker**: Asyncio-based worker (app/services/sync_worker.py) polls queue every 5s
 - **Database-driven deduplication**: SyncRecord table tracks what's synced (not Notion-based)
 - **Upsert pattern**: Query by page identifier (notebook_uuid + page_number), update content_hash
@@ -38,6 +40,13 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - `integration_configs`: User integration settings (encrypted credentials)
 
 ## Recent Major Changes
+- **2026-01-12**: Implemented metadata-first sync backend (Phase 1 of two-phase sync architecture):
+  - Added `NOT_SYNCED` OcrStatus enum value for page stubs (app/models/page.py)
+  - Created `POST /sync/metadata` endpoint (app/api/sync.py) for bulk notebook/page registration
+  - Rate limit: 100/minute for metadata sync (lightweight, fast)
+  - Migration 330fb8f63d23: Document NOT_SYNCED status, update orphan pages
+  - Updated process_rm_file to handle existing page stubs from metadata sync
+  - Updated notebooks API to handle NOT_SYNCED pages in preview logic
 - **2026-01-12**: Fixed Clerk webhook to auto-create free tier subscription for new users (app/api/webhooks/clerk.py)
 - **2026-01-12**: Designed metadata-first sync architecture (concept: dev-context/concepts/metadata-first-sync-architecture.md)
 - **2026-01-11**: Added `/auth/agent-token` endpoint for long-lived agent JWT tokens (30 days vs ~1 hour Clerk sessions)

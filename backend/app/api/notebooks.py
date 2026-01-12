@@ -184,9 +184,9 @@ async def get_notebooks_tree(
                 .first()
             )
 
-            # If most recent page is pending quota, don't show preview
-            # (frontend will show "OCR Pending" message)
-            if most_recent_page and most_recent_page.ocr_status == "pending_quota":
+            # If most recent page is pending quota or not synced, don't show preview
+            # (frontend will show "OCR Pending" or "Not synced" message)
+            if most_recent_page and most_recent_page.ocr_status in ["pending_quota", "not_synced"]:
                 preview_map[nb.notebook_uuid] = None
             else:
                 # Get most recent page with OCR text

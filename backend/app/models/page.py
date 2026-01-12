@@ -12,6 +12,7 @@ from app.database import Base
 class OcrStatus(str, Enum):
     """OCR processing status."""
 
+    NOT_SYNCED = "not_synced"  # Page registered in metadata sync, content not yet uploaded
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
