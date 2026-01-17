@@ -4,18 +4,39 @@ import logging
 import secrets
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models.sync_record import IntegrationConfig
 from app.models.user import User
+from app.services.initial_sync import trigger_initial_sync
 from app.services.notion_oauth import NotionOAuthService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/notion", tags=["notion-oauth"])
+
+
+async def _run_initial_sync_background(user_id: int, target_name: str):
+    """
+    Run initial sync in background to avoid blocking the API response.
+
+    This creates a new database session since background tasks run after
+    the request context is closed.
+    """
+    db = SessionLocal()
+    try:
+        result = await trigger_initial_sync(db, user_id, target_name)
+        logger.info(
+            f"Initial sync completed for user {user_id} to {target_name}: "
+            f"queued {result['queued_count']} pages"
+        )
+    except Exception as e:
+        logger.error(f"Error running initial sync for user {user_id}: {e}", exc_info=True)
+    finally:
+        db.close()
 
 
 class OAuthUrlResponse(BaseModel):
@@ -284,6 +305,7 @@ async def list_pages(
 @router.post("/databases/create", response_model=CreateDatabaseResponse)
 async def create_database(
     request: CreateDatabaseRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
 ):
@@ -378,6 +400,14 @@ async def create_database(
             f"Created Notion {request.database_type} database '{result['title']}' for {target_name} integration (user {current_user.id})"
         )
 
+        # Trigger initial sync of existing data in the background
+        background_tasks.add_task(
+            _run_initial_sync_background,
+            user_id=current_user.id,
+            target_name=target_name,
+        )
+        logger.info(f"Scheduled initial sync for user {current_user.id} to {target_name}")
+
         return CreateDatabaseResponse(**result)
 
     except HTTPException:
@@ -390,6 +420,7 @@ async def create_database(
 @router.post("/databases/{database_id}/select")
 async def select_database(
     database_id: str,
+    background_tasks: BackgroundTasks,
     database_type: str = Query(default="notebooks", description="Type of database: 'notebooks' or 'todos'"),
     current_user: User = Depends(get_clerk_active_user),
     db: Session = Depends(get_db),
@@ -484,6 +515,14 @@ async def select_database(
             f"Selected Notion database {database_id} for {target_name} integration (user {current_user.id})"
         )
 
+        # Trigger initial sync of existing data in the background
+        background_tasks.add_task(
+            _run_initial_sync_background,
+            user_id=current_user.id,
+            target_name=target_name,
+        )
+        logger.info(f"Scheduled initial sync for user {current_user.id} to {target_name}")
+
         return {
             "success": True,
             "message": "Database selected successfully",
@@ -496,3 +535,77 @@ async def select_database(
     except Exception as e:
         logger.error(f"Error selecting database: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class InitialSyncStatusResponse(BaseModel):
+    """Response for initial sync status."""
+
+    pending_count: int
+    processing_count: int
+    completed_count: int
+    failed_count: int
+    total_synced: int
+    in_progress: bool
+
+
+@router.get("/sync/status", response_model=InitialSyncStatusResponse)
+async def get_sync_status(
+    current_user: User = Depends(get_clerk_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get the status of the initial Notion sync.
+
+    Returns counts of pending, processing, completed, and failed sync items.
+    """
+    from app.services.initial_sync import get_initial_sync_status
+
+    try:
+        status = await get_initial_sync_status(db, current_user.id, "notion")
+        return InitialSyncStatusResponse(**status)
+
+    except Exception as e:
+        logger.error(f"Error getting sync status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sync/trigger")
+async def trigger_sync(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_clerk_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually trigger an initial sync of existing data to Notion.
+
+    This can be used to retry a failed sync or to sync data after
+    the user has added new content since the initial connection.
+    """
+    # Verify integration is enabled
+    config = (
+        db.query(IntegrationConfig)
+        .filter(
+            IntegrationConfig.user_id == current_user.id,
+            IntegrationConfig.target_name == "notion",
+            IntegrationConfig.is_enabled == True,
+        )
+        .first()
+    )
+
+    if not config:
+        raise HTTPException(
+            status_code=400,
+            detail="Notion integration is not enabled. Please connect Notion first.",
+        )
+
+    # Trigger sync in background
+    background_tasks.add_task(
+        _run_initial_sync_background,
+        user_id=current_user.id,
+        target_name="notion",
+    )
+
+    return {
+        "success": True,
+        "message": "Sync triggered. Check /sync/status for progress.",
+    }
