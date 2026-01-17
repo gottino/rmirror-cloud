@@ -40,6 +40,14 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - `integration_configs`: User integration settings (encrypted credentials)
 
 ## Recent Major Changes
+- **2026-01-17**: Implemented automatic initial Notion sync when integration is connected
+  - New `app/services/initial_sync.py`: Queues all OCR-completed pages for Notion sync
+  - Triggers automatically when user creates or selects a Notion database
+  - Pages ordered by `last_opened` (newest notebooks first), then `page_number` descending
+  - Rate limit handling: 10 items per batch, 5-second intervals between batches
+  - Initial sync items use priority 8 (lower than real-time syncs at 5)
+  - New endpoints: `GET /notion/sync/status`, `POST /notion/sync/trigger`
+  - Skips pages already synced or already queued
 - **2026-01-12**: Fixed UUID truncation bug in processing.py - rstrip() → removesuffix() for .metadata/.rm extension removal
   - rstrip(".metadata") removes chars in set {'.','m','e','t','a','d'}, truncating UUIDs ending in those letters
   - Caused duplicate notebooks with truncated UUIDs (e.g., "...24ba" vs "...24b")
