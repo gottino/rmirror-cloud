@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
-import { ChevronRight, Download, Calendar, Clock, CloudUpload } from 'lucide-react';
+import { ChevronRight, Download, Calendar, Clock, CloudUpload, Menu } from 'lucide-react';
 import { getNotebook, getQuotaStatus, type NotebookWithPages, type Page, type QuotaStatus } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
@@ -354,6 +354,7 @@ export default function NotebookPage() {
   const [copiedPageId, setCopiedPageId] = useState<number | null>(null);
   const [authToken, setAuthToken] = useState<string>('');
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Development mode: use JWT token from localStorage
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
@@ -413,8 +414,14 @@ export default function NotebookPage() {
 
   if (loading) {
     return (
-      <div className="flex h-screen">
-        <Sidebar />
+      <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--background)' }}>
+        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--terracotta)' }}></div>
@@ -427,8 +434,14 @@ export default function NotebookPage() {
 
   if (error || !notebook) {
     return (
-      <div className="flex h-screen">
-        <Sidebar />
+      <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--background)' }}>
+        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
         <div className="flex-1 flex items-center justify-center px-4">
           <div className="text-center max-w-md">
             <div style={{ color: 'var(--destructive)', fontSize: '3rem', marginBottom: '1rem' }}>✗</div>
@@ -454,20 +467,37 @@ export default function NotebookPage() {
   const sortedPages = [...notebook.pages].sort((a, b) => b.page_number - a.page_number);
 
   return (
-    <div className="flex h-screen">
-      <Sidebar />
+    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--background)' }}>
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+      {/* Overlay for mobile */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <header className="bg-white shadow-sm sticky top-0 z-30" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="max-w-full mx-auto px-6 lg:px-8 py-4">
             <div className="flex items-center justify-between gap-4">
+              {/* Hamburger menu button for mobile */}
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="lg:hidden p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+
               {/* Breadcrumb navigation */}
-              <div className="flex items-center gap-2" style={{ fontSize: '0.875em', color: 'var(--warm-gray)' }}>
+              <div className="flex items-center gap-2 flex-1" style={{ fontSize: '0.875em', color: 'var(--warm-gray)' }}>
                 <Link href="/dashboard" className="hover:text-[var(--terracotta)] transition-colors">
                   All Notebooks
                 </Link>
                 <ChevronRight className="w-4 h-4" />
-                <span style={{ color: 'var(--warm-charcoal)', fontWeight: 500 }}>
+                <span style={{ color: 'var(--warm-charcoal)', fontWeight: 500 }} className="truncate">
                   {notebook.visible_name || notebook.title || 'Untitled'}
                 </span>
               </div>
