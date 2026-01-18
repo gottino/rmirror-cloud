@@ -85,7 +85,8 @@ class SyncWorker:
         """
         db: Session = SessionLocal()
         try:
-            # Get pending items
+            # Get pending items with row-level locking to prevent race conditions
+            # FOR UPDATE SKIP LOCKED ensures each worker gets different items
             pending_items = (
                 db.query(SyncQueue)
                 .filter(
@@ -97,6 +98,7 @@ class SyncWorker:
                     SyncQueue.created_at.asc(),  # FIFO within same priority
                 )
                 .limit(limit)
+                .with_for_update(skip_locked=True)
                 .all()
             )
 
