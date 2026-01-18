@@ -3,14 +3,15 @@
 import hashlib
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Dict, Optional
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
-from app.models.sync_record import SyncQueue, SyncRecord
+from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,10 @@ async def trigger_initial_sync(
     This is called when a user first connects an integration (e.g., Notion)
     to sync their existing data to the new target.
 
+    The sync happens in two phases:
+    1. Create notebook pages in Notion (sequentially, to prevent duplicates)
+    2. Queue individual pages for background processing
+
     Args:
         db: Database session
         user_id: User ID
@@ -45,6 +50,7 @@ async def trigger_initial_sync(
         - queued_count: Number of items queued
         - skipped_count: Number of items skipped (already synced or no content)
         - total_pages: Total pages found for user
+        - notebooks_created: Number of notebook pages created in Notion
     """
     logger.info(f"Triggering initial sync for user {user_id} to {target_name}")
 
@@ -76,6 +82,15 @@ async def trigger_initial_sync(
 
     logger.info(f"Found {total_pages} pages with completed OCR for user {user_id}")
 
+    # PHASE 1: Create notebook pages in Notion first (sequentially)
+    # This prevents race conditions when workers process pages in parallel
+    notebooks_created = 0
+    if target_name == "notion":
+        notebooks_created = await _create_notebook_pages_in_notion(
+            db, user_id, target_name, pages_data
+        )
+
+    # PHASE 2: Queue individual pages for sync
     queued_count = 0
     skipped_count = 0
     current_time = datetime.utcnow()
@@ -143,14 +158,180 @@ async def trigger_initial_sync(
         "queued_count": queued_count,
         "skipped_count": skipped_count,
         "total_pages": total_pages,
+        "notebooks_created": notebooks_created,
     }
 
     logger.info(
         f"Initial sync for user {user_id} to {target_name}: "
-        f"queued {queued_count}, skipped {skipped_count}, total {total_pages}"
+        f"notebooks created {notebooks_created}, queued {queued_count}, "
+        f"skipped {skipped_count}, total {total_pages}"
     )
 
     return result
+
+
+async def _create_notebook_pages_in_notion(
+    db: Session,
+    user_id: int,
+    target_name: str,
+    pages_data: list,
+) -> int:
+    """
+    Create Notion pages for all unique notebooks before queuing pages.
+
+    This prevents race conditions where multiple workers try to create
+    the same notebook page simultaneously.
+
+    Args:
+        db: Database session
+        user_id: User ID
+        target_name: Target name (should be "notion")
+        pages_data: List of (Page, NotebookPage, Notebook) tuples
+
+    Returns:
+        Number of notebook pages created in Notion
+    """
+    # Get integration config
+    config = (
+        db.query(IntegrationConfig)
+        .filter(
+            IntegrationConfig.user_id == user_id,
+            IntegrationConfig.target_name == target_name,
+            IntegrationConfig.is_enabled == True,
+        )
+        .first()
+    )
+
+    if not config:
+        logger.warning(f"No active {target_name} integration for user {user_id}")
+        return 0
+
+    config_dict = config.get_config()
+    access_token = config_dict.get("access_token")
+    database_id = config_dict.get("database_id")
+
+    if not access_token or not database_id:
+        logger.warning(f"Missing Notion credentials for user {user_id}")
+        return 0
+
+    # Collect unique notebooks
+    notebooks_to_create: Dict[str, Notebook] = {}
+    for page, notebook_page, notebook in pages_data:
+        if notebook.notebook_uuid not in notebooks_to_create:
+            # Check if notebook already has a SyncRecord
+            existing = (
+                db.query(SyncRecord)
+                .filter(
+                    SyncRecord.user_id == user_id,
+                    SyncRecord.notebook_uuid == notebook.notebook_uuid,
+                    SyncRecord.item_type == "notebook",
+                    SyncRecord.target_name == target_name,
+                )
+                .first()
+            )
+            if not existing:
+                notebooks_to_create[notebook.notebook_uuid] = notebook
+
+    if not notebooks_to_create:
+        logger.info(f"All notebooks already have SyncRecords for user {user_id}")
+        return 0
+
+    logger.info(f"Creating {len(notebooks_to_create)} notebook pages in Notion for user {user_id}")
+
+    created_count = 0
+    for notebook_uuid, notebook in notebooks_to_create.items():
+        try:
+            # Create notebook page in Notion using direct HTTP call
+            notion_page_id = await _create_notion_notebook_page(
+                access_token=access_token,
+                database_id=database_id,
+                notebook=notebook,
+            )
+
+            if notion_page_id:
+                # Create SyncRecord for this notebook
+                sync_record = SyncRecord(
+                    user_id=user_id,
+                    target_name=target_name,
+                    item_type="notebook",
+                    item_id=str(notebook.id),
+                    external_id=notion_page_id,
+                    content_hash="notebook",
+                    status="success",
+                    synced_at=datetime.utcnow(),
+                    notebook_uuid=notebook_uuid,
+                )
+                db.add(sync_record)
+                db.commit()
+                created_count += 1
+                logger.info(f"📒 Created notebook '{notebook.visible_name}' -> {notion_page_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to create notebook {notebook_uuid} in Notion: {e}")
+            # Continue with other notebooks
+
+    return created_count
+
+
+async def _create_notion_notebook_page(
+    access_token: str,
+    database_id: str,
+    notebook: Notebook,
+) -> Optional[str]:
+    """
+    Create a notebook page in Notion.
+
+    Args:
+        access_token: Notion OAuth access token
+        database_id: Notion database ID
+        notebook: Notebook model
+
+    Returns:
+        Notion page ID if successful, None otherwise
+    """
+    # Build page properties
+    properties = {
+        "Name": {"title": [{"text": {"content": notebook.visible_name or "Untitled"}}]},
+        "UUID": {"rich_text": [{"text": {"content": notebook.notebook_uuid}}]},
+        "Path": {"rich_text": [{"text": {"content": ""}}]},  # Can be populated later
+        "Pages": {"number": 0},  # Will be updated as pages are synced
+        "Synced At": {"date": {"start": datetime.utcnow().isoformat()}},
+        "Status": {"select": {"name": "Syncing"}},
+    }
+
+    # Add heading block for content
+    children = [
+        {
+            "object": "block",
+            "type": "heading_2",
+            "heading_2": {
+                "rich_text": [{"type": "text", "text": {"content": "Notebook Content"}}]
+            },
+        }
+    ]
+
+    # Create page using direct HTTP (works reliably with API 2022-06-28)
+    response = httpx.post(
+        "https://api.notion.com/v1/pages",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Notion-Version": "2022-06-28",
+            "Content-Type": "application/json",
+        },
+        json={
+            "parent": {"database_id": database_id},
+            "properties": properties,
+            "children": children,
+        },
+        verify=False,
+        timeout=30.0,
+    )
+
+    if response.status_code == 200:
+        return response.json().get("id")
+    else:
+        logger.error(f"Notion API error: {response.status_code} - {response.text[:200]}")
+        return None
 
 
 def _calculate_content_hash(text: str) -> str:

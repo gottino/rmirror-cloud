@@ -444,8 +444,10 @@ class NotionSyncTarget(SyncTarget):
         """
         Find existing Notion page for a notebook UUID.
 
-        Uses the Notion database query API with a filter on the UUID property
-        for reliable lookups. Falls back to search API if query fails.
+        Uses direct HTTP call to Notion's databases/query endpoint with an older
+        API version (2022-06-28) because:
+        - SDK 2025-09-03 removed databases.query() method
+        - data_sources.query() doesn't work with databases created via databases.create()
 
         Args:
             notebook_uuid: Notebook UUID to search for
@@ -454,24 +456,35 @@ class NotionSyncTarget(SyncTarget):
             Notion page ID if found, None otherwise
         """
         try:
-            # Query the database directly by UUID property (most reliable)
-            # Note: Use databases.query() - it still works even with API 2025-09-03
-            # The data_sources API has issues with some databases
-            response = self.client.databases.query(
-                database_id=self.database_id,
-                filter={
-                    "property": "UUID",
-                    "rich_text": {
-                        "equals": notebook_uuid
+            # Use direct HTTP call with older API version that supports databases/query
+            # The SDK's data_sources.query() doesn't work with our databases
+            response = httpx.post(
+                f"https://api.notion.com/v1/databases/{self.database_id}/query",
+                headers={
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Notion-Version": "2022-06-28",  # Older version that supports this endpoint
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "filter": {
+                        "property": "UUID",
+                        "rich_text": {
+                            "equals": notebook_uuid
+                        }
                     }
-                }
+                },
+                verify=False,  # SSL verification disabled for corporate environments
+                timeout=30.0
             )
 
-            results = response.get("results", [])
-            if results:
-                page_id = results[0]["id"]
-                self.logger.info(f"Found existing page {page_id} for UUID {notebook_uuid}")
-                return page_id
+            if response.status_code == 200:
+                results = response.json().get("results", [])
+                if results:
+                    page_id = results[0]["id"]
+                    self.logger.info(f"Found existing page {page_id} for UUID {notebook_uuid}")
+                    return page_id
+            else:
+                self.logger.warning(f"Database query failed: {response.status_code} - {response.text[:200]}")
 
             # Fallback: search by UUID prefix in title (for legacy pages)
             uuid_prefix = notebook_uuid[:8]
