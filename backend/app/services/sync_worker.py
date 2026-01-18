@@ -107,6 +107,13 @@ class SyncWorker:
 
             logger.info(f"Processing {len(pending_items)} pending sync items")
 
+            # Mark all items as 'processing' immediately to prevent other workers
+            # from picking them up (FOR UPDATE locks are released on commit)
+            for item in pending_items:
+                item.status = 'processing'
+                item.started_at = datetime.utcnow()
+            db.commit()
+
             for queue_item in pending_items:
                 try:
                     await self._process_queue_item(db, queue_item)
@@ -132,11 +139,8 @@ class SyncWorker:
             db: Database session
             queue_item: Queue item to process
         """
-        # Mark as processing
-        queue_item.status = 'processing'
+        # Increment retry count (status already set to 'processing' by caller)
         queue_item.retry_count += 1
-        queue_item.started_at = datetime.utcnow()
-        db.commit()
 
         logger.info(
             f"Processing queue item {queue_item.id}: "
