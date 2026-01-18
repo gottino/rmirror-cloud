@@ -340,6 +340,7 @@ class SyncWorker:
                         item_type='notebook',
                         item_id=str(notebook.id) if notebook else '',
                         external_id=notebook_page_id,
+                        content_hash='notebook',  # Placeholder - notebooks don't have content hash
                         status='success',
                         synced_at=datetime.utcnow(),
                         notebook_uuid=queue_item.notebook_uuid,

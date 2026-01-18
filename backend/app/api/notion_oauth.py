@@ -430,14 +430,22 @@ async def create_database(
             database_type=request.database_type,
         )
 
-        # Check if switching to a different database - clear old sync records
+        # Check if switching to a different database OR fresh config - clear old sync records
+        # Fresh config (no database_id) also needs cleanup in case sync records exist
+        # from a previous disconnected integration
         old_database_id = config_dict.get("database_id")
         new_database_id = result["database_id"]
-        if old_database_id and old_database_id != new_database_id:
-            logger.info(
-                f"User {current_user.id} switching from database {old_database_id} "
-                f"to {new_database_id} - clearing sync records"
-            )
+        if old_database_id != new_database_id:
+            if old_database_id:
+                logger.info(
+                    f"User {current_user.id} switching from database {old_database_id} "
+                    f"to {new_database_id} - clearing sync records"
+                )
+            else:
+                logger.info(
+                    f"User {current_user.id} configuring new database {new_database_id} "
+                    f"- clearing any stale sync records"
+                )
             _clear_sync_records_for_target(db, current_user.id, target_name)
 
         # Update integration config with database_id
@@ -556,13 +564,21 @@ async def select_database(
         # Get database info
         db_info = await oauth_service.get_database_info(access_token, database_id)
 
-        # Check if switching to a different database - clear old sync records
+        # Check if switching to a different database OR fresh config - clear old sync records
+        # Fresh config (no database_id) also needs cleanup in case sync records exist
+        # from a previous disconnected integration
         old_database_id = config_dict.get("database_id")
-        if old_database_id and old_database_id != database_id:
-            logger.info(
-                f"User {current_user.id} switching from database {old_database_id} "
-                f"to {database_id} - clearing sync records"
-            )
+        if old_database_id != database_id:
+            if old_database_id:
+                logger.info(
+                    f"User {current_user.id} switching from database {old_database_id} "
+                    f"to {database_id} - clearing sync records"
+                )
+            else:
+                logger.info(
+                    f"User {current_user.id} configuring database {database_id} "
+                    f"- clearing any stale sync records"
+                )
             _clear_sync_records_for_target(db, current_user.id, target_name)
 
         # Update integration config

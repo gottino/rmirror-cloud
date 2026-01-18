@@ -455,8 +455,9 @@ class NotionSyncTarget(SyncTarget):
         """
         try:
             # Query the database directly by UUID property (most reliable)
-            response = self.client.databases.query(
-                database_id=self.database_id,
+            # Note: In Notion API 2025-09-03+, databases are called data_sources
+            response = self.client.data_sources.query(
+                data_source_id=self.database_id,
                 filter={
                     "property": "UUID",
                     "rich_text": {

@@ -13,7 +13,7 @@ from app.core.unified_sync_manager import UnifiedSyncManager
 from app.database import get_db
 from app.integrations.notion_sync import NotionSyncTarget
 from app.integrations.notion_todos_sync import NotionTodosSyncTarget
-from app.models.sync_record import IntegrationConfig
+from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -268,6 +268,30 @@ async def delete_integration(
             raise HTTPException(
                 status_code=404, detail=f"Integration '{target_name}' not found"
             )
+
+        # Clear sync records and queue items for this integration
+        # This ensures a fresh start if user reconnects to a different database
+        records_deleted = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == current_user.id,
+                SyncRecord.target_name == target_name,
+            )
+            .delete()
+        )
+        queue_deleted = (
+            db.query(SyncQueue)
+            .filter(
+                SyncQueue.user_id == current_user.id,
+                SyncQueue.target_name == target_name,
+                SyncQueue.status.in_(["pending", "processing", "failed"]),
+            )
+            .delete()
+        )
+        logger.info(
+            f"Cleared {records_deleted} sync records and {queue_deleted} queue items "
+            f"for user {current_user.id} target {target_name}"
+        )
 
         db.delete(config)
         db.commit()
