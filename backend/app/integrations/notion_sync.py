@@ -455,9 +455,10 @@ class NotionSyncTarget(SyncTarget):
         """
         try:
             # Query the database directly by UUID property (most reliable)
-            # Note: In Notion API 2025-09-03+, databases are called data_sources
-            response = self.client.data_sources.query(
-                data_source_id=self.database_id,
+            # Note: Use databases.query() - it still works even with API 2025-09-03
+            # The data_sources API has issues with some databases
+            response = self.client.databases.query(
+                database_id=self.database_id,
                 filter={
                     "property": "UUID",
                     "rich_text": {
@@ -480,7 +481,11 @@ class NotionSyncTarget(SyncTarget):
             )
 
             for result in search_response.get("results", []):
-                if result.get("parent", {}).get("database_id") == self.database_id:
+                # Check both database_id formats (with and without dashes)
+                parent = result.get("parent", {})
+                parent_db_id = parent.get("database_id", "")
+                # Normalize IDs for comparison (remove dashes)
+                if parent_db_id.replace("-", "") == self.database_id.replace("-", ""):
                     # Check if the title contains our UUID (legacy format)
                     title_prop = result.get("properties", {}).get("Name", {})
                     title_content = title_prop.get("title", [])
