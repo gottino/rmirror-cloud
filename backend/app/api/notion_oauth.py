@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
 from app.database import get_db, SessionLocal
-from app.models.sync_record import IntegrationConfig
+from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.user import User
 from app.services.initial_sync import trigger_initial_sync
 from app.services.notion_oauth import NotionOAuthService
@@ -37,6 +37,50 @@ async def _run_initial_sync_background(user_id: int, target_name: str):
         logger.error(f"Error running initial sync for user {user_id}: {e}", exc_info=True)
     finally:
         db.close()
+
+
+def _clear_sync_records_for_target(db: Session, user_id: int, target_name: str) -> int:
+    """
+    Clear all sync records and queue items for a user's integration target.
+
+    Called when user switches to a different Notion database, ensuring
+    fresh sync without stale external_id references to old database.
+
+    Args:
+        db: Database session
+        user_id: User ID
+        target_name: Integration target name (e.g., "notion")
+
+    Returns:
+        Number of records deleted
+    """
+    # Delete sync records
+    records_deleted = (
+        db.query(SyncRecord)
+        .filter(
+            SyncRecord.user_id == user_id,
+            SyncRecord.target_name == target_name,
+        )
+        .delete()
+    )
+
+    # Delete pending/failed queue items (don't delete completed ones as they're historical)
+    queue_deleted = (
+        db.query(SyncQueue)
+        .filter(
+            SyncQueue.user_id == user_id,
+            SyncQueue.target_name == target_name,
+            SyncQueue.status.in_(["pending", "processing", "failed"]),
+        )
+        .delete()
+    )
+
+    logger.info(
+        f"Cleared {records_deleted} sync records and {queue_deleted} queue items "
+        f"for user {user_id} target {target_name}"
+    )
+
+    return records_deleted + queue_deleted
 
 
 class OAuthUrlResponse(BaseModel):
@@ -386,8 +430,18 @@ async def create_database(
             database_type=request.database_type,
         )
 
+        # Check if switching to a different database - clear old sync records
+        old_database_id = config_dict.get("database_id")
+        new_database_id = result["database_id"]
+        if old_database_id and old_database_id != new_database_id:
+            logger.info(
+                f"User {current_user.id} switching from database {old_database_id} "
+                f"to {new_database_id} - clearing sync records"
+            )
+            _clear_sync_records_for_target(db, current_user.id, target_name)
+
         # Update integration config with database_id
-        config_dict["database_id"] = result["database_id"]
+        config_dict["database_id"] = new_database_id
         config_dict["database_title"] = result["title"]
         config.set_config(config_dict)
 
@@ -501,6 +555,15 @@ async def select_database(
 
         # Get database info
         db_info = await oauth_service.get_database_info(access_token, database_id)
+
+        # Check if switching to a different database - clear old sync records
+        old_database_id = config_dict.get("database_id")
+        if old_database_id and old_database_id != database_id:
+            logger.info(
+                f"User {current_user.id} switching from database {old_database_id} "
+                f"to {database_id} - clearing sync records"
+            )
+            _clear_sync_records_for_target(db, current_user.id, target_name)
 
         # Update integration config
         config_dict["database_id"] = database_id
