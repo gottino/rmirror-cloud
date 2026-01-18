@@ -186,6 +186,7 @@ class NotionSyncTarget(SyncTarget):
         Sync individual page text to Notion using database-tracked block IDs.
 
         The worker passes existing_block_id if this page was previously synced.
+        The worker also passes existing_notebook_page_id if the notebook was previously synced.
         If block ID exists, we update the existing block.
         If no block ID, we create a new one in the correct position.
         """
@@ -194,7 +195,8 @@ class NotionSyncTarget(SyncTarget):
             page_text = page_data.get("text", "")
             page_number = page_data.get("page_number")
             notebook_uuid = page_data.get("notebook_uuid")
-            existing_block_id = page_data.get("existing_block_id")  # From SyncRecord
+            existing_block_id = page_data.get("existing_block_id")  # From SyncRecord for page
+            existing_notebook_page_id = page_data.get("existing_notebook_page_id")  # From SyncRecord for notebook
 
             if not page_text.strip():
                 return SyncResult(
@@ -208,8 +210,15 @@ class NotionSyncTarget(SyncTarget):
                     error_message="Missing page_number in sync item data",
                 )
 
-            # Find the parent Notion page for this notebook
-            parent_page_id = await self.find_existing_page(notebook_uuid)
+            # Track whether we created the notebook page in this sync
+            notebook_created = False
+
+            # First, try to use the notebook page ID from SyncRecord (database is source of truth)
+            parent_page_id = existing_notebook_page_id
+
+            # Fall back to searching Notion if no SyncRecord exists
+            if not parent_page_id:
+                parent_page_id = await self.find_existing_page(notebook_uuid)
 
             if not parent_page_id:
                 # Auto-create the notebook page if it doesn't exist
@@ -228,6 +237,9 @@ class NotionSyncTarget(SyncTarget):
                         status=SyncStatus.FAILED,
                         error_message=f"Failed to create parent notebook page for {notebook_uuid}",
                     )
+
+                notebook_created = True
+                self.logger.info(f"Created new notebook page {parent_page_id} for {notebook_uuid}")
 
             # Convert text to Notion blocks
             blocks = self._text_to_blocks(page_text, max_blocks=50)
@@ -324,6 +336,8 @@ class NotionSyncTarget(SyncTarget):
                         "action": "page_updated" if block_deleted else "page_recreated",
                         "page_number": page_number,
                         "parent_page_id": parent_page_id,
+                        "notebook_created": notebook_created,
+                        "notebook_page_id": parent_page_id,
                     }
                 )
             else:
@@ -395,6 +409,8 @@ class NotionSyncTarget(SyncTarget):
                         "action": "page_created",
                         "page_number": page_number,
                         "parent_page_id": parent_page_id,
+                        "notebook_created": notebook_created,
+                        "notebook_page_id": parent_page_id,
                     }
                 )
 
@@ -428,6 +444,9 @@ class NotionSyncTarget(SyncTarget):
         """
         Find existing Notion page for a notebook UUID.
 
+        Uses the Notion database query API with a filter on the UUID property
+        for reliable lookups. Falls back to search API if query fails.
+
         Args:
             notebook_uuid: Notebook UUID to search for
 
@@ -435,20 +454,33 @@ class NotionSyncTarget(SyncTarget):
             Notion page ID if found, None otherwise
         """
         try:
-            # Search for pages in the database that contain the UUID in the title
-            # Since we store the UUID as part of the title like "Name [uuid]"
-            uuid_prefix = notebook_uuid[:8]
+            # Query the database directly by UUID property (most reliable)
+            response = self.client.databases.query(
+                database_id=self.database_id,
+                filter={
+                    "property": "UUID",
+                    "rich_text": {
+                        "equals": notebook_uuid
+                    }
+                }
+            )
 
-            # Use search API to find pages
-            response = self.client.search(
+            results = response.get("results", [])
+            if results:
+                page_id = results[0]["id"]
+                self.logger.info(f"Found existing page {page_id} for UUID {notebook_uuid}")
+                return page_id
+
+            # Fallback: search by UUID prefix in title (for legacy pages)
+            uuid_prefix = notebook_uuid[:8]
+            search_response = self.client.search(
                 query=uuid_prefix,
                 filter={"property": "object", "value": "page"}
             )
 
-            # Filter results to only those in our database
-            for result in response.get("results", []):
+            for result in search_response.get("results", []):
                 if result.get("parent", {}).get("database_id") == self.database_id:
-                    # Check if the title contains our UUID
+                    # Check if the title contains our UUID (legacy format)
                     title_prop = result.get("properties", {}).get("Name", {})
                     title_content = title_prop.get("title", [])
                     if title_content:
@@ -485,7 +517,7 @@ class NotionSyncTarget(SyncTarget):
 
             # Build page properties with all metadata
             properties = {
-                "Name": {"title": [{"text": {"content": f"{title} [{notebook_uuid[:8]}]"}}]},
+                "Name": {"title": [{"text": {"content": title}}]},
                 "UUID": {"rich_text": [{"text": {"content": notebook_uuid}}]},
                 "Path": {"rich_text": [{"text": {"content": full_path or ""}}]},
                 "Pages": {"number": len(pages)},
@@ -561,7 +593,7 @@ class NotionSyncTarget(SyncTarget):
 
             # Update properties with all metadata
             properties = {
-                "Name": {"title": [{"text": {"content": f"{title} [{notebook_uuid[:8]}]"}}]},
+                "Name": {"title": [{"text": {"content": title}}]},
                 "UUID": {"rich_text": [{"text": {"content": notebook_uuid}}]},
                 "Path": {"rich_text": [{"text": {"content": full_path or ""}}]},
                 "Pages": {"number": len(pages)},
@@ -749,7 +781,7 @@ class NotionSyncTarget(SyncTarget):
 
             # Build properties update
             properties = {
-                "Name": {"title": [{"text": {"content": f"{title} [{notebook_uuid[:8]}]"}}]},
+                "Name": {"title": [{"text": {"content": title}}]},
                 "UUID": {"rich_text": [{"text": {"content": notebook_uuid}}]},
                 "Path": {"rich_text": [{"text": {"content": full_path or ""}}]},
                 "Pages": {"number": page_count},

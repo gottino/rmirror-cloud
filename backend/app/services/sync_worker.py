@@ -212,7 +212,22 @@ class SyncWorker:
             db.commit()
             return
 
-        # Check if this page was previously synced to get the existing Notion block ID
+        # Check if the NOTEBOOK was previously synced to get the parent Notion page ID
+        # This prevents creating multiple Notion pages for the same notebook
+        notebook_record = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == queue_item.user_id,
+                SyncRecord.notebook_uuid == queue_item.notebook_uuid,
+                SyncRecord.item_type == 'notebook',
+                SyncRecord.target_name == queue_item.target_name,
+            )
+            .first()
+        )
+
+        existing_notebook_page_id = notebook_record.external_id if notebook_record else None
+
+        # Check if this PAGE was previously synced to get the existing Notion block ID
         # Use page_uuid as the primary identifier (reMarkable's unique page ID)
         existing_record = (
             db.query(SyncRecord)
@@ -238,7 +253,7 @@ class SyncWorker:
             db.commit()
             return
 
-        # Create sync item with existing block ID if available
+        # Create sync item with existing IDs if available
         metadata = json.loads(queue_item.metadata_json) if queue_item.metadata_json else {}
         sync_item = SyncItem(
             item_type=SyncItemType.PAGE_TEXT,
@@ -250,7 +265,8 @@ class SyncWorker:
                 'page_number': queue_item.page_number,
                 'text': page.ocr_text or '',
                 'notebook_name': notebook.visible_name if notebook else 'Unknown',
-                'existing_block_id': existing_block_id,  # Pass existing block ID
+                'existing_block_id': existing_block_id,  # Pass existing page block ID
+                'existing_notebook_page_id': existing_notebook_page_id,  # Pass existing notebook page ID
                 'user_id': queue_item.user_id,
                 **metadata
             },
@@ -300,6 +316,39 @@ class SyncWorker:
                     page_number=queue_item.page_number,
                 )
                 db.add(sync_record)
+
+            # If a new notebook page was created in Notion, also create a SyncRecord for it
+            # This prevents duplicate notebook pages on future syncs
+            result_metadata = result.metadata or {}
+            if result_metadata.get('notebook_created') and result_metadata.get('notebook_page_id'):
+                notebook_page_id = result_metadata['notebook_page_id']
+                # Check if notebook SyncRecord already exists (shouldn't happen but be safe)
+                existing_notebook_record = (
+                    db.query(SyncRecord)
+                    .filter(
+                        SyncRecord.user_id == queue_item.user_id,
+                        SyncRecord.notebook_uuid == queue_item.notebook_uuid,
+                        SyncRecord.item_type == 'notebook',
+                        SyncRecord.target_name == queue_item.target_name,
+                    )
+                    .first()
+                )
+                if not existing_notebook_record:
+                    notebook_sync_record = SyncRecord(
+                        user_id=queue_item.user_id,
+                        target_name=queue_item.target_name,
+                        item_type='notebook',
+                        item_id=str(notebook.id) if notebook else '',
+                        external_id=notebook_page_id,
+                        status='success',
+                        synced_at=datetime.utcnow(),
+                        notebook_uuid=queue_item.notebook_uuid,
+                    )
+                    db.add(notebook_sync_record)
+                    logger.info(
+                        f"📒 Created notebook sync record for {queue_item.notebook_uuid} "
+                        f"-> Notion page {notebook_page_id}"
+                    )
 
             # Mark queue item as completed
             queue_item.status = 'completed'
