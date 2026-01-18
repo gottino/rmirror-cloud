@@ -449,14 +449,22 @@ async def create_database(
             _clear_sync_records_for_target(db, current_user.id, target_name)
 
         # Update integration config with database_id
+        logger.warning(f"DEBUG: Before update - old_database_id={old_database_id}, new_database_id={new_database_id}")
         config_dict["database_id"] = new_database_id
         config_dict["database_title"] = result["title"]
         config.set_config(config_dict)
+        logger.warning(f"DEBUG: Called set_config with database_id={config_dict['database_id']}")
 
         # Enable integration now that database is configured
         config.is_enabled = True
 
         db.commit()
+        logger.warning(f"DEBUG: Committed to database")
+
+        # Verify the save worked
+        db.refresh(config)
+        verify_dict = config.get_config()
+        logger.warning(f"DEBUG: After refresh - database_id={verify_dict.get('database_id')}")
 
         logger.info(
             f"Created Notion {request.database_type} database '{result['title']}' for {target_name} integration (user {current_user.id})"
