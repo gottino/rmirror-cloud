@@ -18,7 +18,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 APP_NAME="rMirror"
-VERSION="1.4.0"
+VERSION="1.4.1"
 BUNDLE_ID="io.rmirror.agent"
 
 # Directories
@@ -46,9 +46,9 @@ if ! command -v sips &> /dev/null; then
     exit 1
 fi
 
-if ! python3 -c "import PyInstaller" &> /dev/null; then
-    echo -e "${YELLOW}  Installing PyInstaller...${NC}"
-    pip3 install pyinstaller
+if ! poetry run python -c "import PyInstaller" &> /dev/null; then
+    echo -e "${YELLOW}  Installing PyInstaller via Poetry...${NC}"
+    poetry add --group dev pyinstaller
 fi
 
 if ! command -v create-dmg &> /dev/null; then

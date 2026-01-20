@@ -303,6 +303,11 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 
 ## Recent Major Changes
 
+- **2026-01-20**: Released v1.4.1 with deleted pages fix + release automation
+  - Rebuilt, signed, notarized agent to include the deleted pages fix from Jan 12
+  - Added `b2-keychain.sh` for secure B2 credential storage in macOS Keychain
+  - Added `release.sh` for automated upload to B2 and dashboard update
+  - Added `/release-agent` slash command for full build-to-release pipeline
 - **2026-01-12**: Fixed deleted pages being included in sync
   - Pages in .content file with 'deleted': {'value': 1} are now filtered out
   - Fixes incorrect page counts (e.g., 511 vs 504 for notebooks with deleted pages)
