@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Documentation Update (2026-01-21)
+- **Comprehensive documentation refresh** for January 2026 state
+- **Updated README.md** with current architecture and features
+- **Updated docs/architecture.md** with new data flows and diagrams
+- **Updated docs/api/backend-api.md** with new endpoints (quota, metadata sync, agent token)
+- **Updated docs/README.md** with production-ready component statuses
+
+#### Agent v1.4.1 Release (2026-01-12)
+- **Deleted pages filtering** - skip pages marked as deleted in .content files
+- **UUID truncation bug fix** - use `removesuffix(".rm")` instead of `rstrip(".rm")`
+- **Automation scripts** for release management
+
+#### Two-Phase Initial Sync (2026-01-08)
+- **Sequential notebook creation** - create Notion pages first before queuing page blocks
+- **Row-level queue locking** with `FOR UPDATE SKIP LOCKED` to prevent duplicates
+- **Batch status update** - mark all items as 'processing' before processing loop
+- **Database-driven notebook deduplication** - track notebook page ID in SyncRecord
+
+#### Metadata-Only Sync (2026-01-06)
+- **NOTEBOOK_METADATA sync item type** for fast metadata updates
+- **50-100x faster sync** (~100ms vs ~5s) for metadata-only changes
+- **Notion property updates** without content block modifications
+- **Triggered on .metadata file changes** from reMarkable
+
+#### Quota System Phase 1 (2026-01-05)
+- **Free tier limits** - 30 pages/month OCR quota
+- **Graceful degradation** - accept uploads when quota exhausted, defer OCR
+- **PENDING_QUOTA page status** - pages awaiting quota for OCR processing
+- **HTTP 402 error responses** with quota details
+- **Retroactive processing** - newest pages first when quota resets
+- **Email notifications** at 90% and 100% quota usage
+- **Dashboard quota display** with color-coded status indicators
+- **Agent quota display** in menu bar and web UI
+
+#### Long-Lived Agent Tokens (2026-01-04)
+- **30-day JWT tokens** for agent authentication
+- **Token exchange endpoint** `/auth/agent-token` - exchange Clerk token for agent token
+- **Secure callback validation** - only localhost callbacks allowed
+- **System keychain storage** for secure token persistence
+
+#### User-Aware Rate Limiting (2026-01-03)
+- **Per-user rate limits** for authenticated requests (300/min)
+- **Per-IP rate limits** for unauthenticated requests (30/min)
+- **Auth endpoint limits** (10/min)
+- **Metadata sync limits** (100/min - higher for lightweight operations)
+
 #### OCR Deduplication System (2025-12-26)
 - **SHA-256 file hashing** for .rm files to track content changes
 - **Smart OCR deduplication** - skips OCR processing for unchanged files
@@ -269,24 +315,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ✅ Development setup guides
 - ✅ Centralized documentation structure
 
+**Mac Agent v1.4.1** (January 2026)
+- ✅ Python background service with menu bar integration
+- ✅ Real-time file watching with watchdog
+- ✅ Intelligent sync queue with batching
+- ✅ Initial sync for catch-up scenarios
+- ✅ Selective notebook sync configuration
+- ✅ Quota display with color-coded status
+- ✅ 30-day token authentication
+
+**Web Dashboard** (January 2026)
+- ✅ Notebook browsing interface with folder navigation
+- ✅ Page viewing with OCR text and PDF preview
+- ✅ Quota management with upgrade CTAs
+- ✅ Integration configuration (Notion OAuth)
+- ✅ Clerk authentication (Google OAuth)
+- ✅ Mobile-responsive design
+
+**Quota System Phase 1** (January 2026)
+- ✅ 30 pages/month free tier
+- ✅ Graceful degradation
+- ✅ Email notifications
+- ✅ Dashboard and agent display
+
 ### Upcoming Milestones
 
-**Mac Agent** (In Progress)
-- Local reMarkable tablet sync
-- Python background service
-- File watching and automatic upload
+**Stripe Integration** (Phase 2)
+- Pro tier (500 pages/month)
+- Enterprise tier (unlimited)
+- Payment processing and billing
 
-**Web Dashboard** (Planned)
-- Notebook browsing interface
-- Todo management UI
-- Integration configuration
-- Search and filtering
+**Readwise Integration** (Planned)
+- Highlight sync to Readwise
+- Two-way sync support
 
 ---
 
 ## Version History
 
-- **Unreleased** - Current development version with todo extraction and Notion integration
+- **Unreleased** - Production-ready system with quota management, metadata sync, and full dashboard
+- **Agent v1.4.1** - Production release with deleted pages filtering and bug fixes
 - **0.1.0** - Initial development phase with core backend and OCR processing
 
 ---
