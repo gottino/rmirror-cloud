@@ -40,6 +40,12 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - `integration_configs`: User integration settings (encrypted credentials)
 
 ## Recent Major Changes
+- **2026-01-18**: Fixed initial sync race conditions causing duplicate Notion pages/blocks
+  - Root cause: 2 uvicorn workers = 2 SyncWorker instances running in parallel
+  - Fix 1: Two-phase initial sync - create notebooks FIRST (sequential), then queue pages
+  - Fix 2: Row-level queue locking with `FOR UPDATE SKIP LOCKED` + batch status update
+  - Fix 3: Direct HTTP for Notion queries (SDK 2025-09-03 `databases.query()` broken)
+  - Files: `app/services/initial_sync.py`, `app/services/sync_worker.py`, `app/integrations/notion_sync.py`
 - **2026-01-17**: Implemented automatic initial Notion sync when integration is connected
   - New `app/services/initial_sync.py`: Queues all OCR-completed pages for Notion sync
   - Triggers automatically when user creates or selects a Notion database
@@ -171,6 +177,9 @@ poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - **Env**: `/var/www/rmirror-cloud/backend/.env`
 
 ## Gotchas
+- **Uvicorn workers**: With `--workers 2`, there are 2 independent SyncWorker instances - use database-level coordination (status flags, row locks)
+- **Queue race conditions**: `FOR UPDATE` locks released on commit - must mark ALL items as 'processing' before processing loop
+- **Notion SDK 2025-09-03**: `databases.query()` removed, `data_sources.query()` broken - use direct HTTP with API 2022-06-28
 - SQLAlchemy sessions must be closed in finally blocks (especially in background workers)
 - Notion API 2025-09-03 requires data source API for adding properties
 - Content hash UNIQUE constraint requires page identifier for upsert queries

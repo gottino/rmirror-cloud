@@ -2,6 +2,8 @@
 
 Complete API reference for the rMirror Cloud backend service.
 
+**Last Updated:** January 2026
+
 **Base URL:** `http://your-server/v1`
 
 **Authentication:** Most endpoints require Bearer token authentication. Include the token in the `Authorization` header:
@@ -15,12 +17,13 @@ Authorization: Bearer <your_token>
 
 1. [Authentication](#authentication)
 2. [User Management](#user-management)
-3. [Notebooks](#notebooks)
-4. [Processing & OCR](#processing--ocr)
-5. [Todos](#todos)
-6. [Agent Management](#agent-management)
-7. [Integrations](#integrations)
-8. [Sync](#sync)
+3. [Quota Management](#quota-management)
+4. [Notebooks](#notebooks)
+5. [Processing & OCR](#processing--ocr)
+6. [Todos](#todos)
+7. [Agent Management](#agent-management)
+8. [Integrations](#integrations)
+9. [Sync](#sync)
 
 ---
 
@@ -119,6 +122,57 @@ Update user profile information.
   "email": "newemail@example.com"
 }
 ```
+
+---
+
+## Quota Management
+
+### Get Quota Status
+
+Get current quota status for the authenticated user.
+
+**Endpoint:** `GET /v1/quota/status`
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response:**
+```json
+{
+  "quota_type": "ocr_pages",
+  "used": 25,
+  "limit": 30,
+  "remaining": 5,
+  "percentage_used": 83.33,
+  "is_exhausted": false,
+  "reset_at": "2026-02-01T00:00:00Z",
+  "period_start": "2026-01-01T00:00:00Z"
+}
+```
+
+**Response Fields:**
+- `quota_type`: Type of quota (currently only "ocr_pages")
+- `used`: Number of pages processed this period
+- `limit`: Total quota limit for the period
+- `remaining`: Pages remaining (limit - used)
+- `percentage_used`: Percentage of quota consumed (0-100)
+- `is_exhausted`: Boolean indicating if quota is fully consumed
+- `reset_at`: Timestamp when quota resets (start of next month)
+- `period_start`: Timestamp when current quota period began
+
+**Subscription Tiers:**
+- **Free**: 30 pages/month
+- **Pro** (planned): Higher limits with Stripe integration
+- **Enterprise** (planned): Custom limits
+
+**Quota Behavior:**
+When quota is exhausted:
+1. File uploads are still accepted
+2. PDFs are generated and stored
+3. OCR processing is deferred
+4. Pages are marked with `pending_quota` status
+5. Integration syncs are blocked
+6. Dashboard shows "OCR Pending" state
+7. Retroactive processing occurs when quota resets (newest pages first)
 
 ---
 
@@ -267,7 +321,7 @@ Upload and parse a `.content` file to update the notebook_pages mapping table. T
 
 Process a reMarkable `.rm` file: convert to PDF, extract text via OCR, and save to database. This endpoint uses SHA-256 file hashing to avoid re-processing unchanged files.
 
-**Endpoint:** `POST /processing/rm-file`
+**Endpoint:** `POST /v1/processing/rm-file`
 
 **Headers:** `Authorization: Bearer <token>`
 
@@ -276,7 +330,7 @@ Process a reMarkable `.rm` file: convert to PDF, extract text via OCR, and save 
   - `rm_file`: The `.rm` file from reMarkable tablet (required)
   - `metadata_file`: Optional `.metadata` JSON file for notebook metadata
 
-**Response:**
+**Response (Success):**
 ```json
 {
   "success": true,
@@ -288,29 +342,123 @@ Process a reMarkable `.rm` file: convert to PDF, extract text via OCR, and save 
     "last_modified": "2025-12-26T12:00:00"
   },
   "notebook_id": 123,
-  "page_id": 456
+  "page_id": 456,
+  "status": "completed"
+}
+```
+
+**Response (Quota Exhausted):**
+```json
+{
+  "success": true,
+  "extracted_text": "",
+  "page_count": 1,
+  "metadata": {
+    "visible_name": "My Notebook",
+    "document_type": "DocumentType",
+    "last_modified": "2025-12-26T12:00:00"
+  },
+  "notebook_id": 123,
+  "page_id": 456,
+  "status": "pending_quota",
+  "message": "Upload successful, OCR deferred due to quota limit"
 }
 ```
 
 **Behavior:**
-- **New file**: Calculates hash, runs OCR, stores hash and text
+- **New file**: Calculates hash, runs OCR (if quota available), stores hash and text
 - **Unchanged file**: Compares hash, skips OCR, returns cached text (90% cost reduction)
-- **Modified file**: Detects hash change, runs OCR, updates hash and text
+- **Modified file**: Detects hash change, runs OCR (if quota available), updates hash and text
 - **Failed OCR**: Retries OCR even if hash matches
+- **Quota exhausted**: Accepts upload, generates PDF, defers OCR, sets status to `pending_quota`
 
 **What it does:**
 1. Accepts a `.rm` file (and optional `.metadata` file)
-2. Calculates SHA-256 hash and checks if file changed
-3. Converts .rm → SVG → PDF (if needed)
-4. Sends PDF to Claude Vision for OCR (if needed)
-5. Creates/updates Notebook and Page records in database
-6. Stores `.rm` file and PDF in storage
-7. Returns extracted text with database IDs
+2. Checks quota status (does not block upload if exhausted)
+3. Calculates SHA-256 hash and checks if file changed
+4. Converts .rm → SVG → PDF
+5. Sends PDF to Claude Vision for OCR (if quota available and file changed)
+6. Consumes quota only after successful OCR
+7. Creates/updates Notebook and Page records in database
+8. Stores `.rm` file and PDF in storage
+9. Returns extracted text with database IDs
 
 **Performance benefits:**
 - Avoids redundant OCR for unchanged pages
 - 90-95% cost reduction for OCR API calls
 - 85-90% faster sync operations
+
+**Page Status Values:**
+- `not_synced`: Page registered but content not uploaded
+- `pending`: Content uploaded, OCR queued
+- `completed`: OCR finished successfully
+- `failed`: OCR processing failed
+- `pending_quota`: Quota exhausted, OCR deferred until quota resets
+
+### Update Notebook Metadata (Lightweight Sync)
+
+Lightweight metadata-only sync for notebooks. Updates Notion properties without processing content. This is 50-100x faster than full content sync (~100ms vs ~5s).
+
+**Endpoint:** `POST /v1/processing/metadata/update`
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "notebook_uuid": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+  "visible_name": "Meeting Notes",
+  "last_opened_at": "2026-01-15T10:30:00Z",
+  "last_modified_at": "2026-01-15T10:30:00Z",
+  "page_count": 15,
+  "full_path": "Work/Projects/Meeting Notes"
+}
+```
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "message": "Metadata updated successfully",
+  "notebook_uuid": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+  "sync_type": "NOTEBOOK_METADATA"
+}
+```
+
+**Response (Notebook Not Yet Synced):**
+```json
+{
+  "success": true,
+  "message": "Skipped: Notebook not yet synced to Notion",
+  "notebook_uuid": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+  "sync_type": "SKIPPED"
+}
+```
+
+**What it does:**
+1. Accepts notebook metadata without content
+2. Checks if notebook exists and has been synced to Notion
+3. If not synced, returns SKIPPED (no error)
+4. If synced, updates only Notion properties:
+   - Title (visible_name)
+   - Last Opened
+   - Last Modified
+   - Page Count
+   - Full Path
+5. Does not process pages or consume OCR quota
+6. Returns immediately after property update
+
+**Use Cases:**
+- Periodic metadata refresh from agent (every 5 minutes)
+- Update notebook properties after reMarkable changes
+- Keep Notion properties in sync without triggering full OCR
+- Lightweight sync for frequently accessed notebooks
+
+**Performance:**
+- ~100ms response time (vs ~5s for full sync)
+- No OCR processing
+- No quota consumption
+- Higher rate limit (100/minute vs 10/minute for content sync)
 
 ### Trigger OCR Processing
 
@@ -547,6 +695,53 @@ Track when a user downloads the macOS agent. Updates onboarding state and tracks
 - Updates onboarding state from `signed_up` to `agent_downloaded`
 - Used by download page to track onboarding progress
 
+### Exchange Clerk Token for Agent Token
+
+Exchange a short-lived Clerk session token for a long-lived agent token. Used by the macOS agent to authenticate API requests.
+
+**Endpoint:** `POST /v1/auth/agent-token`
+
+**Headers:** `Authorization: Bearer <clerk_session_token>`
+
+**Request Body:** None (token provided in Authorization header)
+
+**Response:**
+```json
+{
+  "access_token": "eyJhbGc...",
+  "token_type": "bearer",
+  "expires_in": 2592000,
+  "user_id": "user_abc123"
+}
+```
+
+**Response Fields:**
+- `access_token`: JWT token valid for 30 days
+- `token_type`: Always "bearer"
+- `expires_in`: Token lifetime in seconds (2592000 = 30 days)
+- `user_id`: Clerk user ID associated with the token
+
+**Security:**
+- Only accepts tokens from localhost callbacks (`http://localhost:*`)
+- Validates Clerk session token with Clerk API
+- Generates JWT signed with backend secret key
+- Token stored securely in system keychain by agent
+
+**What it does:**
+1. Accepts Clerk session token from OAuth callback
+2. Validates token with Clerk API
+3. Generates 30-day JWT for agent use
+4. Returns long-lived token for background sync operations
+
+**Use Cases:**
+- Initial agent authentication after Clerk OAuth flow
+- Token renewal when agent token expires
+- Switching between user accounts in agent
+
+**Error Responses:**
+- `401 Unauthorized`: Invalid or expired Clerk token
+- `403 Forbidden`: Token not from localhost callback
+
 ### Trigger Agent (Future)
 
 *Note: These endpoints are planned for future releases when agent triggering is implemented.*
@@ -635,6 +830,66 @@ Test if the Notion integration is working.
 ---
 
 ## Sync
+
+### Trigger Initial Sync
+
+Trigger initial sync for a user. Creates notebook pages in Notion first, then queues pages for processing. This two-phase approach prevents duplicate page creation.
+
+**Endpoint:** `POST /v1/sync/initial`
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "page_limit": 30,
+  "force": false
+}
+```
+
+**Parameters:**
+- `page_limit` (optional): Maximum number of pages to sync (default: 30, matches free tier quota)
+- `force` (optional): Force sync even if user has already done initial sync (default: false)
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Initial sync started",
+  "notebooks_queued": 25,
+  "pages_to_process": 350,
+  "page_limit_applied": 30
+}
+```
+
+**What it does:**
+1. Checks if user has Notion integration configured
+2. Checks if user has already completed initial sync (unless `force=true`)
+3. Gets all notebooks from database (sorted by last_modified, newest first)
+4. **Phase 1**: Creates empty notebook pages in Notion for all notebooks
+   - Prevents duplicate page creation
+   - Establishes Notion page IDs upfront
+   - Stores mapping in `sync_records` table
+5. **Phase 2**: Queues individual pages for OCR processing
+   - Respects `page_limit` parameter
+   - Processes newest pages first
+   - Pages beyond limit are registered but not processed (status: `not_synced`)
+6. Marks user's initial sync as complete
+7. Returns queue statistics
+
+**Two-Phase Sync Prevents Duplicates:**
+- Old approach: Queue notebooks → worker creates Notion pages → race condition → duplicates
+- New approach: Create Notion pages first → queue pages → worker updates existing pages → no duplicates
+
+**Use Cases:**
+- First-time setup after installing agent and configuring Notion
+- Re-syncing after clearing Notion workspace
+- Catch-up sync after being offline for extended period
+
+**Error Responses:**
+- `400 Bad Request`: Notion integration not configured
+- `409 Conflict`: Initial sync already completed (use `force=true` to override)
+- `402 Payment Required`: Quota exhausted (accepts request but defers OCR)
 
 ### Trigger Notebook Sync
 
@@ -804,15 +1059,33 @@ All endpoints return appropriate HTTP status codes:
 - `204` - No Content (successful deletion)
 - `400` - Bad Request (invalid parameters)
 - `401` - Unauthorized (missing or invalid token)
+- `402` - Payment Required (quota exceeded)
 - `403` - Forbidden (insufficient permissions)
 - `404` - Not Found
+- `409` - Conflict (resource already exists or operation not allowed)
 - `422` - Validation Error
+- `429` - Too Many Requests (rate limit exceeded)
 - `500` - Internal Server Error
 
 **Error Response Format:**
 ```json
 {
   "detail": "Error message describing what went wrong"
+}
+```
+
+**Quota Exceeded Error (HTTP 402):**
+```json
+{
+  "detail": "OCR quota exceeded",
+  "quota": {
+    "used": 30,
+    "limit": 30,
+    "remaining": 0,
+    "percentage_used": 100.0,
+    "is_exhausted": true,
+    "reset_at": "2026-02-01T00:00:00Z"
+  }
 }
 ```
 
@@ -829,21 +1102,59 @@ All endpoints return appropriate HTTP status codes:
 }
 ```
 
+**Rate Limit Error (HTTP 429):**
+```json
+{
+  "detail": "Rate limit exceeded. Try again in 60 seconds."
+}
+```
+
 ---
 
 ## Rate Limiting
 
-API endpoints are subject to rate limiting:
-- Authentication endpoints: 5 requests per minute
-- Data retrieval endpoints: 100 requests per minute
-- Processing endpoints: 10 requests per minute
+API endpoints are subject to rate limiting to ensure fair usage and system stability.
 
-Rate limit headers are included in responses:
+**Rate Limits by Endpoint Type:**
+
+| Endpoint Type | Rate Limit | Scope |
+|--------------|------------|-------|
+| Authenticated requests (default) | 300/minute | Per user |
+| Unauthenticated requests | 30/minute | Per IP address |
+| Authentication endpoints (`/auth/*`) | 10/minute | Per IP address |
+| Processing endpoints (`/processing/rm-file`) | 10/minute | Per user |
+| Metadata sync (`/processing/metadata/update`) | 100/minute | Per user |
+| OCR processing (`/processing/notebooks/*/ocr`) | 10/minute | Per user |
+
+**Rate Limit Headers:**
+
+All responses include rate limit information in headers:
+
 ```
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1700000000
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 295
+X-RateLimit-Reset: 1737475200
 ```
+
+- `X-RateLimit-Limit`: Maximum requests allowed in the time window
+- `X-RateLimit-Remaining`: Requests remaining in current window
+- `X-RateLimit-Reset`: Unix timestamp when the rate limit resets
+
+**Rate Limit Exceeded Response:**
+
+When rate limit is exceeded, the API returns HTTP 429:
+
+```json
+{
+  "detail": "Rate limit exceeded. Try again in 45 seconds."
+}
+```
+
+**Best Practices:**
+- Implement exponential backoff when receiving 429 responses
+- Monitor `X-RateLimit-Remaining` header to avoid hitting limits
+- Use metadata sync endpoint for frequent updates (higher limit)
+- Batch operations when possible to reduce request count
 
 ---
 

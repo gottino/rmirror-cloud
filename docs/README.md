@@ -10,8 +10,10 @@ rMirror Cloud is a comprehensive cloud service that brings your reMarkable table
 - 📓 **Cloud Notebook Storage** - Sync and store your reMarkable notebooks
 - 🔍 **OCR Processing** - Extract text from handwritten notes using Claude Vision API
 - ✅ **Smart Todo Extraction** - Automatically detect and manage checkbox todo items
-- 🔄 **Notion Integration** - Sync notebooks to Notion with markdown formatting
-- 📱 **Mac Agent** - Local agent for seamless reMarkable sync
+- 🔄 **Notion Integration** - Full production sync with metadata-only mode for speed
+- 📊 **Quota Management** - Free tier (30 pages/month) with graceful degradation
+- 🔐 **Clerk Authentication** - Secure OAuth via Google, GitHub, and email
+- 📱 **Mac Agent** - Local agent for seamless reMarkable sync with menu bar UI
 - 🌐 **RESTful API** - Complete API for all platform features
 
 ## Project Components
@@ -19,8 +21,8 @@ rMirror Cloud is a comprehensive cloud service that brings your reMarkable table
 The rMirror Cloud platform consists of three main components:
 
 1. **Backend** (`/backend`) - FastAPI-based REST API and core services
-2. **Agent** (`/agent`) - Mac application for local reMarkable tablet sync
-3. **Dashboard** (`/dashboard`) - Web-based user interface (coming soon)
+2. **Agent** (`/agent`) - macOS application for local reMarkable tablet sync
+3. **Dashboard** (`/dashboard`) - Next.js web-based user interface
 
 ## Documentation Structure
 
@@ -66,21 +68,30 @@ The rMirror Cloud platform consists of three main components:
 
 ## Quick Start
 
-### Prerequisites
+### For End Users
+
+1. **Sign up** at https://rmirror.io
+2. **Download the agent** from the dashboard (macOS only)
+3. **Connect your reMarkable** and start syncing
+
+### For Developers
+
+#### Prerequisites
 
 - Python 3.11+
 - Poetry for Python dependency management
+- Node.js 18+ (for dashboard development)
 - Git
 - (Optional) Docker for containerized deployment
 
-### 1. Clone the Repository
+#### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/gottino/rmirror-cloud.git
 cd rmirror-cloud
 ```
 
-### 2. Backend Setup
+#### 2. Backend Setup
 
 ```bash
 cd backend
@@ -90,55 +101,46 @@ poetry install
 
 # Create environment file
 cp .env.example .env
-# Edit .env with your configuration (especially CLAUDE_API_KEY)
+# Edit .env with your configuration (especially CLAUDE_API_KEY and CLERK_SECRET_KEY)
 
 # Run database migrations
 poetry run alembic upgrade head
 
 # Start the development server
-poetry run uvicorn app.main:app --reload
+poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The API will be available at http://localhost:8000
 
 **Interactive API docs:** http://localhost:8000/docs
 
-### 3. Create Your First User
+#### 3. Quick Development Start
+
+Use the `/dev` slash command in Claude Code for automated local setup:
 
 ```bash
-# Register a new user
-curl -X POST http://localhost:8000/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "your@email.com",
-    "password": "secure-password",
-    "full_name": "Your Name"
-  }'
+# From repository root with Claude Code
+/dev
+# This starts backend, dashboard, and agent in parallel
 ```
 
-### 4. Test Todo Extraction
+#### 4. Dashboard Setup (Optional)
 
 ```bash
-# Login and get token
-TOKEN=$(curl -X POST http://localhost:8000/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"your@email.com","password":"secure-password"}' \
-  | jq -r '.access_token')
+cd dashboard
 
-# List notebooks
-curl http://localhost:8000/v1/notebooks/ \
-  -H "Authorization: Bearer $TOKEN"
+# Install dependencies
+npm install
 
-# Extract todos from a notebook
-curl -X POST http://localhost:8000/v1/todos/extract \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"notebook_ids":[1]}'
+# Create environment file
+cp .env.example .env.local
+# Configure NEXT_PUBLIC_API_URL and Clerk keys
 
-# View extracted todos
-curl http://localhost:8000/v1/todos/ \
-  -H "Authorization: Bearer $TOKEN"
+# Start development server
+npm run dev
 ```
+
+Dashboard available at http://localhost:3000
 
 ---
 
@@ -154,8 +156,10 @@ The backend is a FastAPI application that provides the core API services.
 - FastAPI - Modern Python web framework
 - SQLAlchemy - ORM for database access
 - Alembic - Database migrations
-- Claude API - OCR processing
+- Claude Vision API - OCR processing
 - Notion API - Integration
+- Clerk - Authentication
+- Resend - Email notifications
 
 **Documentation:**
 - [Backend README](../backend/README.md) - Component overview
@@ -166,31 +170,38 @@ The backend is a FastAPI application that provides the core API services.
 - `test_todo_extraction.py` - Test todo extraction feature
 - `test_notion_sync.py` - Test Notion integration
 
-### Agent (Mac)
+### Agent (macOS)
 
 The agent runs locally on macOS and syncs reMarkable tablets with the cloud backend.
 
 **Location:** `/agent`
 
-**Status:** Beta - Core functionality complete
+**Status:** 🟢 Production Ready - v1.4.1
 
 **Key Features:**
+- Menu bar app with real-time status
 - Automatic file watching with watchdog library
 - Real-time sync to cloud backend
 - Intelligent sync queue with batching and deduplication
 - Exponential backoff retry logic for failed uploads
-- Web UI for configuration and monitoring (localhost:5555)
+- Web UI for configuration and monitoring (localhost:9090)
+- Quota display with color-coded status (green/orange/red)
 - CLI interface with foreground/background modes
 - Support for .rm, .metadata, and .content files
-- JWT authentication with cloud backend
+- Secure token storage via macOS keychain
 
 **Installation:**
+
+For end users:
+1. Download the `.app` bundle from https://rmirror.io after signup
+2. Move to Applications folder
+3. Launch and sign in
+
+For developers:
 ```bash
 cd agent
 poetry install
-cp config.example.yaml ~/.config/rmirror/config.yaml
-# Edit config with your credentials
-poetry run python -m app.main --foreground
+./build_macos.sh  # Build .app bundle
 ```
 
 See [agent/README.md](../agent/README.md) for detailed setup instructions.
@@ -201,13 +212,37 @@ The dashboard provides a web-based interface for managing notebooks, todos, and 
 
 **Location:** `/dashboard`
 
-**Status:** Planned
+**Status:** 🟢 Production Ready
 
-**Planned Features:**
-- Notebook browsing and search
-- Todo management interface
-- Integration configuration
-- User settings
+**Deployed at:** https://rmirror.io (Vercel)
+
+**Key Technologies:**
+- Next.js 14 (App Router)
+- TypeScript
+- Tailwind CSS
+- Clerk Authentication
+- React Server Components
+
+**Features:**
+- **Notebook Browsing** - View all synced notebooks with search and filtering
+- **Page Viewing** - View individual pages with OCR text and PDF preview
+- **Quota Management** - Real-time quota display with color-coded status
+  - Green: < 75% used
+  - Orange: 75-100% used
+  - Red: 100% used (shows upgrade CTA)
+- **Integration Management** - Connect and configure Notion integration
+- **Authentication** - OAuth via Google, GitHub, or email (Clerk)
+- **Responsive Design** - Works on desktop and mobile
+- **Moleskine-inspired UI** - Warm, paper-like aesthetic
+
+**Development:**
+```bash
+cd dashboard
+npm install
+npm run dev  # Runs on localhost:3000
+```
+
+See [dashboard/README.md](../dashboard/README.md) for detailed documentation.
 
 ---
 
@@ -245,6 +280,20 @@ GET    /v1/integrations/notion/test      # Test connection
 POST   /v1/sync/notebook/{id}            # Sync to Notion
 ```
 
+### Quota Management
+```bash
+GET    /v1/quota/usage                   # Get quota usage
+GET    /v1/quota/status                  # Get quota status
+POST   /v1/quota/consume                 # Consume quota (internal)
+```
+
+**Quota Behavior:**
+- Free tier: 30 OCR pages per month
+- Uploads accepted even when quota exhausted (OCR deferred)
+- Pages set to `PENDING_QUOTA` status when quota exceeded
+- Email notifications at 90% and 100% usage
+- HTTP 402 returned for operations requiring quota
+
 See the [Complete API Reference](api/backend-api.md) for detailed documentation.
 
 ---
@@ -263,18 +312,24 @@ The rMirror Cloud platform follows a client-server architecture:
          ▼
 ┌─────────────────┐         HTTPS         ┌─────────────────┐
 │   Mac Agent     │◄──────────────────────►│  Cloud Backend  │
-│   (Local)       │                        │   (FastAPI)     │
-└─────────────────┘                        └────────┬────────┘
-                                                    │
-         ┌──────────────────────────────────────────┼────────┐
-         │                                          │        │
-         ▼                                          ▼        ▼
-┌─────────────────┐                        ┌──────────────────┐
-│  Web Dashboard  │                        │   Integrations   │
-│   (React)       │                        │  - Notion        │
-└─────────────────┘                        │  - Others...     │
-                                           └──────────────────┘
+│   (Local)       │    Clerk Auth          │   (FastAPI)     │
+│  - Menu bar UI  │    Quota checks        │  - OCR + Claude │
+│  - File watcher │                        │  - PostgreSQL   │
+└─────────────────┘                        │  - Quota mgmt   │
+         ▲                                 └────────┬────────┘
+         │                                          │
+         │                                          │
+         │       ┌──────────────────────────────────┼────────┐
+         │       │                                  │        │
+         │       ▼                                  ▼        ▼
+         │ ┌─────────────────┐            ┌──────────────────┐
+         └─┤  Web Dashboard  │            │   Integrations   │
+           │   (Next.js)     │            │  - Notion        │
+           │  - Vercel       │            │  - Readwise (*)  │
+           └─────────────────┘            └──────────────────┘
 ```
+
+*(\*) = Planned*
 
 See [architecture.md](architecture.md) for detailed architecture documentation.
 
@@ -282,18 +337,42 @@ See [architecture.md](architecture.md) for detailed architecture documentation.
 
 ## Development Workflow
 
+### Using Claude Code Slash Commands
+
+This project includes custom slash commands for common workflows:
+
+- `/dev` - Start all services (backend, dashboard, agent) for local development
+- `/test-backend` - Run backend tests with coverage
+- `/test-agent` - Run agent tests
+- `/migrate` - Create and apply database migrations
+- `/commit-push` - Commit and push changes with conventional commits
+- `/create-task` - Create tasks in project management
+
 ### 1. Feature Development
 
 ```bash
 # Create feature branch
 git checkout -b feature/your-feature-name
 
-# Make changes to backend
+# Start all services with Claude Code
+/dev
+
+# Or manually start individual components:
+# Terminal 1 - Backend
 cd backend
-poetry run uvicorn app.main:app --reload
+poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Terminal 2 - Dashboard (optional)
+cd dashboard
+npm run dev
+
+# Terminal 3 - Agent (optional)
+cd agent
+poetry run python -m app.main --foreground --debug
 
 # Run tests
-poetry run pytest
+poetry run pytest  # Backend
+npm test          # Dashboard
 
 # Commit changes
 git add .
@@ -303,6 +382,10 @@ git commit -m "feat: add your feature"
 ### 2. Database Migrations
 
 ```bash
+# Using Claude Code slash command
+/migrate
+
+# Or manually:
 cd backend
 
 # Create migration after model changes
@@ -312,6 +395,8 @@ poetry run alembic revision --autogenerate -m "Description"
 
 # Apply migration
 poetry run alembic upgrade head
+
+# CRITICAL: Always use `poetry run alembic` (never bare `alembic`)
 ```
 
 ### 3. Deployment
@@ -331,7 +416,7 @@ See [GitHub Actions Deployment](deployment/github-actions.md) for details.
 ### Development (.env)
 
 ```bash
-# Database
+# Database (SQLite for local, PostgreSQL for production)
 DATABASE_URL=sqlite:///./rmirror.db
 
 # Security
@@ -342,9 +427,10 @@ DEBUG=true  # Enables development mode authentication
 # Claude API (for OCR)
 CLAUDE_API_KEY=your-claude-api-key
 
-# Clerk Authentication
-CLERK_SECRET_KEY=your-dev-clerk-key
-CLERK_WEBHOOK_SECRET=your-webhook-secret
+# Clerk Authentication (get from https://clerk.com)
+CLERK_SECRET_KEY=sk_test_your_dev_key
+CLERK_WEBHOOK_SECRET=whsec_your_webhook_secret
+CLERK_PUBLISHABLE_KEY=pk_test_your_publishable_key  # For dashboard
 
 # Email Service (Resend)
 RESEND_API_KEY=re_your_dev_api_key
@@ -353,12 +439,17 @@ RESEND_FROM_EMAIL=onboarding@resend.dev  # Use this for testing
 # Notion (optional for testing)
 NOTION_CLIENT_ID=your-client-id
 NOTION_CLIENT_SECRET=your-client-secret
+NOTION_REDIRECT_URI=http://localhost:8000/v1/integrations/notion/callback
+
+# Quota Settings (optional, defaults shown)
+DEFAULT_QUOTA_LIMIT=30  # Free tier limit
+QUOTA_WARNING_THRESHOLD=0.9  # Send warning at 90%
 ```
 
 ### Production (.env)
 
 ```bash
-# Database (PostgreSQL recommended for production)
+# Database (PostgreSQL for production)
 DATABASE_URL=postgresql://user:password@localhost:5432/rmirror
 
 # Security (use strong random key)
@@ -372,15 +463,20 @@ CLAUDE_API_KEY=your-production-claude-api-key
 # Clerk Authentication
 CLERK_SECRET_KEY=sk_live_your_production_key
 CLERK_WEBHOOK_SECRET=whsec_your_webhook_secret
+CLERK_PUBLISHABLE_KEY=pk_live_your_publishable_key
 
 # Email Service (Resend)
 RESEND_API_KEY=re_your_production_api_key
-RESEND_FROM_EMAIL=noreply@yourdomain.com  # Use verified domain
+RESEND_FROM_EMAIL=noreply@rmirror.io  # Use verified domain
 
 # Notion
 NOTION_CLIENT_ID=your-production-client-id
 NOTION_CLIENT_SECRET=your-production-client-secret
-NOTION_REDIRECT_URI=https://yourdomain.com/v1/integrations/notion/callback
+NOTION_REDIRECT_URI=https://api.rmirror.io/v1/integrations/notion/callback
+
+# Quota Settings
+DEFAULT_QUOTA_LIMIT=30  # Free tier
+QUOTA_WARNING_THRESHOLD=0.9  # Send warning at 90%
 ```
 
 **See also:**
@@ -468,8 +564,22 @@ This project is proprietary software. All rights reserved.
 
 ## Project Status
 
-🟢 **Backend API** - Production ready
-🟢 **Mac Agent** - Beta (core functionality complete)
-🔴 **Web Dashboard** - Planned
+🟢 **Backend API** - Production ready (deployed on Hetzner)
+🟢 **macOS Agent** - Production ready v1.4.1 (available at https://rmirror.io)
+🟢 **Web Dashboard** - Production ready (deployed on Vercel)
 
-Last updated: December 2025
+**Recent Updates (January 2026):**
+- ✅ Quota management system with graceful degradation
+- ✅ Email notifications (90% warning, 100% exceeded)
+- ✅ Dashboard quota UI with color-coded status
+- ✅ Agent menu bar app with real-time quota display
+- ✅ Clerk authentication (OAuth via Google/GitHub)
+- ✅ Database-driven deduplication with page_uuid
+- ✅ Metadata-only sync (50-100x faster than full sync)
+
+**Coming Soon:**
+- 💳 Stripe integration for paid tiers (Phase 2)
+- 📚 Readwise integration
+- 🔍 Advanced search and filtering
+
+Last updated: January 2026
