@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect, useRef } from 'react';
 import { Check, ArrowRight, Github, Zap, Search as SearchIcon, Cloud, Puzzle } from 'lucide-react';
+import { MacWindowFrame } from '@/components/MacWindowFrame';
 
 export default function LandingPage() {
   const { isSignedIn } = useAuth();
@@ -60,13 +61,16 @@ export default function LandingPage() {
       <section
         ref={heroRef}
         className="relative overflow-visible py-20 lg:py-28 transition-all duration-1000 ease-out"
-        style={{
-          paddingBottom: isScrolled ? '900px' : '5rem'
-        }}
       >
         <div className="max-w-7xl mx-auto px-6">
           {/* Desktop layout */}
-          <div className="hidden lg:block relative" style={{ minHeight: '400px' }}>
+          <div
+            className="hidden lg:block relative transition-all duration-1000 ease-out"
+            style={{
+              minHeight: '400px',
+              paddingBottom: isScrolled ? '850px' : '0'
+            }}
+          >
             {/* Title & Tagline */}
             <div
               className="transition-all duration-1000 ease-in-out"
@@ -426,13 +430,15 @@ export default function LandingPage() {
               The rMirror agent syncs your notebooks automatically - no manual exports needed
             </p>
           </div>
-          <Image
-            src="/agent-screenshot.png"
-            alt="rMirror Agent Running"
-            width={1920}
-            height={1080}
-            className="w-full h-auto"
-          />
+          <MacWindowFrame>
+            <Image
+              src="/agent-screenshot.png"
+              alt="rMirror Agent Running"
+              width={1920}
+              height={1080}
+              className="w-full h-auto"
+            />
+          </MacWindowFrame>
         </div>
       </section>
 
@@ -549,13 +555,15 @@ export default function LandingPage() {
               Sync your notes to Notion, Readwise, and more
             </p>
           </div>
-          <Image
-            src="/integrations-screenshot.png"
-            alt="Integrations Dashboard"
-            width={1920}
-            height={1080}
-            className="w-full h-auto"
-          />
+          <MacWindowFrame>
+            <Image
+              src="/integrations-screenshot.png"
+              alt="Integrations Dashboard"
+              width={1920}
+              height={1080}
+              className="w-full h-auto"
+            />
+          </MacWindowFrame>
         </div>
       </section>
 
