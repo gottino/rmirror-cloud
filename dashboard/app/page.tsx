@@ -188,19 +188,18 @@ export default function LandingPage() {
               </p>
             </div>
 
-            {/* Screenshot - absolutely positioned */}
+            {/* Screenshot - GPU-accelerated animation using only transform/opacity */}
             <div
-              className="absolute top-0 transition-all duration-1000 ease-in-out"
+              className="absolute top-0 right-0 w-1/2"
               style={{
-                right: isScrolled ? 'auto' : 0,
-                left: isScrolled ? '50%' : 'auto',
-                width: isScrolled ? '85%' : '50%',
-                maxWidth: isScrolled ? '1100px' : 'none',
+                willChange: 'transform, opacity',
                 transform: isScrolled
-                  ? 'translateX(-50%) translateY(550px) scale(0.95)'
+                  ? 'translateX(-50%) translateY(550px) scale(1.7)'
                   : 'translateY(0) scale(0.85)',
                 opacity: isScrolled ? 1 : 0.95,
-                zIndex: isScrolled ? 1 : 10
+                zIndex: isScrolled ? 1 : 10,
+                transformOrigin: 'top center',
+                transition: 'transform 800ms cubic-bezier(0.4, 0, 0.2, 1), opacity 800ms cubic-bezier(0.4, 0, 0.2, 1)'
               }}
             >
               <Image

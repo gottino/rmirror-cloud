@@ -27,25 +27,25 @@ export function MacWindowFrame({ children, title, className = '', titleBarColor 
       </div>
       <style jsx>{`
         .mac-window-frame {
-          border-radius: 12px;
+          border-radius: clamp(6px, 1.5vw, 12px);
           overflow: hidden;
           box-shadow: 0 20px 40px -8px rgba(0, 0, 0, 0.2),
                       0 0 0 0.5px rgba(0, 0, 0, 0.12);
           background: #fff;
         }
         .mac-title-bar {
-          padding: 12px 14px;
+          padding: clamp(6px, 1.5vw, 12px) clamp(8px, 1.8vw, 14px);
           display: flex;
           align-items: center;
-          min-height: 42px;
+          min-height: clamp(24px, 5vw, 42px);
         }
         .mac-traffic-lights {
           display: flex;
-          gap: 8px;
+          gap: clamp(4px, 1vw, 8px);
         }
         .mac-button {
-          width: 12px;
-          height: 12px;
+          width: clamp(8px, 1.5vw, 12px);
+          height: clamp(8px, 1.5vw, 12px);
           border-radius: 50%;
           display: inline-block;
           box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12);
@@ -62,10 +62,10 @@ export function MacWindowFrame({ children, title, className = '', titleBarColor 
         .mac-title {
           flex: 1;
           text-align: center;
-          font-size: 13px;
+          font-size: clamp(10px, 1.5vw, 13px);
           color: rgba(0, 0, 0, 0.85);
           font-weight: 500;
-          margin-right: 52px; /* Balance the traffic lights */
+          margin-right: clamp(28px, 6vw, 52px);
           letter-spacing: -0.01em;
         }
         .mac-content {
