@@ -210,6 +210,16 @@ The dashboard is tightly coupled with the backend API. When working on features 
 
 ## Recent Major Changes
 
+- **2026-01-22**: Landing page screenshot updates and UX improvements
+  - Created MacWindowFrame component with macOS Tahoe-style window chrome
+  - Traffic lights and title bar scale responsively with viewport (clamp() sizing)
+  - Updated agent and integrations screenshots with new authenticated state
+  - Added cache-busting query params (?v=2) for CDN image refresh
+  - Improved hero animation to use GPU-accelerated transforms only (no layout thrashing)
+  - Fixed mobile white space issue by moving padding to desktop-only section
+  - Files: components/MacWindowFrame.tsx, app/page.tsx, public/agent-screenshot.png, public/integrations-screenshot.png
+  - Commits: 44fdc6f, 523ec93, 728f71e
+
 - **2026-01-12**: Implemented metadata-first sync UI support
   - Added `NOT_SYNCED` page status handling in PageCard component (gray placeholder with upload icon)
   - Created SyncProgress component showing "X/Y pages synced" with progress bar

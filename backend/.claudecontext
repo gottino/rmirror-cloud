@@ -40,6 +40,10 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - `integration_configs`: User integration settings (encrypted credentials)
 
 ## Recent Major Changes
+- **2026-01-22**: Improved OCR prompt for curved arrow (↳) formatting in `app/core/ocr_service.py`
+  - Arrows now render on NEW LINE with 2-space indentation: `[main text]\n  ↳ [indented continuation]`
+  - Fixes issue where arrows appeared inline instead of on separate indented lines
+  - Updated both `extract_text_from_pdf()` and `extract_text_from_image()` methods
 - **2026-01-18**: Fixed initial sync race conditions causing duplicate Notion pages/blocks
   - Root cause: 2 uvicorn workers = 2 SyncWorker instances running in parallel
   - Fix 1: Two-phase initial sync - create notebooks FIRST (sequential), then queue pages
