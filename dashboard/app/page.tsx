@@ -432,7 +432,7 @@ export default function LandingPage() {
           </div>
           <MacWindowFrame>
             <Image
-              src="/agent-screenshot.png"
+              src="/agent-screenshot.png?v=2"
               alt="rMirror Agent Running"
               width={1920}
               height={1080}
@@ -557,7 +557,7 @@ export default function LandingPage() {
           </div>
           <MacWindowFrame>
             <Image
-              src="/integrations-screenshot.png"
+              src="/integrations-screenshot.png?v=2"
               alt="Integrations Dashboard"
               width={1920}
               height={1080}
