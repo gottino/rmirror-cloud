@@ -4,49 +4,59 @@
 
 /* rMirror Design System - CSS Variables */
 :root {
-  /* Color Palette - Warm, sophisticated palette inspired by Moleskine */
+  /* Color Palette - Warm paper-inspired palette */
   --warm-charcoal: #2d2a2e;
+  --warm-ink: #2C2420;
   --soft-cream: #faf8f5;
-  --terracotta: #c85a54;
+  --cream-paper: #FAF8F5;
+  --card-paper: #FFFEFB;
+  --terracotta: #C45C3E;
   --warm-gray: #8b8680;
-  --amber-gold: #d4a574;
+  --muted-sepia: #A89A8C;
+  --amber-gold: #D4A84B;
   --sage-green: #7a9c89;
 
   /* Semantic Design Tokens */
-  --background: #faf8f5;
-  --foreground: #2d2a2e;
-  --card: #ffffff;
-  --card-foreground: #2d2a2e;
-  --primary: #c85a54;
-  --primary-foreground: #ffffff;
-  --secondary: #d4a574;
-  --secondary-foreground: #2d2a2e;
-  --muted: #faf8f5;
-  --muted-foreground: #8b8680;
-  --accent: #c85a54;
+  --background: #F2F3F0;
+  --foreground: #2C2420;
+  --card: #FFFEFB;
+  --card-foreground: #2C2420;
+  --primary: #C45C3E;
+  --primary-foreground: #FFFEFB;
+  --secondary: #E7E8E5;
+  --secondary-foreground: #2C2420;
+  --muted: #F2F3F0;
+  --muted-foreground: #A89A8C;
+  --accent: #C45C3E;
   --success: #7a9c89;
   --success-foreground: #ffffff;
-  --destructive: #dc2626;
+  --destructive: #D93C15;
   --destructive-foreground: #ffffff;
-  --border: #e8e4df;
-  --input: #e8e4df;
-  --ring: #c85a54;
+  --border: #CBCCC9;
+  --border-sketch: #E8E2D9;
+  --input: #CBCCC9;
+  --ring: #C45C3E;
 
   /* Border Radius */
-  --radius-sm: 6px;
+  --radius-sm: 4px;
   --radius: 8px;
   --radius-lg: 12px;
+  --radius-pill: 22px;
 
-  /* Shadows */
-  --shadow-sm: 0 2px 8px rgba(45, 42, 46, 0.06);
-  --shadow-md: 0 4px 12px rgba(45, 42, 46, 0.08);
-  --shadow-lg: 0 8px 20px rgba(45, 42, 46, 0.12);
+  /* Shadows - softer, warmer */
+  --shadow-sm: 0 1px 4px rgba(44, 36, 32, 0.04);
+  --shadow-md: 0 2px 8px rgba(44, 36, 32, 0.06);
+  --shadow-lg: 0 4px 16px rgba(44, 36, 32, 0.08);
+
+  /* Typography */
+  --font-display: var(--font-dm-sans), system-ui, sans-serif;
+  --font-body: var(--font-outfit), system-ui, sans-serif;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font-body);
   font-size: 16px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -73,8 +83,10 @@ h3,
 h4,
 h5,
 h6 {
-  color: var(--warm-charcoal);
-  font-weight: 600;
+  color: var(--warm-ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 h1 {

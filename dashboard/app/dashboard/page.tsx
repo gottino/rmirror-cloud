@@ -2,14 +2,17 @@
 
 import { useAuth, UserButton } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, CreditCard, Menu, Home as HomeIcon, Folder } from 'lucide-react';
+import { ChevronRight, BookOpen, Puzzle, CreditCard, Menu, Home as HomeIcon, Folder, X, Search } from 'lucide-react';
 import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus } from '@/lib/api';
 import { QuotaWarning } from '@/components/QuotaWarning';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
+import { SearchBar } from '@/components/SearchBar';
+import { ViewToggle } from '@/components/ViewToggle';
+import { SectionLabel } from '@/components/SectionLabel';
+import { NotebookCard } from '@/components/NotebookCard';
 
 // Group notebooks by date
 function groupNotebooksByDate(notebooks: NotebookTreeNode[]) {
@@ -110,7 +113,6 @@ function findNodeByUuid(nodes: NotebookTreeNode[], uuid: string): NotebookTreeNo
 
 export default function Home() {
   const { getToken, isSignedIn } = useAuth();
-  const router = useRouter();
   const [tree, setTree] = useState<NotebookTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -477,9 +479,9 @@ export default function Home() {
         <QuotaWarning onUpgradeClick={() => setShowQuotaModal(true)} />
 
         {/* Header */}
-        <header className="bg-white shadow-sm sticky top-0 z-30" style={{ borderBottom: '1px solid var(--border)' }}>
-          <div className="max-w-full mx-auto px-6 lg:px-8 py-4">
-            <div className="flex items-center justify-between gap-4">
+        <header className="sticky top-0 z-30" style={{ backgroundColor: 'var(--background)' }}>
+          <div className="max-w-full mx-auto px-8 lg:px-12 py-6">
+            <div className="flex items-center justify-between gap-6">
               {/* Hamburger menu button for mobile */}
               <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -489,32 +491,12 @@ export default function Home() {
                 <Menu className="w-6 h-6" />
               </button>
 
-              <div className="flex-1 max-w-md">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
-                  <input
-                    type="text"
-                    placeholder="Search notebooks..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-10 py-2 rounded-lg"
-                    style={{
-                      border: '1px solid var(--border)',
-                      fontSize: '0.925em',
-                      backgroundColor: 'var(--card)',
-                      color: 'var(--foreground)'
-                    }}
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2"
-                      style={{ color: 'var(--warm-gray)' }}
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  )}
-                </div>
+              <div className="flex-1 max-w-lg">
+                <SearchBar
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  placeholder="Search notebooks..."
+                />
               </div>
 
               <div className="flex items-center space-x-4">
@@ -539,7 +521,7 @@ export default function Home() {
             </div>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
+        <main className="flex-1 overflow-y-auto px-8 lg:px-12 py-10">
           {notebooks.length === 0 ? (
             <div className="text-center py-12 rounded-lg max-w-2xl mx-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
               <BookOpen className="w-20 h-20 mx-auto mb-4" style={{ color: 'var(--warm-gray)', opacity: 0.3 }} />
@@ -565,246 +547,49 @@ export default function Home() {
           ) : (
             <>
               {/* View toggle */}
-              <div className="flex items-center justify-between mb-6">
-                <h2 style={{ fontSize: '1.5rem', fontWeight: 600, margin: 0 }}>
+              <div className="flex items-center justify-between mb-8">
+                <h2
+                  style={{
+                    fontSize: '2rem',
+                    fontWeight: 700,
+                    margin: 0,
+                    letterSpacing: '-0.02em',
+                    fontFamily: 'var(--font-display)',
+                    color: 'var(--warm-ink)',
+                  }}
+                >
                   {currentFolderPath.length > 0 ? breadcrumbs[breadcrumbs.length - 1].name : 'All Notebooks'}
                 </h2>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setViewMode('list')}
-                    className="px-3 py-2 rounded-lg flex items-center gap-2 transition-all"
-                    style={{
-                      backgroundColor: viewMode === 'list' ? 'var(--primary)' : 'transparent',
-                      color: viewMode === 'list' ? 'var(--primary-foreground)' : 'var(--warm-gray)',
-                      border: '1px solid var(--border)'
-                    }}
-                  >
-                    <List className="w-4 h-4" />
-                    <span style={{ fontSize: '0.875em' }}>List</span>
-                  </button>
-                  <button
-                    onClick={() => setViewMode('grid')}
-                    className="px-3 py-2 rounded-lg flex items-center gap-2 transition-all"
-                    style={{
-                      backgroundColor: viewMode === 'grid' ? 'var(--primary)' : 'transparent',
-                      color: viewMode === 'grid' ? 'var(--primary-foreground)' : 'var(--warm-gray)',
-                      border: '1px solid var(--border)'
-                    }}
-                  >
-                    <Grid3x3 className="w-4 h-4" />
-                    <span style={{ fontSize: '0.875em' }}>Grid</span>
-                  </button>
-                </div>
+                <ViewToggle value={viewMode} onChange={setViewMode} />
               </div>
 
               {/* Notebooks by date group */}
-              <div className="space-y-8">
+              <div className="space-y-10">
                 {Object.entries(groupedNotebooks).map(([groupName, groupNotebooks]) => {
                   if (groupNotebooks.length === 0) return null;
 
                   return (
                     <div key={groupName}>
-                      <h3 style={{
-                        fontSize: '0.8em',
-                        fontWeight: 600,
-                        color: 'var(--warm-gray)',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.05em',
-                        marginBottom: '1rem',
-                        paddingLeft: '0.75rem'
-                      }}>
-                        {groupName}
-                      </h3>
+                      <SectionLabel>{groupName}</SectionLabel>
 
                       {viewMode === 'grid' ? (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
+                        <div className="flex flex-wrap gap-5">
                           {groupNotebooks.map((notebook) => (
-                            <Link
+                            <NotebookCard
                               key={notebook.notebook_uuid}
-                              href={`/notebooks/${notebook.id}`}
-                              className="p-5 rounded-lg transition-all group"
-                              style={{
-                                backgroundColor: 'var(--card)',
-                                border: '1px solid var(--border)',
-                                cursor: 'pointer',
-                                boxShadow: 'var(--shadow-md)'
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.boxShadow = 'var(--shadow-lg)';
-                                e.currentTarget.style.transform = 'translateY(-4px)';
-                                e.currentTarget.style.borderColor = 'var(--terracotta)';
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.boxShadow = 'var(--shadow-md)';
-                                e.currentTarget.style.transform = 'translateY(0)';
-                                e.currentTarget.style.borderColor = 'var(--border)';
-                              }}
-                            >
-                              <div className="aspect-[3/4] rounded mb-3 flex items-start p-3 overflow-hidden"
-                                style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
-                              >
-                                {notebook.preview ? (
-                                  <p style={{
-                                    fontSize: '0.7em',
-                                    color: 'var(--warm-charcoal)',
-                                    lineHeight: '1.4',
-                                    margin: 0,
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    display: '-webkit-box',
-                                    WebkitLineClamp: 6,
-                                    WebkitBoxOrient: 'vertical'
-                                  }}>
-                                    {notebook.preview}
-                                  </p>
-                                ) : notebook.sync_progress && notebook.sync_progress.not_synced_pages > 0 ? (
-                                  <div className="flex flex-col items-center justify-center w-full h-full px-2">
-                                    <svg className="w-6 h-6 mb-2" style={{ color: 'var(--warm-gray)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                    </svg>
-                                    <span style={{ fontSize: '0.7em', color: 'var(--warm-gray)', textAlign: 'center', fontWeight: 500, marginBottom: '0.25rem' }}>
-                                      Awaiting upload
-                                    </span>
-                                    <span style={{ fontSize: '0.6em', color: 'var(--warm-gray)', textAlign: 'center' }}>
-                                      {notebook.sync_progress.synced_pages}/{notebook.sync_progress.total_pages} ready
-                                    </span>
-                                  </div>
-                                ) : notebook.sync_progress && notebook.sync_progress.pending_quota_pages > 0 ? (
-                                  <div className="flex flex-col items-center justify-center w-full h-full px-2">
-                                    <span style={{ fontSize: '0.7em', color: 'var(--amber-gold)', textAlign: 'center', fontWeight: 500, marginBottom: '0.25rem' }}>
-                                      OCR Pending
-                                    </span>
-                                    <button
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        router.push('/billing');
-                                      }}
-                                      style={{ fontSize: '0.6em', color: 'var(--terracotta)', textAlign: 'center', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                                    >
-                                      Upgrade
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="flex flex-col items-center justify-center w-full h-full px-2">
-                                    <span style={{ fontSize: '0.7em', color: 'var(--amber-gold)', textAlign: 'center', fontWeight: 500, marginBottom: '0.25rem' }}>
-                                      OCR Pending
-                                    </span>
-                                    <button
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        router.push('/billing');
-                                      }}
-                                      style={{ fontSize: '0.6em', color: 'var(--terracotta)', textAlign: 'center', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                                    >
-                                      Upgrade
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                              <h4 style={{
-                                fontSize: '0.875em',
-                                fontWeight: 500,
-                                color: 'var(--warm-charcoal)',
-                                marginBottom: '0.25rem',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap'
-                              }} className="group-hover:text-[var(--terracotta)]">
-                                {notebook.visible_name}
-                              </h4>
-                              <p style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
-                                {notebook.last_synced_at ? new Date(notebook.last_synced_at).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric'
-                                }) : 'Never synced'}
-                              </p>
-                            </Link>
+                              notebook={notebook}
+                              variant="grid"
+                            />
                           ))}
                         </div>
                       ) : (
                         <div className="space-y-3">
                           {groupNotebooks.map((notebook) => (
-                            <Link
+                            <NotebookCard
                               key={notebook.notebook_uuid}
-                              href={`/notebooks/${notebook.id}`}
-                              className="flex items-center justify-between p-5 rounded-lg transition-all group"
-                              style={{
-                                backgroundColor: 'var(--card)',
-                                border: '1px solid var(--border)',
-                                cursor: 'pointer',
-                                boxShadow: 'var(--shadow-sm)'
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.boxShadow = 'var(--shadow-md)';
-                                e.currentTarget.style.transform = 'translateX(6px)';
-                                e.currentTarget.style.borderColor = 'var(--terracotta)';
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
-                                e.currentTarget.style.transform = 'translateX(0)';
-                                e.currentTarget.style.borderColor = 'var(--border)';
-                              }}
-                            >
-                              <div className="flex items-center gap-4 flex-1 min-w-0">
-                                <div className="w-12 h-16 rounded flex items-start p-2 flex-shrink-0 overflow-hidden"
-                                  style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
-                                >
-                                  {notebook.preview ? (
-                                    <p style={{
-                                      fontSize: '0.5em',
-                                      color: 'var(--warm-charcoal)',
-                                      lineHeight: '1.3',
-                                      margin: 0,
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      display: '-webkit-box',
-                                      WebkitLineClamp: 4,
-                                      WebkitBoxOrient: 'vertical'
-                                    }}>
-                                      {notebook.preview}
-                                    </p>
-                                  ) : notebook.sync_progress && notebook.sync_progress.not_synced_pages > 0 ? (
-                                    <div className="flex flex-col items-center justify-center w-full h-full">
-                                      <svg className="w-4 h-4 mb-1" style={{ color: 'var(--warm-gray)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                      </svg>
-                                      <span style={{ fontSize: '0.45em', color: 'var(--warm-gray)', textAlign: 'center', fontWeight: 500 }}>
-                                        Pending
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <div className="flex flex-col items-center justify-center w-full h-full">
-                                      <span style={{ fontSize: '0.5em', color: 'var(--amber-gold)', textAlign: 'center', fontWeight: 500 }}>
-                                        OCR Pending
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <h4 style={{
-                                    fontSize: '0.925em',
-                                    fontWeight: 500,
-                                    color: 'var(--warm-charcoal)',
-                                    marginBottom: '0.125rem',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap'
-                                  }} className="group-hover:text-[var(--terracotta)]">
-                                    {notebook.visible_name}
-                                  </h4>
-                                  <p style={{ fontSize: '0.8em', color: 'var(--warm-gray)' }}>
-                                    {notebook.last_synced_at ? new Date(notebook.last_synced_at).toLocaleDateString('en-US', {
-                                      year: 'numeric',
-                                      month: 'short',
-                                      day: 'numeric'
-                                    }) : 'Never synced'}
-                                  </p>
-                                </div>
-                              </div>
-                              <ChevronRight className="w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
-                            </Link>
+                              notebook={notebook}
+                              variant="list"
+                            />
                           ))}
                         </div>
                       )}
