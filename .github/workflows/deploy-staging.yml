@@ -68,7 +68,7 @@ jobs:
           cat > dashboard/.env << 'ENVEOF'
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY=${{ secrets.STAGING_CLERK_SECRET_KEY }}
-          NEXT_PUBLIC_API_URL=https://staging.rmirror.io
+          NEXT_PUBLIC_API_URL=https://staging.rmirror.io/api/v1
           ENVEOF
 
           echo "=== Backend deployment ==="
