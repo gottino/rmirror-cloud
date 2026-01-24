@@ -316,11 +316,13 @@ async def test_hard_cap_allows_99_pending(
     # Verify success
     assert response.status_code == 200, f"100th page should be allowed: {response.json()}"
 
-    # Verify now have 100 pending pages
+    # Verify now have 100 pending pages total for user (across all notebooks)
+    # Note: The uploaded file creates a separate notebook, so we count all user's notebooks
     final_count = (
         db.query(Page)
+        .join(Notebook)
         .filter(
-            Page.notebook_id == notebook.id,
+            Notebook.user_id == user.id,
             Page.ocr_status == OcrStatus.PENDING_QUOTA,
         )
         .count()
@@ -385,9 +387,11 @@ async def test_rate_limiting(
         responses[10].status_code == 429
     ), f"11th upload should be rate limited, got {responses[10].status_code}"
 
-    # Verify error message mentions rate limit
+    # Verify error message indicates rate limiting (slowapi returns "X per Y minute" format)
     error_detail = str(responses[10].json().get("detail", ""))
-    assert "rate limit" in error_detail.lower(), f"Error should mention rate limit: {error_detail}"
+    assert "per" in error_detail.lower() and "minute" in error_detail.lower(), (
+        f"Error should indicate rate limit: {error_detail}"
+    )
 
 
 # =============================================================================

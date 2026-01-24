@@ -463,6 +463,11 @@ async def process_rm_file(
             page_id=page.id,
         )
 
+    except HTTPException:
+        # Re-raise HTTPExceptions (e.g., 402, 429) without wrapping
+        if temp_rm_path and temp_rm_path.exists():
+            temp_rm_path.unlink(missing_ok=True)
+        raise
     except Exception as e:
         logger.error(f"Failed to process .rm file: {e}", exc_info=True)
         # Clean up temp file on error

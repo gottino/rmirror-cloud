@@ -20,8 +20,8 @@ from app.database import get_db
 
 
 @asynccontextmanager
-async def test_lifespan(app: FastAPI):
-    """Test lifespan - no background workers."""
+async def noop_lifespan(app: FastAPI):
+    """No-op lifespan for testing - no background workers."""
     print("🧪 Test mode - skipping background workers")
     yield
     print("🧪 Test cleanup")
@@ -37,7 +37,7 @@ def create_test_app() -> FastAPI:
         title="rMirror Cloud API (Test)",
         version="0.1.0-test",
         description="Test instance",
-        lifespan=test_lifespan,  # Use test lifespan (no background workers)
+        lifespan=noop_lifespan,  # Use no-op lifespan (no background workers)
     )
 
     # Include API routers (same as production)
