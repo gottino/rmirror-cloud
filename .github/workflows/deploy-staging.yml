@@ -1,0 +1,107 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'dashboard/**'
+      - '.github/workflows/deploy-staging.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.rmirror.io
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to staging
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p $SERVER_PORT $SERVER_USER@$SERVER_HOST << 'ENDSSH'
+          set -e
+          cd /var/www/rmirror-staging
+
+          echo "=== Pulling latest code ==="
+          git fetch origin main
+          git reset --hard origin/main
+
+          echo "=== Creating backend .env ==="
+          cat > backend/.env << 'ENVEOF'
+          DATABASE_URL=postgresql://${{ secrets.STAGING_POSTGRES_USER }}:${{ secrets.STAGING_POSTGRES_PASSWORD }}@localhost:5432/rmirror_staging
+          DEBUG=false
+          SECRET_KEY=${{ secrets.STAGING_SECRET_KEY }}
+          CLERK_SECRET_KEY=${{ secrets.STAGING_CLERK_SECRET_KEY }}
+          CLERK_WEBHOOK_SECRET=${{ secrets.STAGING_CLERK_WEBHOOK_SECRET }}
+          CLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}
+          S3_ENDPOINT_URL=${{ secrets.B2_ENDPOINT_URL }}
+          S3_ACCESS_KEY=${{ secrets.B2_ACCESS_KEY_ID }}
+          S3_SECRET_KEY=${{ secrets.B2_SECRET_ACCESS_KEY }}
+          S3_BUCKET_NAME=${{ secrets.B2_BUCKET_NAME }}
+          S3_REGION=${{ secrets.B2_REGION }}
+          S3_KEY_PREFIX=staging/
+          NOTION_CLIENT_ID=${{ secrets.NOTION_CLIENT_ID }}
+          NOTION_CLIENT_SECRET=${{ secrets.NOTION_CLIENT_SECRET }}
+          NOTION_REDIRECT_URI=https://staging.rmirror.io/integrations/notion/callback
+          RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+          INTEGRATION_MASTER_KEY=${{ secrets.STAGING_INTEGRATION_MASTER_KEY }}
+          ENVEOF
+
+          echo "=== Creating dashboard .env ==="
+          cat > dashboard/.env << 'ENVEOF'
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY=${{ secrets.STAGING_CLERK_SECRET_KEY }}
+          NEXT_PUBLIC_API_URL=https://staging.rmirror.io
+          ENVEOF
+
+          echo "=== Backend deployment ==="
+          cd backend
+          poetry install --without dev --no-root
+          poetry run alembic upgrade head
+
+          echo "=== Dashboard deployment ==="
+          cd ../dashboard
+          npm ci
+          npm run build
+
+          echo "=== Restarting services ==="
+          sudo systemctl restart rmirror-staging
+          pm2 delete rmirror-dashboard-staging 2>/dev/null || true
+          pm2 start npm --name rmirror-dashboard-staging -- start -- -p 3100
+          pm2 save
+
+          echo "=== Deployment complete ==="
+          ENDSSH
+
+      - name: Health check
+        run: |
+          echo "Waiting for services to start..."
+          sleep 20
+          for i in {1..10}; do
+            if curl -sf https://staging.rmirror.io/api/health; then
+              echo "Staging is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "Health check failed after 10 attempts"
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

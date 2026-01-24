@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     s3_secret_key: Optional[str] = None
     s3_bucket_name: str = "rmirror"
     s3_region: str = "us-east-1"
+    s3_key_prefix: str = ""  # Set to "staging/" for staging environment
 
     # Claude API for OCR
     claude_api_key: Optional[str] = None
