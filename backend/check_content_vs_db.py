@@ -103,7 +103,7 @@ def check_content_vs_db(remarkable_source_dir: str):
                 print(f"✅ {notebook.visible_name}: {len(content_page_uuids)} pages (all match)")
 
         print(f"\n{'='*60}")
-        print(f"Summary:")
+        print("Summary:")
         print(f"  Total pages missing in DB:  {total_missing}")
         print(f"  Total extra pages in DB:    {total_extra}")
         print(f"{'='*60}")

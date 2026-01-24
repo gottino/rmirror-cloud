@@ -8,7 +8,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -22,14 +22,14 @@ from app.core.rm_converter import RMConverter
 from app.core.rm_metadata import RMMetadataParser
 from app.database import get_db
 from app.dependencies import get_storage_service
-from app.models.notebook import Notebook, DocumentType
+from app.models.notebook import DocumentType, Notebook
 from app.models.notebook_page import NotebookPage
-from app.models.page import Page, OcrStatus
+from app.models.page import OcrStatus, Page
 from app.models.sync_record import IntegrationConfig
 from app.models.user import User
+from app.services import quota_service
 from app.services.fingerprinting import fingerprint_page
 from app.services.sync_queue import queue_sync
-from app.services import quota_service
 from app.storage import StorageService
 from app.utils.files import calculate_file_hash
 
@@ -101,7 +101,6 @@ async def process_rm_file(
     try:
         # Read .rm file content
         rm_content = await rm_file.read()
-        file_size = len(rm_content)
 
         # Calculate file hash
         file_stream = BytesIO(rm_content)
@@ -476,7 +475,7 @@ async def process_rm_file(
 
 class UpdateMetadataRequest(BaseModel):
     """Request to update notebook metadata."""
-    
+
     notebook_uuid: str
     visible_name: str
     parent_uuid: Optional[str] = None
@@ -494,7 +493,7 @@ class UpdateMetadataRequest(BaseModel):
 
 class UpdateMetadataResponse(BaseModel):
     """Response for metadata update."""
-    
+
     success: bool
     notebook_id: int
     notebook_uuid: str
@@ -510,26 +509,26 @@ async def update_notebook_metadata(
 ):
     """
     Update or create notebook metadata and rebuild folder paths.
-    
+
     This endpoint allows clients to sync metadata from reMarkable devices,
     including folder hierarchies, document types, and reMarkable-specific
     state like pinned, deleted, etc.
-    
+
     After updating the metadata, it automatically rebuilds the full folder
     path for the notebook and any affected children.
-    
+
     Args:
         request: Metadata update request
         current_user: Authenticated user
         db: Database session
-        
+
     Returns:
         UpdateMetadataResponse with updated notebook info
     """
     try:
         # Initialize metadata service
         metadata_service = NotebookMetadataService(db, current_user.id)
-        
+
         # Prepare metadata dict
         metadata = {}
         if request.pinned is not None:
@@ -550,7 +549,7 @@ async def update_notebook_metadata(
             metadata["publisher"] = request.publisher
         if request.publication_date:
             metadata["publication_date"] = request.publication_date
-        
+
         # Update notebook
         notebook = metadata_service.update_single_notebook_metadata(
             notebook_uuid=request.notebook_uuid,
@@ -579,8 +578,8 @@ async def update_notebook_metadata(
                         "Metadata updates will not be synced to integrations."
                     )
                 else:
+                    from app.core.sync_engine import ContentFingerprint, SyncItem
                     from app.core.unified_sync_manager import UnifiedSyncManager
-                    from app.core.sync_engine import SyncItem, ContentFingerprint
                     from app.models.sync_record import SyncItemType
 
                     # Get page count from .content file (no DB query needed)
@@ -663,7 +662,7 @@ async def update_notebook_metadata(
             full_path=notebook.full_path or "",
             message=f"Updated metadata for {notebook.visible_name}",
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to update metadata: {e}", exc_info=True)
         raise HTTPException(
@@ -679,26 +678,26 @@ async def rebuild_all_paths(
 ):
     """
     Rebuild all notebook paths for the current user.
-    
+
     Useful after bulk metadata updates or to fix any path inconsistencies.
-    
+
     Args:
         current_user: Authenticated user
         db: Database session
-        
+
     Returns:
         Dict with number of updated paths
     """
     try:
         metadata_service = NotebookMetadataService(db, current_user.id)
         updated_count = metadata_service.update_notebook_paths()
-        
+
         return {
             "success": True,
             "updated_count": updated_count,
             "message": f"Rebuilt paths for {updated_count} notebooks",
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to rebuild paths: {e}", exc_info=True)
         raise HTTPException(

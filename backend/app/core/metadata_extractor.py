@@ -1,6 +1,5 @@
 """Extract metadata from PDF and EPUB files."""
 
-from io import BytesIO
 from typing import BinaryIO
 
 from pypdf import PdfReader
@@ -54,8 +53,8 @@ class MetadataExtractor:
         Returns:
             Dictionary with 'title', 'author', and other metadata
         """
-        import zipfile
         import xml.etree.ElementTree as ET
+        import zipfile
 
         try:
             # EPUB is a ZIP file

@@ -10,8 +10,8 @@ from svix.webhooks import Webhook, WebhookVerificationError
 
 from app.config import get_settings
 from app.database import get_db
+from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
 from app.models.user import User
-from app.models.subscription import Subscription, SubscriptionTier, SubscriptionStatus
 from app.utils.email import get_email_service
 
 router = APIRouter()

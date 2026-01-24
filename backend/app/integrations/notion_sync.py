@@ -605,10 +605,10 @@ class NotionSyncTarget(SyncTarget):
             True if successful, False otherwise
         """
         try:
-            from datetime import datetime
             import hashlib
             import json
             import re
+            from datetime import datetime
 
             # Update properties with all metadata
             properties = {

@@ -3,10 +3,11 @@ Example usage of email service in rMirror Cloud backend
 This file shows how to integrate email notifications into your workflows
 """
 
-from app.utils.email import get_email_service
-from app.models.user import User
-from app.models.notebook import Notebook
 from typing import List
+
+from app.models.notebook import Notebook
+from app.models.user import User
+from app.utils.email import get_email_service
 
 
 # Example 1: User Registration Hook

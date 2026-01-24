@@ -55,7 +55,20 @@ target-version = ['py311']
 [tool.ruff]
 line-length = 100
 select = ["E", "F", "I", "N", "W"]
-ignore = ["E501"]
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "E712",   # Comparison to True/False (valid in SQLAlchemy filters)
+    "N806",   # Variable in function should be lowercase (constants in functions)
+    "N817",   # CamelCase imported as acronym (ElementTree as ET is common)
+]
+
+[tool.ruff.per-file-ignores]
+# SQLAlchemy models use string-based forward references
+"app/models/*.py" = ["F821"]
+# Scripts have imports after path setup
+"*.py" = ["E402"]
+# Sync manager has intentional dead code for debugging
+"app/core/unified_sync_manager.py" = ["F841"]
 
 [tool.mypy]
 python_version = "3.11"

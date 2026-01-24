@@ -2,8 +2,9 @@
 """Upload Marton .content file to production to update mapping."""
 
 import asyncio
-import httpx
 from pathlib import Path
+
+import httpx
 
 NOTEBOOK_UUID = "a5cb6010-b0f6-4bc6-ac80-9ef341708db7"
 CONTENT_FILE = Path(

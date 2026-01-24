@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
-from app.database import get_db, SessionLocal
+from app.database import SessionLocal, get_db
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.user import User
 from app.services.initial_sync import trigger_initial_sync
@@ -459,7 +459,7 @@ async def create_database(
         config.is_enabled = True
 
         db.commit()
-        logger.warning(f"DEBUG: Committed to database")
+        logger.warning("DEBUG: Committed to database")
 
         # Verify the save worked
         db.refresh(config)

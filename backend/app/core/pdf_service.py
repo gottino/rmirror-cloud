@@ -3,7 +3,7 @@
 import logging
 from io import BytesIO
 
-from pypdf import PdfMerger, PdfReader, PdfWriter
+from pypdf import PdfMerger, PdfReader
 
 logger = logging.getLogger(__name__)
 

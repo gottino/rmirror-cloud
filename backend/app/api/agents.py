@@ -1,12 +1,11 @@
 """Agent registration and status endpoints."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import and_, desc
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user

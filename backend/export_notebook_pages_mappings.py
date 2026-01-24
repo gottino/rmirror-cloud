@@ -10,12 +10,13 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+
 from dotenv import load_dotenv
-import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 # Load environment variables
 load_dotenv(Path(__file__).parent / '.env')
@@ -23,10 +24,10 @@ load_dotenv(Path(__file__).parent / '.env')
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.models.user import User
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import Page
+from app.models.user import User
 
 # Get database URL from environment
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./rmirror.db')
@@ -116,7 +117,7 @@ def export_mappings(user_email: str, output_file: Path):
         print()
         print("Next steps:")
         print(f"  1. Copy file to production: scp {output_file} deploy@167.235.74.51:/tmp/")
-        print(f"  2. SSH to production: ssh deploy@167.235.74.51")
+        print("  2. SSH to production: ssh deploy@167.235.74.51")
         print(f"  3. Run SQL: psql -U rmirror -d rmirror -f /tmp/{output_file.name}")
 
         return True

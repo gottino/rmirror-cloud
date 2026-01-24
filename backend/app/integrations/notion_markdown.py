@@ -7,12 +7,12 @@ with proper formatting (headings, lists, checkboxes, etc.).
 """
 
 import re
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List
 
 
 class MarkdownToNotionConverter:
     """Converts markdown-like text to Notion blocks with proper formatting."""
-    
+
     def __init__(self):
         # Regex patterns for markdown elements
         self.heading_pattern = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
@@ -21,15 +21,15 @@ class MarkdownToNotionConverter:
         self.numbered_pattern = re.compile(r'^(\s*)\d+\.\s+(.+)$', re.MULTILINE)
         self.bold_pattern = re.compile(r'\*\*(.+?)\*\*')
         self.italic_pattern = re.compile(r'\*(.+?)\*')
-    
+
     def text_to_notion_blocks(self, text: str, max_blocks: int = 100) -> List[Dict[str, Any]]:
         """
         Convert markdown-like text to Notion blocks.
-        
+
         Args:
             text: Raw text content with markdown-like formatting
             max_blocks: Maximum number of blocks to create (to avoid API limits)
-            
+
         Returns:
             List of Notion block dictionaries
         """
@@ -44,12 +44,12 @@ class MarkdownToNotionConverter:
                     }]
                 }
             }]
-        
+
         blocks = []
         lines = text.split('\n')
         current_list_items = []
         current_list_type = None
-        
+
         for line in lines:
             if len(blocks) >= max_blocks:
                 # Add truncation notice
@@ -65,7 +65,7 @@ class MarkdownToNotionConverter:
                     }
                 })
                 break
-                
+
             line = line.strip()
             if not line:
                 # Flush any pending list items
@@ -74,7 +74,7 @@ class MarkdownToNotionConverter:
                     current_list_items = []
                     current_list_type = None
                 continue
-            
+
             # Check for headings
             if line.startswith('#'):
                 # Flush any pending list items first
@@ -82,10 +82,10 @@ class MarkdownToNotionConverter:
                     blocks.extend(self._create_list_blocks(current_list_items, current_list_type))
                     current_list_items = []
                     current_list_type = None
-                    
+
                 blocks.append(self._create_heading_block(line))
                 continue
-            
+
             # Check for horizontal rules
             if line.startswith('---') and len(line.strip('-')) == 0:
                 # Flush any pending list items first
@@ -93,10 +93,10 @@ class MarkdownToNotionConverter:
                     blocks.extend(self._create_list_blocks(current_list_items, current_list_type))
                     current_list_items = []
                     current_list_type = None
-                    
+
                 blocks.append(self._create_divider_block())
                 continue
-            
+
             # Check for checkboxes
             checkbox_match = re.match(r'^(\s*)-\s*\[([ xX])\]\s+(.+)$', line)
             if checkbox_match:
@@ -106,7 +106,7 @@ class MarkdownToNotionConverter:
                         blocks.extend(self._create_list_blocks(current_list_items, current_list_type))
                         current_list_items = []
                     current_list_type = 'checkbox'
-                
+
                 indent, checked, content = checkbox_match.groups()
                 current_list_items.append({
                     'content': content.strip(),
@@ -114,7 +114,7 @@ class MarkdownToNotionConverter:
                     'indent': len(indent)
                 })
                 continue
-            
+
             # Check for bullet points (support both - and * for markdown compatibility)
             bullet_match = re.match(r'^(\s*)[-*]\s+(.+)$', line)
             if bullet_match:
@@ -124,14 +124,14 @@ class MarkdownToNotionConverter:
                         blocks.extend(self._create_list_blocks(current_list_items, current_list_type))
                         current_list_items = []
                     current_list_type = 'bullet'
-                
+
                 indent, content = bullet_match.groups()
                 current_list_items.append({
                     'content': content.strip(),
                     'indent': len(indent)
                 })
                 continue
-            
+
             # Check for numbered lists
             numbered_match = re.match(r'^(\s*)\d+\.\s+(.+)$', line)
             if numbered_match:
@@ -141,26 +141,26 @@ class MarkdownToNotionConverter:
                         blocks.extend(self._create_list_blocks(current_list_items, current_list_type))
                         current_list_items = []
                     current_list_type = 'numbered'
-                
+
                 indent, content = numbered_match.groups()
                 current_list_items.append({
                     'content': content.strip(),
                     'indent': len(indent)
                 })
                 continue
-            
+
             # Regular paragraph - flush any pending list items first
             if current_list_items:
                 blocks.extend(self._create_list_blocks(current_list_items, current_list_type))
                 current_list_items = []
                 current_list_type = None
-                
+
             blocks.append(self._create_paragraph_block(line))
-        
+
         # Flush any remaining list items
         if current_list_items:
             blocks.extend(self._create_list_blocks(current_list_items, current_list_type))
-        
+
         return blocks[:max_blocks] if blocks else [{
             "object": "block",
             "type": "paragraph",
@@ -171,7 +171,7 @@ class MarkdownToNotionConverter:
                 }]
             }
         }]
-    
+
     def _create_heading_block(self, line: str) -> Dict[str, Any]:
         """Create a Notion heading block from markdown heading."""
         # Count # symbols to determine heading level
@@ -181,11 +181,11 @@ class MarkdownToNotionConverter:
                 level += 1
             else:
                 break
-        
+
         # Notion supports heading_1, heading_2, heading_3
         heading_type = f"heading_{min(level, 3)}"
         content = line[level:].strip()
-        
+
         return {
             "object": "block",
             "type": heading_type,
@@ -193,7 +193,7 @@ class MarkdownToNotionConverter:
                 "rich_text": self._parse_rich_text(content)
             }
         }
-    
+
     def _create_divider_block(self) -> Dict[str, Any]:
         """Create a Notion divider block."""
         return {
@@ -201,13 +201,13 @@ class MarkdownToNotionConverter:
             "type": "divider",
             "divider": {}
         }
-    
+
     def _create_paragraph_block(self, content: str) -> Dict[str, Any]:
         """Create a Notion paragraph block with rich text formatting."""
         # Limit content length to avoid API limits
         if len(content) > 1500:
             content = content[:1500] + "..."
-            
+
         return {
             "object": "block",
             "type": "paragraph",
@@ -215,11 +215,11 @@ class MarkdownToNotionConverter:
                 "rich_text": self._parse_rich_text(content)
             }
         }
-    
+
     def _create_list_blocks(self, items: List[Dict], list_type: str) -> List[Dict[str, Any]]:
         """Create Notion list blocks from collected list items."""
         blocks = []
-        
+
         for item in items:
             if list_type == 'checkbox':
                 block = {
@@ -232,7 +232,7 @@ class MarkdownToNotionConverter:
                 }
             elif list_type == 'bullet':
                 block = {
-                    "object": "block", 
+                    "object": "block",
                     "type": "bulleted_list_item",
                     "bulleted_list_item": {
                         "rich_text": self._parse_rich_text(item['content'])
@@ -241,7 +241,7 @@ class MarkdownToNotionConverter:
             elif list_type == 'numbered':
                 block = {
                     "object": "block",
-                    "type": "numbered_list_item", 
+                    "type": "numbered_list_item",
                     "numbered_list_item": {
                         "rich_text": self._parse_rich_text(item['content'])
                     }
@@ -249,27 +249,27 @@ class MarkdownToNotionConverter:
             else:
                 # Fallback to paragraph
                 block = self._create_paragraph_block(item['content'])
-            
+
             blocks.append(block)
-        
+
         return blocks
-    
+
     def _parse_rich_text(self, content: str) -> List[Dict[str, Any]]:
         """Parse text content and create rich text objects with formatting."""
         if not content:
             return [{"type": "text", "text": {"content": ""}}]
-        
+
         # For now, we'll keep it simple and handle basic bold/italic
         # More complex parsing could be added here
         rich_text = []
-        
+
         # Split by bold markers first
         parts = re.split(r'(\*\*.*?\*\*)', content)
-        
+
         for part in parts:
             if not part:
                 continue
-                
+
             # Check if this part is bold
             bold_match = re.match(r'\*\*(.+?)\*\*', part)
             if bold_match:
@@ -285,7 +285,7 @@ class MarkdownToNotionConverter:
                 for italic_part in italic_parts:
                     if not italic_part:
                         continue
-                        
+
                     italic_match = re.match(r'\*(.+?)\*', italic_part)
                     if italic_match and not italic_part.startswith('**'):
                         italic_content = italic_match.group(1)
@@ -301,14 +301,14 @@ class MarkdownToNotionConverter:
                                 "type": "text",
                                 "text": {"content": italic_part}
                             })
-        
+
         # If no rich text was created, return plain text
         if not rich_text:
             rich_text = [{"type": "text", "text": {"content": content}}]
-        
+
         # Ensure no single rich text item exceeds Notion's limits
         for item in rich_text:
             if len(item["text"]["content"]) > 2000:
                 item["text"]["content"] = item["text"]["content"][:1997] + "..."
-        
+
         return rich_text

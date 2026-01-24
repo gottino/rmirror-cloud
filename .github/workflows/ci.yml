@@ -37,7 +37,6 @@ jobs:
 
       - name: Lint (ruff)
         run: poetry run ruff check .
-        continue-on-error: true  # Don't fail CI on lint errors (cleanup later)
 
       - name: Unit tests
         run: poetry run pytest tests/ -v --tb=short -x
@@ -70,7 +69,6 @@ jobs:
 
       - name: Lint
         run: npm run lint
-        continue-on-error: true  # Don't fail CI on lint errors (cleanup later)
 
       - name: Build
         env:

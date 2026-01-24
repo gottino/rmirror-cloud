@@ -2,9 +2,9 @@
 
 from typing import Annotated, Optional
 
+from clerk_backend_sdk import ApiClient, ClientsApi, Configuration
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from clerk_backend_sdk import Configuration, ApiClient, ClientsApi
 from sqlalchemy.orm import Session
 
 from app.config import get_settings

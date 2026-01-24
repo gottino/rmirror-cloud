@@ -9,7 +9,6 @@ still protecting against abuse from unauthenticated sources.
 """
 
 import logging
-from typing import Callable
 
 from fastapi import Request
 from slowapi.util import get_remote_address

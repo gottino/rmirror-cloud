@@ -1,8 +1,7 @@
 """Page management endpoints."""
 
-from typing import Annotated
-
 from io import BytesIO
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse

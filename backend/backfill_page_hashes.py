@@ -75,7 +75,7 @@ def backfill_hashes(remarkable_source_dir: str):
 
                 # Check if file exists
                 if not rm_file_path.exists():
-                    print(f"SKIP (file not found)")
+                    print("SKIP (file not found)")
                     skipped += 1
                     continue
 
@@ -102,7 +102,7 @@ def backfill_hashes(remarkable_source_dir: str):
                 continue
 
         print(f"\n{'='*60}")
-        print(f"Backfill complete!")
+        print("Backfill complete!")
         print(f"  Total pages:   {total}")
         print(f"  Updated:       {updated}")
         print(f"  Skipped:       {skipped}")

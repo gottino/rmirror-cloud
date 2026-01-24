@@ -16,11 +16,11 @@ from app.core.sync_engine import SyncItem
 from app.core.unified_sync_manager import UnifiedSyncManager
 from app.database import get_db
 from app.integrations.notion_sync import NotionSyncTarget
+from app.models.notebook import Notebook
+from app.models.notebook_page import NotebookPage
+from app.models.page import OcrStatus, Page
 from app.models.sync_record import IntegrationConfig, SyncItemType, SyncQueue, SyncRecord
 from app.models.user import User
-from app.models.page import Page, OcrStatus
-from app.models.notebook import Notebook, DocumentType
-from app.models.notebook_page import NotebookPage
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["sync"])

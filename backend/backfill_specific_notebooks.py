@@ -10,8 +10,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
 from app.models.notebook import Notebook
-from app.models.page import Page
 from app.models.notebook_page import NotebookPage
+from app.models.page import Page
 from app.utils.files import calculate_file_hash
 
 

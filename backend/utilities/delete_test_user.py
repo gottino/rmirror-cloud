@@ -11,8 +11,8 @@ Usage:
 Example:
     python delete_test_user.py test@example.com
 """
-import sys
 import sqlite3
+import sys
 from pathlib import Path
 
 
@@ -31,13 +31,13 @@ def delete_user(email: str, db_path: str = "rmirror.db"):
         return False
 
     print(f"Found user: ID={user[0]}, Email={user[1]}, Clerk ID={user[2]}")
-    print(f"Deleting user from database...")
+    print("Deleting user from database...")
 
     cursor.execute("DELETE FROM users WHERE email = ?", (email,))
     conn.commit()
 
     print(f"✅ User '{email}' deleted from database")
-    print(f"⚠️  Don't forget to also delete this user from Clerk Dashboard!")
+    print("⚠️  Don't forget to also delete this user from Clerk Dashboard!")
     print(f"   https://dashboard.clerk.com → Users → {email}")
 
     conn.close()

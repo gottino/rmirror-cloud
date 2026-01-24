@@ -6,7 +6,7 @@ from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.notebook import Notebook, DocumentType
+from app.models.notebook import Notebook
 
 logger = logging.getLogger(__name__)
 

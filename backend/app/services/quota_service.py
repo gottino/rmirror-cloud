@@ -5,7 +5,6 @@ Provides functions to check, consume, and reset user quotas based on subscriptio
 
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -321,8 +320,9 @@ def reset_quota(
         # NOTE: For now, this logs intent. Full implementation requires a task queue
         # like Celery or background worker integration.
         # TODO: Integrate with task queue when implementing scheduled quota resets
-        from app.jobs.process_pending_pages import process_pending_pages_for_user
         import asyncio
+
+        from app.jobs.process_pending_pages import process_pending_pages_for_user
 
         try:
             # Run in background (fire and forget)

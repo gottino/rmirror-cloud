@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
-from app.core.unified_sync_manager import UnifiedSyncManager
 from app.database import get_db
 from app.integrations.notion_sync import NotionSyncTarget
 from app.integrations.notion_todos_sync import NotionTodosSyncTarget

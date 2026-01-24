@@ -1,7 +1,5 @@
 """Local filesystem storage implementation."""
 
-import os
-import shutil
 from pathlib import Path
 from typing import BinaryIO
 

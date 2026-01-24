@@ -24,7 +24,6 @@ from app.core.sync_engine import ContentFingerprint, SyncItem, SyncResult, SyncT
 from app.models.notebook import Notebook
 from app.models.page import Page
 from app.models.sync_record import (
-    IntegrationConfig,
     SyncItemType,
     SyncRecord,
     SyncStatus,
@@ -718,7 +717,7 @@ class UnifiedSyncManager:
                 )
 
                 sync_items.append(sync_item)
-                self.logger.info(f"Added notebook {notebook.visible_name} ({notebook.notebook_uuid}) with {len(pages)} pages to sync")
+                self.logger.info(f"Added notebook {notebook.visible_name} ({notebook.notebook_uuid}) with {len(pages_data)} pages to sync")
 
             return sync_items
 

@@ -2,7 +2,21 @@
 
 from fastapi import APIRouter
 
-from app.api import agents, auth, integrations, notebooks, notion_oauth, onboarding, pages, processing, quota, sync, todos, users, waitlist
+from app.api import (
+    agents,
+    auth,
+    integrations,
+    notebooks,
+    notion_oauth,
+    onboarding,
+    pages,
+    processing,
+    quota,
+    sync,
+    todos,
+    users,
+    waitlist,
+)
 from app.api.webhooks import clerk as clerk_webhook
 
 api_router = APIRouter()

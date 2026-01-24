@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.ocr_service import OCRService
 from app.dependencies import get_storage_service
 from app.models.notebook import Notebook
-from app.models.page import Page, OcrStatus
+from app.models.page import OcrStatus, Page
 from app.services import quota_service
 
 logger = logging.getLogger(__name__)

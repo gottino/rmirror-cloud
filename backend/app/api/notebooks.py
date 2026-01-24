@@ -162,9 +162,6 @@ async def get_notebooks_tree(
         .all()
     )
 
-    # Build a map of UUID to notebook
-    notebook_map = {nb.notebook_uuid: nb for nb in all_notebooks}
-
     # Identify which notebooks have children (i.e., are folders)
     has_children = set()
     for nb in all_notebooks:
@@ -256,7 +253,7 @@ async def get_notebooks_tree(
         tree_nodes[nb.notebook_uuid] = build_tree_node(nb)
 
     # Second pass: build parent-child relationships
-    for uuid, node in tree_nodes.items():
+    for notebook_uuid, node in tree_nodes.items():
         parent_uuid = node["parent_uuid"]
         if parent_uuid and parent_uuid in tree_nodes:
             # Add to parent's children
@@ -517,7 +514,7 @@ async def upload_content_file(
 
         return {
             "success": True,
-            "message": f"Content file processed successfully",
+            "message": "Content file processed successfully",
             "notebook_uuid": notebook_uuid,
             "pages_in_content": len(pages_array),
             "pages_mapped": pages_added,

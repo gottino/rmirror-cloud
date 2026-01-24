@@ -1,7 +1,6 @@
 """Notion OAuth service for handling OAuth flow and database operations."""
 
 import logging
-import ssl
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
@@ -308,13 +307,13 @@ class NotionOAuthService:
 
             # Add properties using the new API (2025-09-03)
             try:
-                self.logger.info(f"Adding properties to database using new API...")
+                self.logger.info("Adding properties to database using new API...")
                 await self.add_database_properties(
                     access_token=access_token,
                     database_id=database_id,
                     database_type=database_type
                 )
-                self.logger.info(f"Successfully added properties to database")
+                self.logger.info("Successfully added properties to database")
             except Exception as prop_error:
                 self.logger.warning(f"Failed to add properties (will be created on first use): {prop_error}")
                 # Don't fail the whole operation if property addition fails

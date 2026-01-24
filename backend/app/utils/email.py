@@ -3,8 +3,10 @@ Email utility using Resend for rMirror Cloud
 """
 
 import logging
-from typing import Optional, List
+from typing import Optional
+
 import resend
+
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)

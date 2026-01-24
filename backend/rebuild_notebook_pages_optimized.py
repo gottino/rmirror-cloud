@@ -9,14 +9,15 @@ Usage:
     poetry run python rebuild_notebook_pages_optimized.py --remarkable-dir "~/Library/Containers/..."
 """
 
-import json
 import argparse
+import json
+import os
 import sys
 from pathlib import Path
+
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-import os
-from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv(Path(__file__).parent / '.env')
@@ -204,7 +205,7 @@ def main():
         print("=" * 70)
 
         if args.dry_run:
-            print(f"  🔍 Dry run complete")
+            print("  🔍 Dry run complete")
         else:
             print(f"  ✅ Rebuilt mappings for {total_rebuilt} notebooks")
             print(f"  ✅ Total pages mapped: {total_pages_mapped}")

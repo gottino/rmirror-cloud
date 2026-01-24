@@ -2,10 +2,11 @@
 """Show notebooks with the most missing pages."""
 
 import json
-import sys
 from pathlib import Path
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from app.config import get_settings
 from app.models.notebook import Notebook
 from app.models.page import Page

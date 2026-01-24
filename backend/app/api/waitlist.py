@@ -3,13 +3,12 @@
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import Column, DateTime, Integer, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Base, get_db
-from fastapi import Depends
 
 router = APIRouter(prefix="/waitlist", tags=["waitlist"])
 

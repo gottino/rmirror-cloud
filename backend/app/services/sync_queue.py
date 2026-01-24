@@ -9,7 +9,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
-from app.services.fingerprinting import fingerprint_page, fingerprint_todo, fingerprint_highlight
+from app.services.fingerprinting import fingerprint_highlight, fingerprint_page, fingerprint_todo
 
 
 def queue_sync(

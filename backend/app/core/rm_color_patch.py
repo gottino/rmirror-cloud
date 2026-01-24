@@ -8,7 +8,6 @@ when processing pages with light blue highlighters.
 """
 
 import logging
-from typing import Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +20,8 @@ def patch_rmc_colors():
     light blue highlighters (PenColor.HIGHLIGHT).
     """
     try:
-        from rmscene.scene_items import PenColor
         import rmc.exporters.writing_tools as writing_tools
+        from rmscene.scene_items import PenColor
 
         # Check if already patched
         if hasattr(writing_tools, "_rmc_color_patched"):

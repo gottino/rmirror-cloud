@@ -12,14 +12,15 @@ Usage:
     poetry run python rebuild_notebook_pages_mapping.py --remarkable-dir "~/Library/Containers/..."
 """
 
-import json
 import argparse
+import json
+import os
+import sys
 from pathlib import Path
+
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-import sys
-import os
-from dotenv import load_dotenv
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
