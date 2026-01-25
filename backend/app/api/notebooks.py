@@ -1,14 +1,19 @@
 """Notebook management endpoints."""
 
 import json
+import logging
+import re
 import uuid
 from datetime import datetime
+from io import BytesIO
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
+from app.core.pdf_service import PDFService
 from app.database import get_db
 from app.dependencies import get_storage_service
 from app.models.notebook import Notebook
@@ -17,8 +22,11 @@ from app.models.page import Page
 from app.models.user import User
 from app.schemas.notebook import Notebook as NotebookSchema
 from app.schemas.notebook import NotebookUploadResponse, NotebookWithPages
+from app.services import quota_service
 from app.storage import StorageService
 from app.utils.files import calculate_file_hash, get_document_type, validate_file_type
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -51,8 +59,6 @@ async def upload_notebook(
     file_size = len(file_content)
 
     # Calculate file hash
-    from io import BytesIO
-
     file_stream = BytesIO(file_content)
     file_hash = calculate_file_hash(file_stream)
 
@@ -369,6 +375,180 @@ async def get_notebook(
     notebook.pages = pages
 
     return notebook
+
+
+@router.get("/{notebook_id}/export")
+async def export_notebook(
+    notebook_id: int,
+    format: Annotated[str, Query(description="Export format: markdown or pdf")] = "markdown",
+    current_user: Annotated[User, Depends(get_clerk_active_user)] = None,
+    db: Annotated[Session, Depends(get_db)] = None,
+    storage: Annotated[StorageService, Depends(get_storage_service)] = None,
+):
+    """
+    Export a notebook as Markdown or PDF.
+
+    Requires quota to be available (like other premium features).
+    Returns the combined content as a downloadable file.
+
+    Args:
+        notebook_id: Notebook ID
+        format: Export format ('markdown' or 'pdf')
+        current_user: Current authenticated user
+        db: Database session
+        storage: Storage service
+
+    Returns:
+        StreamingResponse with the exported content
+    """
+    # Validate format
+    if format not in ("markdown", "pdf"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid format. Must be 'markdown' or 'pdf'.",
+        )
+
+    # Check quota first (export is a premium feature like Notion sync)
+    quota_status = quota_service.get_quota_status(db, current_user.id)
+    if quota_status["is_exhausted"]:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "message": "Quota exceeded - export unavailable",
+                "quota": quota_status,
+            },
+        )
+
+    # Get the notebook
+    notebook = (
+        db.query(Notebook)
+        .filter(
+            Notebook.id == notebook_id,
+            Notebook.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not notebook:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notebook not found",
+        )
+
+    # Get pages through the mapping table (source of truth for order)
+    notebook_pages = (
+        db.query(NotebookPage, Page)
+        .join(Page, NotebookPage.page_id == Page.id)
+        .filter(NotebookPage.notebook_id == notebook.id)
+        .order_by(NotebookPage.page_number)
+        .all()
+    )
+
+    if not notebook_pages:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notebook has no pages",
+        )
+
+    # Sanitize filename (remove special characters, limit length)
+    safe_name = re.sub(r'[^\w\s-]', '', notebook.visible_name or "notebook")
+    safe_name = re.sub(r'\s+', '_', safe_name)[:50]
+
+    if format == "markdown":
+        return await _export_markdown(notebook, notebook_pages, safe_name)
+    else:
+        return await _export_pdf(notebook, notebook_pages, safe_name, storage)
+
+
+async def _export_markdown(
+    notebook: Notebook,
+    notebook_pages: list[tuple[NotebookPage, Page]],
+    safe_name: str,
+) -> StreamingResponse:
+    """Generate markdown export for notebook."""
+    lines = []
+
+    # Add notebook title
+    lines.append(f"# {notebook.visible_name or 'Untitled Notebook'}")
+    lines.append("")
+
+    # Add each page
+    for notebook_page, page in notebook_pages:
+        lines.append(f"## Page {notebook_page.page_number}")
+        lines.append("")
+
+        # Content based on OCR status
+        if page.ocr_status == "completed" and page.ocr_text:
+            lines.append(page.ocr_text)
+        elif page.ocr_status == "processing":
+            lines.append("*[OCR processing...]*")
+        elif page.ocr_status == "pending":
+            lines.append("*[OCR pending]*")
+        elif page.ocr_status == "failed":
+            lines.append("*[OCR failed]*")
+        elif page.ocr_status == "pending_quota":
+            lines.append("*[OCR pending - quota exceeded]*")
+        elif page.ocr_status == "not_synced":
+            lines.append("*[Page not yet synced]*")
+        else:
+            lines.append("*[No content available]*")
+
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    markdown_content = "\n".join(lines)
+
+    return StreamingResponse(
+        iter([markdown_content.encode("utf-8")]),
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.md"',
+        },
+    )
+
+
+async def _export_pdf(
+    notebook: Notebook,
+    notebook_pages: list[tuple[NotebookPage, Page]],
+    safe_name: str,
+    storage: StorageService,
+) -> StreamingResponse:
+    """Generate PDF export by combining page PDFs."""
+    page_pdfs = []
+
+    for notebook_page, page in notebook_pages:
+        if page.pdf_s3_key:
+            try:
+                pdf_bytes = await storage.download_file(page.pdf_s3_key)
+                page_pdfs.append(pdf_bytes)
+            except Exception as e:
+                logger.warning(f"Failed to download PDF for page {page.id}: {e}")
+                # Skip pages without accessible PDFs
+                continue
+
+    if not page_pdfs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No PDF pages available for export",
+        )
+
+    try:
+        combined_pdf = PDFService.combine_page_pdfs(page_pdfs)
+    except Exception as e:
+        logger.error(f"Failed to combine PDFs: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate combined PDF",
+        )
+
+    return StreamingResponse(
+        iter([combined_pdf]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.pdf"',
+        },
+    )
 
 
 @router.delete("/{notebook_id}", status_code=status.HTTP_204_NO_CONTENT)

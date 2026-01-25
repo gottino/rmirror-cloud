@@ -5,10 +5,11 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
-import { ChevronRight, Download, Calendar, Clock, CloudUpload, Menu } from 'lucide-react';
-import { getNotebook, getQuotaStatus, type NotebookWithPages, type Page, type QuotaStatus } from '@/lib/api';
+import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu } from 'lucide-react';
+import { getNotebook, getQuotaStatus, QuotaExceededError, type NotebookWithPages, type Page, type QuotaStatus } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
+import { QuotaExceededModal } from '@/components/QuotaExceededModal';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
 
@@ -355,6 +356,11 @@ export default function NotebookPage() {
   const [authToken, setAuthToken] = useState<string>('');
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [quotaModalOpen, setQuotaModalOpen] = useState(false);
+  const [quotaModalData, setQuotaModalData] = useState<QuotaStatus | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   // Development mode: use JWT token from localStorage
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
@@ -406,11 +412,102 @@ export default function NotebookPage() {
     fetchNotebook();
   }, [params.id, effectiveIsSignedIn, getToken, router, isDevelopmentMode]);
 
-  // Handle download
-  const handleDownload = () => {
-    // TODO: Implement download functionality
-    alert('Download functionality coming soon!');
+  // Handle export
+  const handleExport = async (format: 'markdown' | 'pdf') => {
+    if (!notebook || !authToken) return;
+
+    setExporting(true);
+    setExportMenuOpen(false);
+
+    try {
+      const response = await fetch(`${API_URL}/notebooks/${notebook.id}/export?format=${format}`, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+        },
+      });
+
+      // Check for quota exceeded (402)
+      if (response.status === 402) {
+        const errorData = await response.json();
+        if (errorData.detail?.quota) {
+          setQuotaModalData(errorData.detail.quota);
+          setQuotaModalOpen(true);
+          return;
+        }
+        throw new Error('Quota exceeded');
+      }
+
+      if (!response.ok) {
+        // Try to parse JSON error response
+        const contentType = response.headers.get('content-type');
+        let errorMessage = `Export failed (${response.status})`;
+
+        if (contentType?.includes('application/json')) {
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.detail || errorMessage;
+          } catch {
+            // Fallback to text
+          }
+        } else {
+          const errorText = await response.text();
+          if (errorText) {
+            try {
+              const parsed = JSON.parse(errorText);
+              errorMessage = parsed.detail || errorText;
+            } catch {
+              errorMessage = errorText;
+            }
+          }
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      // Get filename from Content-Disposition header or generate one
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = `${notebook.visible_name || 'notebook'}.${format === 'markdown' ? 'md' : 'pdf'}`;
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="([^"]+)"/);
+        if (match) {
+          filename = match[1];
+        }
+      }
+
+      // Download the file
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export error:', err);
+      setExportError(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setExporting(false);
+    }
   };
+
+  // Close export menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-export-menu]')) {
+        setExportMenuOpen(false);
+      }
+    };
+
+    if (exportMenuOpen) {
+      document.addEventListener('click', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [exportMenuOpen]);
 
   if (loading) {
     return (
@@ -562,27 +659,74 @@ export default function NotebookPage() {
 
               {/* Action buttons */}
               <div className="flex gap-3">
-                <button
-                  onClick={handleDownload}
-                  className="px-4 py-2 rounded-lg transition-all flex items-center gap-2"
-                  style={{
-                    backgroundColor: 'var(--terracotta)',
-                    color: 'white',
-                    fontSize: '0.875em',
-                    fontWeight: 500,
-                    border: 'none',
-                    cursor: 'pointer'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.opacity = '0.9';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.opacity = '1';
-                  }}
-                >
-                  <Download className="w-4 h-4" />
-                  Export Notebook
-                </button>
+                <div className="relative" data-export-menu>
+                  <button
+                    onClick={() => setExportMenuOpen(!exportMenuOpen)}
+                    disabled={exporting}
+                    className="px-4 py-2 rounded-lg transition-all flex items-center gap-2"
+                    style={{
+                      backgroundColor: 'var(--terracotta)',
+                      color: 'white',
+                      fontSize: '0.875em',
+                      fontWeight: 500,
+                      border: 'none',
+                      cursor: exporting ? 'not-allowed' : 'pointer',
+                      opacity: exporting ? 0.7 : 1,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!exporting) e.currentTarget.style.opacity = '0.9';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!exporting) e.currentTarget.style.opacity = '1';
+                    }}
+                  >
+                    {exporting ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Exporting...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-4 h-4" />
+                        Export
+                        <ChevronDown className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+
+                  {/* Dropdown menu */}
+                  {exportMenuOpen && !exporting && (
+                    <div
+                      className="absolute top-full left-0 mt-2 w-56 rounded-lg shadow-lg z-50"
+                      style={{
+                        backgroundColor: 'var(--card)',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <button
+                        onClick={() => handleExport('markdown')}
+                        className="w-full px-4 py-3 flex items-start gap-3 text-left hover:bg-[var(--soft-cream)] transition-colors rounded-t-lg"
+                      >
+                        <FileText className="w-5 h-5 mt-0.5" style={{ color: 'var(--terracotta)' }} />
+                        <div>
+                          <div style={{ fontWeight: 500, color: 'var(--warm-charcoal)' }}>Markdown</div>
+                          <div style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>OCR text as .md file</div>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => handleExport('pdf')}
+                        className="w-full px-4 py-3 flex items-start gap-3 text-left hover:bg-[var(--soft-cream)] transition-colors rounded-b-lg"
+                        style={{ borderTop: '1px solid var(--border)' }}
+                      >
+                        <FileDown className="w-5 h-5 mt-0.5" style={{ color: 'var(--terracotta)' }} />
+                        <div>
+                          <div style={{ fontWeight: 500, color: 'var(--warm-charcoal)' }}>PDF</div>
+                          <div style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>Combined page PDFs</div>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -616,6 +760,71 @@ export default function NotebookPage() {
           </div>
         </main>
       </div>
+
+      {/* Quota Exceeded Modal */}
+      <QuotaExceededModal
+        isOpen={quotaModalOpen}
+        onClose={() => setQuotaModalOpen(false)}
+        quota={quotaModalData}
+      />
+
+      {/* Export Error Modal */}
+      {exportError && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+          onClick={() => setExportError(null)}
+        >
+          <div
+            className="relative max-w-md w-full rounded-lg shadow-2xl p-6"
+            style={{ backgroundColor: 'var(--card)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Icon */}
+            <div
+              className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4"
+              style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
+            >
+              <svg className="w-6 h-6" style={{ color: 'var(--destructive)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+
+            {/* Title */}
+            <h3 style={{
+              fontSize: '1.25rem',
+              fontWeight: 600,
+              color: 'var(--warm-charcoal)',
+              textAlign: 'center',
+              marginBottom: '0.5rem'
+            }}>
+              Export Failed
+            </h3>
+
+            {/* Message */}
+            <p style={{
+              fontSize: '0.925em',
+              color: 'var(--warm-gray)',
+              textAlign: 'center',
+              marginBottom: '1.5rem'
+            }}>
+              {exportError}
+            </p>
+
+            {/* Button */}
+            <button
+              onClick={() => setExportError(null)}
+              className="w-full px-4 py-2 rounded-lg transition-colors font-medium"
+              style={{
+                backgroundColor: 'var(--terracotta)',
+                color: 'white',
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
