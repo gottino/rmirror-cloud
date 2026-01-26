@@ -4,9 +4,9 @@ Flask routes for rMirror Agent web UI.
 
 import asyncio
 import threading
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
 
 from flask import Flask, jsonify, render_template, request
 
@@ -70,7 +70,7 @@ async def register_agent_with_backend(
             },
         )
         response.raise_for_status()
-        print(f"✓ Agent registered with backend")
+        print("✓ Agent registered with backend")
     except Exception as e:
         print(f"⚠ Failed to register agent with backend: {e}")
         raise

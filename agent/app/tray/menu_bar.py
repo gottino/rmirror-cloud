@@ -1,7 +1,6 @@
 """Menu bar application using rumps."""
 
 import asyncio
-import threading
 from pathlib import Path
 from typing import Optional
 
@@ -48,11 +47,11 @@ class TrayApp(rumps.App):
         """Update the status displayed in the menu."""
         self.status = status
         self.status_item.title = f"Status: {status}"
-    
+
     def update_sync_count(self, count: int) -> None:
         """Update the sync count."""
         self.sync_count = count
-        
+
     def open_web_ui(self, sender: rumps.MenuItem) -> None:
         """Open the web UI in browser."""
         url = f"http://{self.config.web.host}:{self.config.web.port}"
@@ -62,7 +61,7 @@ class TrayApp(rumps.App):
         """Open settings page in browser."""
         url = f"http://{self.config.web.host}:{self.config.web.port}"
         launch_browser_app_mode(url, app_mode=self.config.web.app_mode)
-        
+
     def quit_app(self, sender: rumps.MenuItem) -> None:
         """Quit the application."""
         # Stop the agent if it exists
@@ -74,7 +73,7 @@ class TrayApp(rumps.App):
                 loop.run_until_complete(self.agent.stop())
             finally:
                 loop.close()
-        
+
         # Quit the rumps application
         rumps.quit_application()
 

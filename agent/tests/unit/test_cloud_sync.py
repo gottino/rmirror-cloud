@@ -2,16 +2,17 @@
 Unit tests for cloud_sync module.
 """
 
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import httpx
+import pytest
 
 from app.sync.cloud_sync import (
     CloudSync,
     CloudSyncError,
-    RateLimitError,
     QuotaExceededError,
+    RateLimitError,
 )
 
 

@@ -2,19 +2,18 @@
 Unit tests for configuration module.
 """
 
-import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-import tempfile
-import json
+from unittest.mock import patch
+
+import pytest
 
 from app.config import (
-    Config,
     APIConfig,
+    Config,
     ReMarkableConfig,
-    WebConfig,
-    TrayConfig,
     SyncConfig,
+    TrayConfig,
+    WebConfig,
 )
 
 

@@ -12,7 +12,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 from app.config import Config
 from app.sync.cloud_sync import CloudSync, CloudSyncError
@@ -42,7 +42,7 @@ class MetadataSync:
         self.cloud_sync = cloud_sync
         self.remarkable_folder = Path(config.remarkable.source_directory)
 
-    async def run(self, selected_uuids: Optional[List[str]] = None) -> dict:
+    async def run(self, selected_uuids: Optional[list[str]] = None) -> dict:
         """
         Sync notebook metadata and page structure to the backend.
 
@@ -117,7 +117,7 @@ class MetadataSync:
             print(f"  ❌ Metadata sync failed: {e}")
             raise CloudSyncError(f"Metadata sync failed: {e}")
 
-    def _scan_notebooks(self, selected_uuids: Optional[List[str]] = None) -> List[dict]:
+    def _scan_notebooks(self, selected_uuids: Optional[list[str]] = None) -> list[dict]:
         """
         Scan reMarkable folder and build notebook metadata list.
 
@@ -162,7 +162,7 @@ class MetadataSync:
             Dictionary with notebook metadata or None if not a notebook
         """
         try:
-            with open(metadata_file, "r") as f:
+            with open(metadata_file) as f:
                 data = json.load(f)
 
             uuid = metadata_file.stem
@@ -223,7 +223,7 @@ class MetadataSync:
             logger.error(f"Error parsing {metadata_file}: {e}")
             return None
 
-    def _get_page_uuids(self, notebook_uuid: str) -> List[str]:
+    def _get_page_uuids(self, notebook_uuid: str) -> list[str]:
         """
         Extract page UUIDs from the notebook's .content file.
 
@@ -243,7 +243,7 @@ class MetadataSync:
             return []
 
         try:
-            with open(content_file, "r") as f:
+            with open(content_file) as f:
                 content_data = json.load(f)
 
             # Get pages array (try both locations for different reMarkable versions)

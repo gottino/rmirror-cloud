@@ -2,13 +2,12 @@
 Pytest fixtures for agent tests.
 """
 
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-import tempfile
-import os
 
-from app.config import Config, APIConfig, ReMarkableConfig, WebConfig, TrayConfig, SyncConfig
+import pytest
+
+from app.config import APIConfig, Config, ReMarkableConfig, SyncConfig, TrayConfig, WebConfig
 
 
 @pytest.fixture

@@ -96,7 +96,7 @@ class Agent:
 
             # Keep running until stopped
             if self.foreground:
-                print(f"\nrMirror Agent running in foreground mode. Press Ctrl+C to stop.")
+                print("\nrMirror Agent running in foreground mode. Press Ctrl+C to stop.")
                 print(f"Web UI: http://{self.config.web.host}:{self.config.web.port}")
                 if self.cloud_sync and self.cloud_sync.authenticated:
                     print(f"Watching: {self.config.remarkable.source_directory}")

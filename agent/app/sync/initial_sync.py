@@ -13,11 +13,11 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from app.config import Config
 from app.remarkable.metadata_scanner import MetadataScanner
-from app.sync.cloud_sync import CloudSync, CloudSyncError, QuotaExceededError, RateLimitError
+from app.sync.cloud_sync import CloudSync, QuotaExceededError, RateLimitError
 from app.sync.metadata_sync import MetadataSync
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class InitialSync:
         self.remarkable_folder = Path(config.remarkable.source_directory)
         self.metadata_sync = MetadataSync(config, cloud_sync)
 
-    async def run(self, selected_notebook_uuids: Optional[List[str]] = None) -> dict:
+    async def run(self, selected_notebook_uuids: Optional[list[str]] = None) -> dict:
         """
         Perform initial sync of all notebooks using two-phase approach.
 
@@ -132,9 +132,9 @@ class InitialSync:
 
                 print()
 
-            except QuotaExceededError as e:
+            except QuotaExceededError:
                 logger.warning(f"Quota exceeded during sync of {notebook.uuid}")
-                print(f"   ⚠️  Quota exceeded - stopping content sync")
+                print("   ⚠️  Quota exceeded - stopping content sync")
                 break
 
             except Exception as e:
@@ -209,7 +209,7 @@ class InitialSync:
 
         if content_file.exists():
             try:
-                with open(content_file, 'r') as f:
+                with open(content_file) as f:
                     content_data = json.load(f)
 
                 # Get pages array (try both locations for different reMarkable versions)
@@ -254,7 +254,7 @@ class InitialSync:
                     ordered_page_files.append(page_file_map[uuid])
         else:
             # No .content file or empty - fall back to file modification time (newest first)
-            logger.warning(f"No page order from .content, falling back to file mtime")
+            logger.warning("No page order from .content, falling back to file mtime")
             ordered_page_files = sorted(
                 all_page_files,
                 key=lambda p: p.stat().st_mtime,

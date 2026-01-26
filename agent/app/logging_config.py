@@ -6,8 +6,8 @@ Sets up both file and console logging with proper formatting.
 
 import logging
 import sys
-from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
