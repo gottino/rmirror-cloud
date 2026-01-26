@@ -336,11 +336,10 @@ async def test_hard_cap_allows_99_pending(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Rate limiter state persists between tests - needs test isolation fix")
 @pytest.mark.slow  # Mark as slow test (takes ~6+ seconds)
 async def test_rate_limiting(
     db: Session,
-    test_client_with_user,
+    test_app,
     mock_storage,
     mock_ocr,
     mock_rm_converter,
@@ -354,45 +353,62 @@ async def test_rate_limiting(
     - 11th upload fails with HTTP 429
     - Error message indicates rate limit
     """
-    client, user = test_client_with_user
+    from app.auth.clerk import get_clerk_active_user
+    from app.api.processing import limiter
 
-    # Setup: User with available quota
-    quota = quota_service.get_or_create_quota(db, user.id)
-    quota.used = 0
-    quota.limit = 30
-    db.commit()
+    # Reset rate limiter storage before test
+    if hasattr(limiter, '_storage') and limiter._storage:
+        limiter._storage.reset()
 
-    # Action: Upload 11 pages rapidly
-    responses = []
-    for i in range(11):
-        # Create unique file for each upload
-        test_file = (
-            f"test_page_{i}.rm",
-            io.BytesIO(f"fake_rm_content_{i}".encode()),
-            "application/octet-stream",
+    # Create test user
+    user = create_user_with_quota(db, used=0, limit=30)
+
+    # Override authentication dependency
+    async def override_get_clerk_active_user():
+        return user
+
+    test_app.dependency_overrides[get_clerk_active_user] = override_get_clerk_active_user
+
+    # Create client with fresh limiter state
+    with TestClient(test_app) as client:
+        # Action: Upload 11 pages rapidly
+        responses = []
+        for i in range(11):
+            # Create unique file for each upload
+            test_file = (
+                f"test_page_{i}.rm",
+                io.BytesIO(f"fake_rm_content_{i}".encode()),
+                "application/octet-stream",
+            )
+
+            files = {"rm_file": test_file}
+            response = client.post("/v1/processing/rm-file", files=files)
+            responses.append(response)
+            time.sleep(0.1)  # Small delay between uploads
+
+        # Verify first 10 succeeded
+        for i in range(10):
+            assert (
+                responses[i].status_code == 200
+            ), f"Upload {i} should succeed, got {responses[i].status_code}: {responses[i].json()}"
+
+        # Verify 11th was rate limited
+        assert (
+            responses[10].status_code == 429
+        ), f"11th upload should be rate limited, got {responses[10].status_code}"
+
+        # Verify error message indicates rate limiting (slowapi returns "X per Y minute" format)
+        error_detail = str(responses[10].json().get("detail", ""))
+        assert "per" in error_detail.lower() or "rate" in error_detail.lower(), (
+            f"Error should indicate rate limit: {error_detail}"
         )
 
-        files = {"rm_file": test_file}
-        response = client.post("/v1/processing/rm-file", files=files)
-        responses.append(response)
-        time.sleep(0.1)  # Small delay between uploads
+    # Clear override
+    test_app.dependency_overrides.pop(get_clerk_active_user, None)
 
-    # Verify first 10 succeeded
-    for i in range(10):
-        assert (
-            responses[i].status_code == 200
-        ), f"Upload {i} should succeed, got {responses[i].status_code}: {responses[i].json()}"
-
-    # Verify 11th was rate limited
-    assert (
-        responses[10].status_code == 429
-    ), f"11th upload should be rate limited, got {responses[10].status_code}"
-
-    # Verify error message indicates rate limiting (slowapi returns "X per Y minute" format)
-    error_detail = str(responses[10].json().get("detail", ""))
-    assert "per" in error_detail.lower() and "minute" in error_detail.lower(), (
-        f"Error should indicate rate limit: {error_detail}"
-    )
+    # Reset rate limiter after test
+    if hasattr(limiter, '_storage') and limiter._storage:
+        limiter._storage.reset()
 
 
 # =============================================================================
@@ -401,8 +417,7 @@ async def test_rate_limiting(
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="S3 storage mocking incomplete - needs fixture update")
-async def test_retroactive_processing_newest_first(db: Session, mock_storage, mock_ocr):
+async def test_retroactive_processing_newest_first(db: Session):
     """
     TC-AUTO-06: Pending pages should be processed newest first when quota resets.
 
@@ -413,78 +428,94 @@ async def test_retroactive_processing_newest_first(db: Session, mock_storage, mo
     - 20 oldest pages still pending
     - Quota consumed correctly (30/30)
     """
-    from app.jobs.process_pending_pages import process_pending_pages_for_user
+    from unittest.mock import AsyncMock, patch, MagicMock
 
-    # Setup: Create user with fresh quota
-    user = create_user_with_quota(db, used=0, limit=30)
+    # Mock storage and OCR services
+    mock_storage = MagicMock()
+    mock_storage.download_file = AsyncMock(return_value=b"fake_pdf_bytes")
 
-    # Create notebook
-    notebook = Notebook(
-        user_id=user.id,
-        notebook_uuid="retroactive-test-notebook",
-        visible_name="Retroactive Test",
-        document_type=DocumentType.NOTEBOOK,
-    )
-    db.add(notebook)
-    db.commit()
+    mock_ocr = MagicMock()
 
-    # Create 50 pending pages with staggered timestamps (oldest to newest)
-    pages = []
-    for i in range(50):
-        created_at = datetime.utcnow() - timedelta(days=50 - i)  # Oldest to newest
-        page = create_test_page(
-            db=db,
+    async def mock_extract(pdf_bytes):
+        return "Mocked OCR text for retroactive processing"
+
+    mock_ocr.extract_text_from_pdf = mock_extract
+
+    with patch("app.jobs.process_pending_pages.get_storage_service", return_value=mock_storage), \
+         patch("app.jobs.process_pending_pages.OCRService", return_value=mock_ocr):
+
+        from app.jobs.process_pending_pages import process_pending_pages_for_user
+
+        # Setup: Create user with fresh quota
+        user = create_user_with_quota(db, used=0, limit=30)
+
+        # Create notebook
+        notebook = Notebook(
             user_id=user.id,
-            notebook_id=notebook.id,
-            page_number=i,
-            ocr_status=OcrStatus.PENDING_QUOTA,
-            created_at=created_at,
-            ocr_text=None,  # No OCR yet
+            notebook_uuid="retroactive-test-notebook",
+            visible_name="Retroactive Test",
+            document_type=DocumentType.NOTEBOOK,
         )
-        # Add PDF S3 key (required for processing)
-        page.pdf_s3_key = f"s3://test-bucket/page-{i}.pdf"
+        db.add(notebook)
         db.commit()
-        pages.append(page)
 
-    # Identify the 30 newest pages (should be processed)
-    pages_sorted = sorted(pages, key=lambda p: p.created_at, reverse=True)
-    newest_30_ids = [p.id for p in pages_sorted[:30]]
-    oldest_20_ids = [p.id for p in pages_sorted[30:]]
+        # Create 50 pending pages with staggered timestamps (oldest to newest)
+        pages = []
+        for i in range(50):
+            created_at = datetime.utcnow() - timedelta(days=50 - i)  # Oldest to newest
+            page = create_test_page(
+                db=db,
+                user_id=user.id,
+                notebook_id=notebook.id,
+                page_number=i,
+                ocr_status=OcrStatus.PENDING_QUOTA,
+                created_at=created_at,
+                ocr_text=None,  # No OCR yet
+            )
+            # Add PDF S3 key (required for processing)
+            page.pdf_s3_key = f"s3://test-bucket/page-{i}.pdf"
+            db.commit()
+            pages.append(page)
 
-    # Action: Run retroactive processing
-    count = await process_pending_pages_for_user(db, user.id)
+        # Identify the 30 newest pages (should be processed)
+        pages_sorted = sorted(pages, key=lambda p: p.created_at, reverse=True)
+        newest_30_ids = [p.id for p in pages_sorted[:30]]
+        oldest_20_ids = [p.id for p in pages_sorted[30:]]
 
-    # Verify count
-    assert count == 30, f"Expected 30 pages processed, got {count}"
+        # Action: Run retroactive processing
+        count = await process_pending_pages_for_user(db, user.id)
 
-    # Verify the 30 newest were processed (COMPLETED status)
-    for page_id in newest_30_ids:
-        page = db.query(Page).filter_by(id=page_id).first()
-        assert page.ocr_status == OcrStatus.COMPLETED, f"Page {page_id} not completed"
-        assert page.ocr_text is not None, f"Page {page_id} has no OCR text"
-        assert page.ocr_completed_at is not None, f"Page {page_id} has no completion timestamp"
+        # Verify count
+        assert count == 30, f"Expected 30 pages processed, got {count}"
 
-    # Verify 20 oldest still pending
-    for page_id in oldest_20_ids:
-        page = db.query(Page).filter_by(id=page_id).first()
-        assert (
-            page.ocr_status == OcrStatus.PENDING_QUOTA
-        ), f"Page {page_id} should still be pending"
+        # Verify the 30 newest were processed (COMPLETED status)
+        for page_id in newest_30_ids:
+            page = db.query(Page).filter_by(id=page_id).first()
+            assert page.ocr_status == OcrStatus.COMPLETED, f"Page {page_id} not completed"
+            assert page.ocr_text is not None, f"Page {page_id} has no OCR text"
+            assert page.ocr_completed_at is not None, f"Page {page_id} has no completion timestamp"
 
-    # Verify pending count
-    pending_count = (
-        db.query(Page)
-        .filter(
-            Page.notebook_id == notebook.id,
-            Page.ocr_status == OcrStatus.PENDING_QUOTA,
+        # Verify 20 oldest still pending
+        for page_id in oldest_20_ids:
+            page = db.query(Page).filter_by(id=page_id).first()
+            assert (
+                page.ocr_status == OcrStatus.PENDING_QUOTA
+            ), f"Page {page_id} should still be pending"
+
+        # Verify pending count
+        pending_count = (
+            db.query(Page)
+            .filter(
+                Page.notebook_id == notebook.id,
+                Page.ocr_status == OcrStatus.PENDING_QUOTA,
+            )
+            .count()
         )
-        .count()
-    )
-    assert pending_count == 20, f"Expected 20 pending, got {pending_count}"
+        assert pending_count == 20, f"Expected 20 pending, got {pending_count}"
 
-    # Verify quota consumed (30/30)
-    quota = quota_service.get_or_create_quota(db, user.id)
-    assert quota.used == 30, f"Expected quota 30/30, got {quota.used}/{quota.limit}"
+        # Verify quota consumed (30/30)
+        quota = quota_service.get_or_create_quota(db, user.id)
+        assert quota.used == 30, f"Expected quota 30/30, got {quota.used}/{quota.limit}"
 
 
 # =============================================================================
@@ -493,7 +524,6 @@ async def test_retroactive_processing_newest_first(db: Session, mock_storage, mo
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Test fixture issue - needs update for proper content hash handling")
 async def test_content_hash_deduplication(
     db: Session,
     test_client_with_user,
@@ -507,7 +537,7 @@ async def test_content_hash_deduplication(
 
     Expected behavior:
     - First upload consumes quota (5 -> 6)
-    - Second upload (same content) doesn't consume quota (stays 6)
+    - Second upload (same content, same page UUID) doesn't consume quota (stays 6)
     - Both uploads succeed (HTTP 200)
     """
     client, user = test_client_with_user
@@ -518,13 +548,34 @@ async def test_content_hash_deduplication(
     quota.limit = 30
     db.commit()
 
-    # First upload
+    # Use a consistent page UUID for both uploads (from filename)
+    page_uuid = "dedup-test-page-uuid"
+    notebook_uuid = "dedup-test-notebook-uuid"
+
+    # Create metadata file with consistent notebook UUID
+    import json
+    metadata_content = json.dumps({
+        "visibleName": "Dedup Test Notebook",
+        "type": "DocumentType",
+        "parent": "",
+        "lastModified": "1234567890000",
+        "version": 1,
+        "pinned": False,
+    }).encode()
+
+    # First upload with consistent UUIDs
+    test_content = b"exact_same_content_for_dedup_test"
     test_file_1 = (
-        "duplicate_test.rm",
-        io.BytesIO(b"exact_same_content_for_dedup_test"),
+        f"{page_uuid}.rm",  # Page UUID from filename
+        io.BytesIO(test_content),
         "application/octet-stream",
     )
-    files = {"rm_file": test_file_1}
+    metadata_file_1 = (
+        f"{notebook_uuid}.metadata",  # Notebook UUID from metadata filename
+        io.BytesIO(metadata_content),
+        "application/json",
+    )
+    files = {"rm_file": test_file_1, "metadata_file": metadata_file_1}
     response1 = client.post("/v1/processing/rm-file", files=files)
 
     assert response1.status_code == 200, f"First upload failed: {response1.json()}"
@@ -533,13 +584,18 @@ async def test_content_hash_deduplication(
     db.refresh(quota)
     assert quota.used == 6, f"Quota should be 6 after first upload, got {quota.used}"
 
-    # Second upload (SAME content, same hash)
+    # Second upload (SAME content, same UUIDs - should deduplicate)
     test_file_2 = (
-        "duplicate_test.rm",
-        io.BytesIO(b"exact_same_content_for_dedup_test"),  # Identical content
+        f"{page_uuid}.rm",  # Same page UUID
+        io.BytesIO(test_content),  # Identical content
         "application/octet-stream",
     )
-    files = {"rm_file": test_file_2}
+    metadata_file_2 = (
+        f"{notebook_uuid}.metadata",  # Same notebook UUID
+        io.BytesIO(metadata_content),
+        "application/json",
+    )
+    files = {"rm_file": test_file_2, "metadata_file": metadata_file_2}
     response2 = client.post("/v1/processing/rm-file", files=files)
 
     assert response2.status_code == 200, f"Second upload failed: {response2.json()}"

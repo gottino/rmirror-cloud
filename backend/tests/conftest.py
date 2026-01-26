@@ -1,7 +1,15 @@
-"""Test configuration and fixtures for pytest."""
+"""Test configuration and fixtures for pytest.
 
-from datetime import datetime, timedelta
+Provides fixtures for:
+- In-memory SQLite database
+- Test users with quota states
+- Rate limiter reset
+- Test data factories
+"""
+
+from datetime import datetime, timedelta, timezone
 from typing import Generator
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -17,6 +25,12 @@ from app.models.user import User
 
 # Test database URL (in-memory SQLite)
 TEST_DATABASE_URL = "sqlite:///:memory:"
+
+
+# Register custom pytest marks
+def pytest_configure(config):
+    """Register custom pytest markers."""
+    config.addinivalue_line("markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')")
 
 
 @pytest.fixture(scope="function")
@@ -199,3 +213,53 @@ def create_pending_pages(
 def user_with_quota():
     """Fixture factory for creating users with specific quota states."""
     return create_user_with_quota
+
+
+@pytest.fixture
+def reset_rate_limiter():
+    """Reset the rate limiter state between tests.
+
+    This fixture clears the in-memory storage used by SlowAPI
+    to ensure rate limits don't persist between tests.
+    """
+    # Import the limiter from the processing module
+    from app.api.processing import limiter
+
+    # Clear the limiter storage before test
+    if hasattr(limiter, '_storage') and limiter._storage:
+        limiter._storage.reset()
+
+    yield limiter
+
+    # Clear again after test for clean state
+    if hasattr(limiter, '_storage') and limiter._storage:
+        limiter._storage.reset()
+
+
+@pytest.fixture
+def mock_ocr_service():
+    """Mock OCR service for tests that don't need actual OCR."""
+    with patch("app.api.processing.OCRService") as mock_class:
+        mock_instance = MagicMock()
+
+        async def mock_extract_text(pdf_bytes):
+            return "Mocked OCR text for testing"
+
+        mock_instance.extract_text_from_pdf = mock_extract_text
+        mock_class.return_value = mock_instance
+        yield mock_instance
+
+
+@pytest.fixture
+def mock_storage_service():
+    """Mock storage service for tests that don't need actual S3/B2."""
+    from unittest.mock import AsyncMock
+
+    mock_storage = MagicMock()
+    mock_storage.upload_file = AsyncMock()
+    mock_storage.download_file = AsyncMock(return_value=b"fake_pdf_bytes")
+    mock_storage.delete_file = AsyncMock()
+    mock_storage.file_exists = AsyncMock(return_value=True)
+    mock_storage.get_file_url = MagicMock(return_value="https://example.com/fake.pdf")
+
+    return mock_storage
