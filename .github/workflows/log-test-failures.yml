@@ -1,0 +1,193 @@
+name: Log Test Failures as Issues
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+jobs:
+  create-issue:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      actions: read
+
+    steps:
+      - name: Get failed jobs info
+        id: failed-jobs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runId = context.payload.workflow_run.id;
+
+            // Get all jobs from the failed workflow run
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            });
+
+            // Filter to only failed jobs
+            const failedJobs = jobs.jobs.filter(job => job.conclusion === 'failure');
+
+            if (failedJobs.length === 0) {
+              console.log('No failed jobs found');
+              return { createIssue: false };
+            }
+
+            // Build job details
+            const jobDetails = failedJobs.map(job => {
+              // Determine component from job name
+              let component = 'backend';
+              if (job.name.toLowerCase().includes('dashboard')) {
+                component = 'dashboard';
+              } else if (job.name.toLowerCase().includes('agent')) {
+                component = 'agent';
+              }
+
+              // Get failed steps
+              const failedSteps = job.steps
+                .filter(step => step.conclusion === 'failure')
+                .map(step => `- ${step.name}`)
+                .join('\n');
+
+              return {
+                name: job.name,
+                component: component,
+                url: job.html_url,
+                failedSteps: failedSteps || '- (see logs for details)'
+              };
+            });
+
+            return {
+              createIssue: true,
+              jobs: jobDetails,
+              branch: context.payload.workflow_run.head_branch,
+              commit: context.payload.workflow_run.head_sha.substring(0, 7),
+              runUrl: context.payload.workflow_run.html_url
+            };
+
+      - name: Check for existing issue
+        id: check-issue
+        if: ${{ fromJson(steps.failed-jobs.outputs.result).createIssue }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = '${{ fromJson(steps.failed-jobs.outputs.result).branch }}';
+
+            // Search for open issues with same branch
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'ci-failure',
+            });
+
+            // Check if there's already an issue for this branch
+            const existingIssue = issues.find(issue =>
+              issue.title.includes(`[${branch}]`)
+            );
+
+            if (existingIssue) {
+              console.log(`Found existing issue #${existingIssue.number}`);
+              return { exists: true, number: existingIssue.number };
+            }
+
+            return { exists: false };
+
+      - name: Create or update issue
+        if: ${{ fromJson(steps.failed-jobs.outputs.result).createIssue }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const result = ${{ steps.failed-jobs.outputs.result }};
+            const existingIssue = ${{ steps.check-issue.outputs.result }};
+
+            // Build job list for issue body
+            const jobsList = result.jobs.map(job => `
+            ### ${job.name}
+            **Component:** \`${job.component}\`
+            **Failed steps:**
+            ${job.failedSteps}
+
+            [View logs](${job.url})
+            `).join('\n');
+
+            // Build component labels
+            const components = [...new Set(result.jobs.map(j => j.component))];
+            const componentLabels = components.map(c => `component:${c}`);
+
+            const title = `CI Failure [${result.branch}]: ${result.jobs.map(j => j.name).join(', ')}`;
+
+            const body = `## Automated Bug Report from CI
+
+            **Branch:** \`${result.branch}\`
+            **Commit:** \`${result.commit}\`
+            **Workflow Run:** [View full run](${result.runUrl})
+
+            ---
+
+            ## Failed Jobs
+            ${jobsList}
+
+            ---
+
+            ## To fix with Claude Code
+
+            \`\`\`bash
+            # Pull the branch
+            git fetch origin ${result.branch}
+            git checkout ${result.branch}
+
+            # Open Claude Code in the affected component directory
+            cd ${result.jobs[0].component}
+
+            # Then describe the issue to Claude, e.g.:
+            # "The CI tests are failing. Please check the test output and fix the issues."
+            \`\`\`
+
+            <details>
+            <summary>Quick copy-paste for Claude</summary>
+
+            \`\`\`
+            The CI tests failed on branch ${result.branch}. The failing jobs are:
+            ${result.jobs.map(j => `- ${j.name} (${j.component})`).join('\n')}
+
+            Please investigate the test failures and fix them. You can run the tests locally with:
+            - Backend: cd backend && poetry run pytest tests/ -v
+            - Dashboard: cd dashboard && npm test
+            - Agent: cd agent && poetry run pytest tests/ -v
+            \`\`\`
+
+            </details>
+            `;
+
+            if (existingIssue.exists) {
+              // Update existing issue with new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: `## New CI Failure (${new Date().toISOString()})
+
+            **Commit:** \`${result.commit}\`
+            **Run:** [View logs](${result.runUrl})
+
+            ${jobsList}
+            `
+              });
+
+              console.log(`Updated issue #${existingIssue.number}`);
+            } else {
+              // Create new issue
+              const { data: issue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['bug', 'ci-failure', ...componentLabels]
+              });
+
+              console.log(`Created issue #${issue.number}`);
+            }
