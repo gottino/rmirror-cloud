@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:  # Allow manual trigger
   workflow_call:  # Allow other workflows to call this one
 
 jobs:
