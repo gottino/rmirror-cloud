@@ -9,9 +9,6 @@ on:
 jobs:
   backend-checks:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
 
     steps:
       - uses: actions/checkout@v4
@@ -25,12 +22,15 @@ jobs:
         run: pip install poetry
 
       - name: Install dependencies
+        working-directory: backend
         run: poetry install --no-root
 
       - name: Lint
+        working-directory: backend
         run: poetry run ruff check .
 
       - name: Unit tests
+        working-directory: backend
         env:
           SECRET_KEY: test-secret-key-for-ci-only
           DATABASE_URL: sqlite:///:memory:
