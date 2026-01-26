@@ -8,6 +8,7 @@ Provides fixtures for:
 """
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
@@ -263,3 +264,128 @@ def mock_storage_service():
     mock_storage.get_file_url = MagicMock(return_value="https://example.com/fake.pdf")
 
     return mock_storage
+
+
+# =============================================================================
+# Named User Fixtures for Common Test Scenarios
+# =============================================================================
+
+
+@pytest.fixture
+def fresh_user(db: Session) -> User:
+    """User with 0/30 quota - new user flow testing."""
+    return create_user_with_quota(
+        db, email="fresh@test.com", used=0, limit=30, tier=SubscriptionTier.FREE
+    )
+
+
+@pytest.fixture
+def active_user(db: Session) -> User:
+    """User with 15/30 quota - normal usage testing."""
+    return create_user_with_quota(
+        db, email="active@test.com", used=15, limit=30, tier=SubscriptionTier.FREE
+    )
+
+
+@pytest.fixture
+def warning_user(db: Session) -> User:
+    """User with 27/30 quota (90%) - warning threshold testing."""
+    return create_user_with_quota(
+        db, email="warning@test.com", used=27, limit=30, tier=SubscriptionTier.FREE
+    )
+
+
+@pytest.fixture
+def exhausted_user(db: Session) -> User:
+    """User with 30/30 quota - graceful degradation testing."""
+    return create_user_with_quota(
+        db, email="exhausted@test.com", used=30, limit=30, tier=SubscriptionTier.FREE
+    )
+
+
+@pytest.fixture
+def hardcap_user(db: Session) -> tuple[User, Notebook, list[Page]]:
+    """User with 30/30 quota + 100 pending pages - hard cap testing.
+
+    Returns tuple of (user, notebook, pending_pages).
+    """
+    user = create_user_with_quota(
+        db, email="hardcap@test.com", used=30, limit=30, tier=SubscriptionTier.FREE
+    )
+
+    # Create notebook for pending pages
+    notebook = Notebook(
+        uuid=f"hardcap-notebook-{datetime.utcnow().timestamp()}",
+        user_id=user.id,
+        visible_name="Hard Cap Test Notebook",
+        created_at=datetime.utcnow(),
+    )
+    db.add(notebook)
+    db.commit()
+    db.refresh(notebook)
+
+    # Create 100 pending pages
+    pending_pages = create_pending_pages(
+        db=db,
+        user_id=user.id,
+        notebook_id=notebook.id,
+        count=100,
+        status=OcrStatus.PENDING_QUOTA,
+    )
+
+    return user, notebook, pending_pages
+
+
+@pytest.fixture
+def pro_user(db: Session) -> User:
+    """User with 150/500 Pro tier quota - paid tier testing."""
+    return create_user_with_quota(
+        db, email="pro@test.com", used=150, limit=500, tier=SubscriptionTier.PRO
+    )
+
+
+# =============================================================================
+# Fixture File Paths
+# =============================================================================
+
+
+@pytest.fixture
+def fixtures_dir() -> Path:
+    """Return path to the fixtures directory."""
+    return Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture
+def valid_rm_file(fixtures_dir: Path) -> Path:
+    """Return path to a valid .rm file fixture."""
+    return fixtures_dir / "page_1.rm"
+
+
+@pytest.fixture
+def empty_rm_file(fixtures_dir: Path) -> Path:
+    """Return path to an empty .rm file fixture."""
+    return fixtures_dir / "empty_page.rm"
+
+
+@pytest.fixture
+def corrupted_rm_file(fixtures_dir: Path) -> Path:
+    """Return path to a corrupted .rm file fixture."""
+    return fixtures_dir / "corrupted_page.rm"
+
+
+@pytest.fixture
+def sample_metadata_file(fixtures_dir: Path) -> Path:
+    """Return path to a sample notebook.metadata file."""
+    return fixtures_dir / "notebook.metadata"
+
+
+@pytest.fixture
+def sample_content_file(fixtures_dir: Path) -> Path:
+    """Return path to a sample notebook.content file."""
+    return fixtures_dir / "notebook.content"
+
+
+@pytest.fixture
+def folder_metadata_file(fixtures_dir: Path) -> Path:
+    """Return path to a folder.metadata file."""
+    return fixtures_dir / "folder.metadata"
