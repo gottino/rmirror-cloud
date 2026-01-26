@@ -118,9 +118,6 @@ jobs:
   e2e-tests:
     needs: [deploy]
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: dashboard
 
     steps:
       - uses: actions/checkout@v4
@@ -131,15 +128,15 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
-        run: npm ci
+        run: cd dashboard && npm ci
 
       - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
+        run: cd dashboard && npx playwright install chromium --with-deps
 
       - name: Run E2E tests against staging
         env:
           PLAYWRIGHT_BASE_URL: https://staging.rmirror.io
-        run: npm run test:e2e
+        run: cd dashboard && npm run test:e2e
 
       - name: Upload Playwright report on failure
         if: failure()
