@@ -17,9 +17,12 @@ class TestOCRServiceErrors:
     """Test OCR service error handling."""
 
     @pytest.mark.asyncio
-    async def test_ocr_service_timeout(self, db: Session):
+    async def test_ocr_service_timeout(self, db: Session, monkeypatch):
         """OCR service should handle timeout gracefully."""
         from app.core.ocr_service import OCRService
+
+        # Set fake API key for testing
+        monkeypatch.setenv("CLAUDE_API_KEY", "test-api-key-for-ci")
 
         with patch("app.core.ocr_service.anthropic") as mock_anthropic:
             # Simulate timeout
@@ -37,9 +40,12 @@ class TestOCRServiceErrors:
             assert "timeout" in str(exc_info.value).lower() or exc_info.value is not None
 
     @pytest.mark.asyncio
-    async def test_ocr_service_rate_limit(self, db: Session):
+    async def test_ocr_service_rate_limit(self, db: Session, monkeypatch):
         """OCR service should handle API rate limits gracefully."""
         from app.core.ocr_service import OCRService
+
+        # Set fake API key for testing
+        monkeypatch.setenv("CLAUDE_API_KEY", "test-api-key-for-ci")
 
         with patch("app.core.ocr_service.anthropic") as mock_anthropic:
             # Simulate 429 rate limit response
@@ -58,9 +64,12 @@ class TestOCRServiceErrors:
                 await ocr_service.extract_text_from_pdf(b"fake_pdf_bytes")
 
     @pytest.mark.asyncio
-    async def test_ocr_service_invalid_response(self, db: Session):
+    async def test_ocr_service_invalid_response(self, db: Session, monkeypatch):
         """OCR service should handle malformed API responses."""
         from app.core.ocr_service import OCRService
+
+        # Set fake API key for testing
+        monkeypatch.setenv("CLAUDE_API_KEY", "test-api-key-for-ci")
 
         with patch("app.core.ocr_service.anthropic") as mock_anthropic:
             # Simulate malformed response (missing expected fields)
