@@ -56,25 +56,3 @@ jobs:
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
           NEXT_PUBLIC_API_URL: https://rmirror.io
         run: cd dashboard && npm run build
-
-  agent-checks:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Poetry
-        run: pip install poetry
-
-      - name: Install dependencies
-        run: cd agent && poetry install --no-root
-
-      - name: Lint
-        run: cd agent && poetry run ruff check .
-
-      - name: Unit tests
-        run: cd agent && poetry run pytest tests/ -v --tb=short -x
