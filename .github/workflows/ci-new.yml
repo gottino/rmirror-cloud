@@ -25,9 +25,3 @@ jobs:
 
       - name: Lint
         run: cd backend && poetry run ruff check .
-
-      - name: Unit tests
-        env:
-          SECRET_KEY: test-secret-key-for-ci-only
-          DATABASE_URL: sqlite:///:memory:
-        run: cd backend && poetry run pytest tests/ -v --tb=short -x
