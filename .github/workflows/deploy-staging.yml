@@ -13,6 +13,7 @@ jobs:
   # Run CI tests first - deployment requires all tests to pass
   ci:
     uses: ./.github/workflows/ci.yml
+    secrets: inherit
 
   deploy:
     needs: [ci]  # Only deploy if CI passes

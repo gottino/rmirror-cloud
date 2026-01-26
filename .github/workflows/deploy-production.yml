@@ -13,6 +13,7 @@ jobs:
   # Run CI tests first - production deployment requires all tests to pass
   ci:
     uses: ./.github/workflows/ci.yml
+    secrets: inherit
 
   verify-staging:
     needs: [ci]  # CI must pass before checking staging
