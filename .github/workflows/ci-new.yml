@@ -27,4 +27,8 @@ jobs:
         run: cd backend && poetry run ruff check .
 
       - name: Unit tests
-        run: SECRET_KEY=test-secret-key DATABASE_URL=sqlite:///:memory: cd backend && poetry run pytest tests/ -v --tb=short -x
+        run: |
+          cd backend
+          export SECRET_KEY=test-secret-key
+          export DATABASE_URL=sqlite:///:memory:
+          poetry run pytest tests/ -v --tb=short -x
