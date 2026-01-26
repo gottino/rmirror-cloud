@@ -7,8 +7,27 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  backend-checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "CI works!"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: cd backend && poetry install --no-root
+
+      - name: Lint
+        run: cd backend && poetry run ruff check .
+
+      - name: Unit tests
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+          DATABASE_URL: sqlite:///:memory:
+        run: cd backend && poetry run pytest tests/ -v --tb=short -x
