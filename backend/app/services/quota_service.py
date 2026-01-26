@@ -296,7 +296,20 @@ def reset_quota(
         >>> quota = reset_quota(db, user_id=42)
         >>> print(f"Reset. New period: {quota.period_start} to {quota.reset_at}")
     """
-    quota = get_or_create_quota(db, user_id, quota_type)
+    # Query directly to avoid mutual recursion with get_or_create_quota()
+    # (get_or_create_quota calls reset_quota when reset_at is in the past)
+    quota = (
+        db.query(QuotaUsage)
+        .filter(
+            QuotaUsage.user_id == user_id,
+            QuotaUsage.quota_type == quota_type,
+        )
+        .first()
+    )
+
+    if not quota:
+        # No quota exists - create via get_or_create_quota (safe since no reset_at yet)
+        return get_or_create_quota(db, user_id, quota_type)
 
     # Reset usage counter
     quota.used = 0

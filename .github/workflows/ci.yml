@@ -5,6 +5,8 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+  workflow_call:  # Allow other workflows to call this one
 
 jobs:
   backend-checks:
@@ -39,8 +41,10 @@ jobs:
         run: poetry run ruff check .
 
       - name: Unit tests
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+          DATABASE_URL: sqlite:///:memory:
         run: poetry run pytest tests/ -v --tb=short -x
-        continue-on-error: true  # Don't fail CI if no tests exist yet
 
   dashboard-checks:
     runs-on: ubuntu-latest
@@ -70,8 +74,45 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Unit tests
+        run: npm test
+
       - name: Build
         env:
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
           NEXT_PUBLIC_API_URL: https://rmirror.io
         run: npm run build
+
+  agent-checks:
+    runs-on: macos-latest  # macOS needed for rumps compatibility
+    defaults:
+      run:
+        working-directory: agent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('agent/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      - name: Lint (ruff)
+        run: poetry run ruff check .
+
+      - name: Unit tests
+        run: poetry run pytest tests/ -v --tb=short -x

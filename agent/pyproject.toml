@@ -37,7 +37,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501"]  # Line too long (handled by formatter)
+ignore = ["E501", "UP007"]  # E501: Line too long, UP007: Optional[X] vs X | None style
 
 [tool.mypy]
 python_version = "3.11"

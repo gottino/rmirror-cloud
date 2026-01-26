@@ -147,7 +147,7 @@ class Config(BaseSettings):
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
 
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             data = yaml.safe_load(f)
 
         return cls(**data if data else {})

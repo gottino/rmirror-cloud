@@ -10,7 +10,12 @@ on:
         default: false
 
 jobs:
+  # Run CI tests first - production deployment requires all tests to pass
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   verify-staging:
+    needs: [ci]  # CI must pass before checking staging
     if: ${{ !inputs.skip_staging_check }}
     runs-on: ubuntu-latest
     steps:
@@ -24,8 +29,8 @@ jobs:
           fi
 
   deploy:
-    needs: [verify-staging]
-    if: always() && (needs.verify-staging.result == 'success' || needs.verify-staging.result == 'skipped')
+    needs: [ci, verify-staging]
+    if: always() && needs.ci.result == 'success' && (needs.verify-staging.result == 'success' || needs.verify-staging.result == 'skipped')
     runs-on: ubuntu-latest
     environment:
       name: production

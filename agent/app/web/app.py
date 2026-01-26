@@ -4,7 +4,7 @@ Flask web UI for rMirror Agent configuration and monitoring.
 
 from typing import TYPE_CHECKING
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask
 
 from app.config import Config
 from app.sync.cloud_sync import CloudSync

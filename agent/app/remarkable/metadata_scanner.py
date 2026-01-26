@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +36,9 @@ class MetadataScanner:
             remarkable_folder: Path to reMarkable Desktop sync folder
         """
         self.remarkable_folder = Path(remarkable_folder)
-        self.items: Dict[str, NotebookItem] = {}  # uuid -> NotebookItem
+        self.items: dict[str, NotebookItem] = {}  # uuid -> NotebookItem
 
-    def scan(self) -> List[NotebookItem]:
+    def scan(self) -> list[NotebookItem]:
         """
         Scan the reMarkable folder and get all notebooks sorted by last opened.
 
@@ -82,7 +82,7 @@ class MetadataScanner:
             NotebookItem or None if it's not a notebook (folder, PDF, EPUB)
         """
         try:
-            with open(metadata_file, 'r') as f:
+            with open(metadata_file) as f:
                 data = json.load(f)
 
             uuid = metadata_file.stem
@@ -108,7 +108,7 @@ class MetadataScanner:
             content_file = metadata_file.with_suffix('.content')
             if content_file.exists():
                 try:
-                    with open(content_file, 'r') as f:
+                    with open(content_file) as f:
                         content_data = json.load(f)
                         # Use PageCount property if available, otherwise count pages array
                         page_count = content_data.get("pageCount", len(content_data.get("pages", [])))
@@ -151,7 +151,7 @@ class MetadataScanner:
         else:
             return "Older"
 
-    def to_dict(self, items: Optional[List[NotebookItem]] = None) -> List[dict]:
+    def to_dict(self, items: Optional[list[NotebookItem]] = None) -> list[dict]:
         """
         Convert notebooks to grouped dictionary format for JSON serialization.
 
@@ -193,7 +193,7 @@ class MetadataScanner:
 
         return result
 
-    def get_all_document_uuids(self) -> List[str]:
+    def get_all_document_uuids(self) -> list[str]:
         """
         Get all notebook UUIDs.
 
@@ -202,7 +202,7 @@ class MetadataScanner:
         """
         return list(self.items.keys())
 
-    def count_total_pages(self, selected_uuids: Optional[List[str]] = None) -> int:
+    def count_total_pages(self, selected_uuids: Optional[list[str]] = None) -> int:
         """
         Count total pages in selected notebooks.
 

@@ -1,7 +1,16 @@
-"""Test configuration and fixtures for pytest."""
+"""Test configuration and fixtures for pytest.
+
+Provides fixtures for:
+- In-memory SQLite database
+- Test users with quota states
+- Rate limiter reset
+- Test data factories
+"""
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Generator
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -17,6 +26,12 @@ from app.models.user import User
 
 # Test database URL (in-memory SQLite)
 TEST_DATABASE_URL = "sqlite:///:memory:"
+
+
+# Register custom pytest marks
+def pytest_configure(config):
+    """Register custom pytest markers."""
+    config.addinivalue_line("markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')")
 
 
 @pytest.fixture(scope="function")
@@ -199,3 +214,178 @@ def create_pending_pages(
 def user_with_quota():
     """Fixture factory for creating users with specific quota states."""
     return create_user_with_quota
+
+
+@pytest.fixture
+def reset_rate_limiter():
+    """Reset the rate limiter state between tests.
+
+    This fixture clears the in-memory storage used by SlowAPI
+    to ensure rate limits don't persist between tests.
+    """
+    # Import the limiter from the processing module
+    from app.api.processing import limiter
+
+    # Clear the limiter storage before test
+    if hasattr(limiter, '_storage') and limiter._storage:
+        limiter._storage.reset()
+
+    yield limiter
+
+    # Clear again after test for clean state
+    if hasattr(limiter, '_storage') and limiter._storage:
+        limiter._storage.reset()
+
+
+@pytest.fixture
+def mock_ocr_service():
+    """Mock OCR service for tests that don't need actual OCR."""
+    with patch("app.api.processing.OCRService") as mock_class:
+        mock_instance = MagicMock()
+
+        async def mock_extract_text(pdf_bytes):
+            return "Mocked OCR text for testing"
+
+        mock_instance.extract_text_from_pdf = mock_extract_text
+        mock_class.return_value = mock_instance
+        yield mock_instance
+
+
+@pytest.fixture
+def mock_storage_service():
+    """Mock storage service for tests that don't need actual S3/B2."""
+    from unittest.mock import AsyncMock
+
+    mock_storage = MagicMock()
+    mock_storage.upload_file = AsyncMock()
+    mock_storage.download_file = AsyncMock(return_value=b"fake_pdf_bytes")
+    mock_storage.delete_file = AsyncMock()
+    mock_storage.file_exists = AsyncMock(return_value=True)
+    mock_storage.get_file_url = MagicMock(return_value="https://example.com/fake.pdf")
+
+    return mock_storage
+
+
+# =============================================================================
+# Named User Fixtures for Common Test Scenarios
+# =============================================================================
+
+
+@pytest.fixture
+def fresh_user(db: Session) -> User:
+    """User with 0/30 quota - new user flow testing."""
+    return create_user_with_quota(
+        db, email="fresh@test.com", used=0, limit=30, tier=SubscriptionTier.FREE
+    )
+
+
+@pytest.fixture
+def active_user(db: Session) -> User:
+    """User with 15/30 quota - normal usage testing."""
+    return create_user_with_quota(
+        db, email="active@test.com", used=15, limit=30, tier=SubscriptionTier.FREE
+    )
+
+
+@pytest.fixture
+def warning_user(db: Session) -> User:
+    """User with 27/30 quota (90%) - warning threshold testing."""
+    return create_user_with_quota(
+        db, email="warning@test.com", used=27, limit=30, tier=SubscriptionTier.FREE
+    )
+
+
+@pytest.fixture
+def exhausted_user(db: Session) -> User:
+    """User with 30/30 quota - graceful degradation testing."""
+    return create_user_with_quota(
+        db, email="exhausted@test.com", used=30, limit=30, tier=SubscriptionTier.FREE
+    )
+
+
+@pytest.fixture
+def hardcap_user(db: Session) -> tuple[User, Notebook, list[Page]]:
+    """User with 30/30 quota + 100 pending pages - hard cap testing.
+
+    Returns tuple of (user, notebook, pending_pages).
+    """
+    user = create_user_with_quota(
+        db, email="hardcap@test.com", used=30, limit=30, tier=SubscriptionTier.FREE
+    )
+
+    # Create notebook for pending pages
+    notebook = Notebook(
+        uuid=f"hardcap-notebook-{datetime.utcnow().timestamp()}",
+        user_id=user.id,
+        visible_name="Hard Cap Test Notebook",
+        created_at=datetime.utcnow(),
+    )
+    db.add(notebook)
+    db.commit()
+    db.refresh(notebook)
+
+    # Create 100 pending pages
+    pending_pages = create_pending_pages(
+        db=db,
+        user_id=user.id,
+        notebook_id=notebook.id,
+        count=100,
+        status=OcrStatus.PENDING_QUOTA,
+    )
+
+    return user, notebook, pending_pages
+
+
+@pytest.fixture
+def pro_user(db: Session) -> User:
+    """User with 150/500 Pro tier quota - paid tier testing."""
+    return create_user_with_quota(
+        db, email="pro@test.com", used=150, limit=500, tier=SubscriptionTier.PRO
+    )
+
+
+# =============================================================================
+# Fixture File Paths
+# =============================================================================
+
+
+@pytest.fixture
+def fixtures_dir() -> Path:
+    """Return path to the fixtures directory."""
+    return Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture
+def valid_rm_file(fixtures_dir: Path) -> Path:
+    """Return path to a valid .rm file fixture."""
+    return fixtures_dir / "page_1.rm"
+
+
+@pytest.fixture
+def empty_rm_file(fixtures_dir: Path) -> Path:
+    """Return path to an empty .rm file fixture."""
+    return fixtures_dir / "empty_page.rm"
+
+
+@pytest.fixture
+def corrupted_rm_file(fixtures_dir: Path) -> Path:
+    """Return path to a corrupted .rm file fixture."""
+    return fixtures_dir / "corrupted_page.rm"
+
+
+@pytest.fixture
+def sample_metadata_file(fixtures_dir: Path) -> Path:
+    """Return path to a sample notebook.metadata file."""
+    return fixtures_dir / "notebook.metadata"
+
+
+@pytest.fixture
+def sample_content_file(fixtures_dir: Path) -> Path:
+    """Return path to a sample notebook.content file."""
+    return fixtures_dir / "notebook.content"
+
+
+@pytest.fixture
+def folder_metadata_file(fixtures_dir: Path) -> Path:
+    """Return path to a folder.metadata file."""
+    return fixtures_dir / "folder.metadata"

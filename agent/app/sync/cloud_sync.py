@@ -2,7 +2,6 @@
 Cloud sync client for uploading reMarkable files to rMirror Cloud backend.
 """
 
-import asyncio
 import json
 import logging
 from datetime import datetime
@@ -60,13 +59,13 @@ class CloudSync:
         if self.client is None:
             # Disable SSL verification to handle corporate proxies and self-signed certs
             self.client = httpx.AsyncClient(timeout=300.0, verify=False)  # 5 minute timeout for OCR
-            logger.debug(f"Created HTTP client with 300s timeout (SSL verification disabled)")
+            logger.debug("Created HTTP client with 300s timeout (SSL verification disabled)")
 
         # If we already have a token (from any source), verify it's valid
         if self.config.api.token:
             try:
                 # Test the token with a simple API call
-                logger.debug(f"Verifying existing JWT token")
+                logger.debug("Verifying existing JWT token")
                 response = await self.client.get(
                     f"{self.config.api.url}/sync/stats",
                     headers={"Authorization": f"Bearer {self.config.api.token}"}
@@ -167,7 +166,7 @@ class CloudSync:
         Returns:
             Dictionary with metadata in backend format
         """
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             metadata = json.load(f)
 
         # Extract notebook UUID from filename
@@ -335,7 +334,7 @@ class CloudSync:
                 except httpx.HTTPStatusError as e:
                     # If 404, the notebook doesn't exist yet - this is OK, skip silently
                     if e.response.status_code == 404:
-                        logger.debug(f"Notebook not found for .content file (will be created when pages are uploaded)")
+                        logger.debug("Notebook not found for .content file (will be created when pages are uploaded)")
                         return {"success": True, "skipped": True, "reason": "notebook_not_found"}
                     raise
 
@@ -369,8 +368,8 @@ class CloudSync:
                 except httpx.HTTPStatusError as e:
                     # If 404, the notebook doesn't exist yet - this is OK
                     if e.response.status_code == 404:
-                        logger.debug(f"Notebook not found for .metadata file (will be created when pages are uploaded)")
-                        print(f"⏭️  Notebook not found yet (will sync when created)")
+                        logger.debug("Notebook not found for .metadata file (will be created when pages are uploaded)")
+                        print("⏭️  Notebook not found yet (will sync when created)")
                         return {"success": True, "skipped": True, "reason": "notebook_not_found"}
                     raise
 
