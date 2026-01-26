@@ -466,6 +466,36 @@ async def _export_markdown(
     safe_name: str,
 ) -> StreamingResponse:
     """Generate markdown export for notebook."""
+    # Check if any pages have OCR text
+    has_ocr_content = any(
+        page.ocr_status == "completed" and page.ocr_text
+        for _, page in notebook_pages
+    )
+
+    if not has_ocr_content:
+        # Determine the reason for no content
+        statuses = [page.ocr_status for _, page in notebook_pages]
+        if all(s == "pending_quota" for s in statuses):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No OCR text available - all pages are awaiting quota",
+            )
+        elif all(s == "not_synced" for s in statuses):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No OCR text available - pages have not been synced yet",
+            )
+        elif all(s in ("pending", "processing") for s in statuses):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No OCR text available - pages are still being processed",
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No OCR text available for export",
+            )
+
     lines = []
 
     # Add notebook title
