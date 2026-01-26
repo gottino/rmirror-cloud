@@ -42,8 +42,8 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-    /* Only run all browsers in CI */
-    ...(process.env.CI
+    /* Additional browsers for local cross-browser testing (not CI - too slow) */
+    ...(!process.env.CI
       ? [
           {
             name: 'firefox',
