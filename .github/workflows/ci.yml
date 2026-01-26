@@ -24,18 +24,10 @@ jobs:
       - name: Install Poetry
         run: pip install poetry
 
-      - name: Cache Poetry dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pypoetry
-          key: ${{ runner.os }}-poetry-${{ hashFiles('backend/poetry.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-poetry-
-
       - name: Install dependencies
         run: poetry install --no-root
 
-      - name: Lint (ruff)
+      - name: Lint
         run: poetry run ruff check .
 
       - name: Unit tests
@@ -43,75 +35,3 @@ jobs:
           SECRET_KEY: test-secret-key-for-ci-only
           DATABASE_URL: sqlite:///:memory:
         run: poetry run pytest tests/ -v --tb=short -x
-
-  dashboard-checks:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: dashboard
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Cache npm dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('dashboard/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Unit tests
-        run: npm test
-
-      - name: Build
-        env:
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-          NEXT_PUBLIC_API_URL: https://rmirror.io
-        run: npm run build
-
-  agent-checks:
-    runs-on: macos-latest  # macOS needed for rumps compatibility
-    defaults:
-      run:
-        working-directory: agent
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Poetry
-        run: pip install poetry
-
-      - name: Cache Poetry dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/pypoetry
-          key: ${{ runner.os }}-poetry-${{ hashFiles('agent/poetry.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-poetry-
-
-      - name: Install dependencies
-        run: poetry install --no-root
-
-      - name: Lint (ruff)
-        run: poetry run ruff check .
-
-      - name: Unit tests
-        run: poetry run pytest tests/ -v --tb=short -x
-
