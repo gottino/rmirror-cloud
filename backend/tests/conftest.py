@@ -7,7 +7,7 @@ Provides fixtures for:
 - Test data factories
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock, patch
