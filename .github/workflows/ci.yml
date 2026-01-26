@@ -116,3 +116,4 @@ jobs:
 
       - name: Unit tests
         run: poetry run pytest tests/ -v --tb=short -x
+
