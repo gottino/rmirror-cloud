@@ -22,6 +22,18 @@ class Settings(BaseSettings):
     debug: bool = False
     api_version: str = "v1"
 
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_debug(cls, v):
+        """Handle empty string for debug field (defaults to False)."""
+        if v == "" or v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.lower() in ("true", "1", "yes", "on")
+        return bool(v)
+
     # Database
     database_url: str = "sqlite:///./rmirror.db"  # Default to SQLite for local dev
     postgres_user: Optional[str] = None
