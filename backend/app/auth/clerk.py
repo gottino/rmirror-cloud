@@ -1,15 +1,20 @@
 """Clerk authentication dependencies for FastAPI routes."""
 
+import logging
 from typing import Annotated, Optional
 
+import jwt
 from clerk_backend_sdk import ApiClient, ClientsApi, Configuration
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt import PyJWKClient
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 # HTTP Bearer token scheme
 security = HTTPBearer()
@@ -17,6 +22,35 @@ security = HTTPBearer()
 # Initialize Clerk SDK (lazy-loaded)
 _clerk_api_client: Optional[ApiClient] = None
 _clients_api: Optional[ClientsApi] = None
+
+# JWKS client for JWT verification (lazy-loaded)
+_jwks_client: Optional[PyJWKClient] = None
+_jwks_warned: bool = False  # Track if we've already warned about missing JWKS
+
+
+def get_jwks_client() -> Optional[PyJWKClient]:
+    """Get or create JWKS client for JWT verification.
+
+    Returns None if CLERK_JWKS_URL is not configured (development mode).
+    """
+    global _jwks_client, _jwks_warned
+    settings = get_settings()
+
+    if not settings.clerk_jwks_url:
+        if not _jwks_warned:
+            logger.warning(
+                "CLERK_JWKS_URL not configured - JWT signature verification disabled. "
+                "This is a SECURITY RISK in production. Set CLERK_JWKS_URL to your "
+                "Clerk JWKS endpoint (e.g., https://your-app.clerk.accounts.dev/.well-known/jwks.json)"
+            )
+            _jwks_warned = True
+        return None
+
+    if _jwks_client is None:
+        _jwks_client = PyJWKClient(settings.clerk_jwks_url)
+        logger.info(f"Initialized JWKS client with URL: {settings.clerk_jwks_url}")
+
+    return _jwks_client
 
 
 def get_clerk_client() -> ClientsApi:
@@ -64,12 +98,28 @@ async def get_clerk_user(
     token = credentials.credentials
 
     try:
-        # Decode JWT token without verification to get the user ID
-        # In production, you should verify the JWT signature using Clerk's JWKS
-        import jwt
+        # Get JWKS client for signature verification
+        jwks_client = get_jwks_client()
 
-        # Decode without verification for now (user ID is in 'sub' claim)
-        decoded = jwt.decode(token, options={"verify_signature": False})
+        if jwks_client:
+            # Production mode: Verify JWT signature using Clerk's JWKS
+            try:
+                signing_key = jwks_client.get_signing_key_from_jwt(token)
+                decoded = jwt.decode(
+                    token,
+                    signing_key.key,
+                    algorithms=["RS256"],
+                    options={"verify_aud": False}  # Clerk tokens don't always have audience
+                )
+            except jwt.exceptions.PyJWKClientError as e:
+                logger.error(f"JWKS client error: {e}")
+                raise credentials_exception
+            except jwt.exceptions.InvalidSignatureError:
+                logger.warning("JWT signature verification failed - possible token tampering")
+                raise credentials_exception
+        else:
+            # Development mode: Decode without verification (with warning logged above)
+            decoded = jwt.decode(token, options={"verify_signature": False})
 
         # Extract user ID from the token (could be Clerk ID or regular user ID)
         sub = decoded.get("sub")
@@ -97,10 +147,13 @@ async def get_clerk_user(
         return user
 
     except jwt.DecodeError as e:
-        print(f"JWT decode error: {e}")
+        logger.warning(f"JWT decode error: {e}")
+        raise credentials_exception
+    except jwt.ExpiredSignatureError:
+        logger.debug("JWT token has expired")
         raise credentials_exception
     except Exception as e:
-        print(f"Clerk authentication error: {e}")
+        logger.error(f"Clerk authentication error: {e}")
         raise credentials_exception
 
 

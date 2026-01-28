@@ -57,7 +57,7 @@ async def register_agent_with_backend(
     # Initialize HTTP client if not exists
     if not cloud_sync.client:
         import httpx
-        cloud_sync.client = httpx.AsyncClient(timeout=30.0)
+        cloud_sync.client = httpx.AsyncClient(timeout=30.0, verify=cloud_sync._verify_ssl)
 
     try:
         response = await cloud_sync.client.post(

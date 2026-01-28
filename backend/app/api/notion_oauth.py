@@ -167,7 +167,7 @@ async def get_authorization_url(
 
     except Exception as e:
         logger.error(f"Error generating OAuth URL: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.post("/oauth/callback", response_model=OAuthCallbackResponse)
@@ -247,7 +247,7 @@ async def oauth_callback(
 
     except Exception as e:
         logger.error(f"Error in OAuth callback: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.get("/databases", response_model=List[NotionDatabase])
@@ -295,7 +295,7 @@ async def list_databases(
         raise
     except Exception as e:
         logger.error(f"Error listing databases: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.get("/pages", response_model=List[NotionPage])
@@ -343,7 +343,7 @@ async def list_pages(
         raise
     except Exception as e:
         logger.error(f"Error listing pages: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.post("/databases/create", response_model=CreateDatabaseResponse)
@@ -484,7 +484,7 @@ async def create_database(
         raise
     except Exception as e:
         logger.error(f"Error creating database: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.post("/databases/{database_id}/select")
@@ -621,7 +621,7 @@ async def select_database(
         raise
     except Exception as e:
         logger.error(f"Error selecting database: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 class InitialSyncStatusResponse(BaseModel):
@@ -653,7 +653,7 @@ async def get_sync_status(
 
     except Exception as e:
         logger.error(f"Error getting sync status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.post("/sync/trigger")

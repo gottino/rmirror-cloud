@@ -48,6 +48,15 @@ class CloudSync:
         self.user_email: Optional[str] = None
         self.user_id: Optional[int] = None
 
+    @property
+    def _verify_ssl(self) -> bool:
+        """Get SSL verification setting based on dev mode.
+
+        Returns True (verify SSL) by default for production builds.
+        Returns False only if RMIRROR_DEV_MODE=true for development/corporate proxy testing.
+        """
+        return not self.config.dev.dev_mode
+
     async def authenticate(self) -> bool:
         """
         Authenticate with the backend API and store the access token.
@@ -57,9 +66,11 @@ class CloudSync:
         """
         # Create HTTP client if not exists
         if self.client is None:
-            # Disable SSL verification to handle corporate proxies and self-signed certs
-            self.client = httpx.AsyncClient(timeout=300.0, verify=False)  # 5 minute timeout for OCR
-            logger.debug("Created HTTP client with 300s timeout (SSL verification disabled)")
+            # SSL verification controlled by RMIRROR_DEV_MODE env var
+            # Default: verify=True (secure). Set RMIRROR_DEV_MODE=true for corporate proxies
+            self.client = httpx.AsyncClient(timeout=300.0, verify=self._verify_ssl)
+            ssl_status = "enabled" if self._verify_ssl else "disabled (dev mode)"
+            logger.debug(f"Created HTTP client with 300s timeout (SSL verification {ssl_status})")
 
         # If we already have a token (from any source), verify it's valid
         if self.config.api.token:
@@ -142,8 +153,9 @@ class CloudSync:
         # This is necessary because Flask creates a new event loop for each request,
         # and httpx clients are bound to the event loop they were created in
         if not self.client:
-            self.client = httpx.AsyncClient(timeout=300.0, verify=False)
-            logger.debug("Created new HTTP client for current event loop")
+            self.client = httpx.AsyncClient(timeout=300.0, verify=self._verify_ssl)
+            ssl_status = "enabled" if self._verify_ssl else "disabled (dev mode)"
+            logger.debug(f"Created new HTTP client for current event loop (SSL verification {ssl_status})")
 
         # Re-authenticate if needed
         if not self.authenticated or not self.config.api.token:

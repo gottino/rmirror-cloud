@@ -1,6 +1,7 @@
 """Clerk webhook handler for user synchronization."""
 
 import json
+import logging
 from datetime import datetime
 from typing import Annotated
 
@@ -14,7 +15,12 @@ from app.models.subscription import Subscription, SubscriptionStatus, Subscripti
 from app.models.user import User
 from app.utils.email import get_email_service
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# Track if we've warned about missing webhook secret in dev mode
+_webhook_secret_warned = False
 
 
 def verify_webhook_signature(payload: bytes, headers: dict, webhook_secret: str) -> bool:
@@ -43,7 +49,7 @@ def verify_webhook_signature(payload: bytes, headers: dict, webhook_secret: str)
     except WebhookVerificationError:
         return False
     except Exception as e:
-        print(f"Webhook verification error: {e}")
+        logger.error(f"Webhook verification error: {e}")
         return False
 
 
@@ -76,8 +82,25 @@ async def clerk_webhook(
     body = await request.body()
     headers = dict(request.headers)
 
-    # Verify webhook signature if secret is configured
-    if settings.clerk_webhook_secret:
+    # Verify webhook signature
+    global _webhook_secret_warned
+
+    if not settings.clerk_webhook_secret:
+        # In production, webhook secret is required
+        if not settings.debug:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Webhook secret not configured",
+            )
+        # In development, warn once and allow
+        if not _webhook_secret_warned:
+            logger.warning(
+                "CLERK_WEBHOOK_SECRET not configured - webhook signature verification disabled. "
+                "This is a SECURITY RISK. Set CLERK_WEBHOOK_SECRET to your Clerk webhook signing secret."
+            )
+            _webhook_secret_warned = True
+    else:
+        # Verify signature
         if not verify_webhook_signature(body, headers, settings.clerk_webhook_secret):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

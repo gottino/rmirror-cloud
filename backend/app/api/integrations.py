@@ -115,7 +115,7 @@ async def create_integration(
         raise
     except Exception as e:
         logger.error(f"Error creating integration: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.get("/", response_model=List[IntegrationConfigResponse])
@@ -151,7 +151,7 @@ async def list_integrations(
 
     except Exception as e:
         logger.error(f"Error listing integrations: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.get(
@@ -193,7 +193,7 @@ async def get_integration(
         raise
     except Exception as e:
         logger.error(f"Error getting integration: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.put("/{target_name}", response_model=IntegrationConfigResponse)
@@ -243,7 +243,7 @@ async def update_integration(
         raise
     except Exception as e:
         logger.error(f"Error updating integration: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.delete("/{target_name}")
@@ -303,7 +303,7 @@ async def delete_integration(
         raise
     except Exception as e:
         logger.error(f"Error deleting integration: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.post("/{target_name}/test", response_model=IntegrationTestResponse)

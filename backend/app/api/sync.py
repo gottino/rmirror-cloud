@@ -363,7 +363,7 @@ async def trigger_sync(
         raise
     except Exception as e:
         logger.error(f"Error triggering sync: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 async def _run_sync(
@@ -465,7 +465,7 @@ async def get_sync_stats(
 
     except Exception as e:
         logger.error(f"Error getting sync stats: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.get("/status/{target_name}")
@@ -511,7 +511,7 @@ async def get_sync_status(
         raise
     except Exception as e:
         logger.error(f"Error getting sync status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 @router.post("/process-queue")
@@ -683,4 +683,4 @@ async def process_sync_queue(
 
     except Exception as e:
         logger.error(f"Error processing sync queue: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="An internal error occurred")

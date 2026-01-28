@@ -22,16 +22,35 @@ class LocalStorageService(StorageService):
         self.base_path.mkdir(parents=True, exist_ok=True)
 
     def _get_full_path(self, key: str) -> Path:
-        """Get full filesystem path for a storage key."""
-        # Ensure key doesn't escape base_path
-        safe_key = key.lstrip("/").replace("..", "")
-        return self.base_path / safe_key
+        """Get full filesystem path for a storage key.
+
+        Raises:
+            ValueError: If the key attempts path traversal outside base_path
+        """
+        # Remove leading slashes to prevent absolute path interpretation
+        clean_key = key.lstrip("/")
+
+        # Build the full path and resolve any .. or symlinks
+        full_path = (self.base_path / clean_key).resolve()
+
+        # Verify the resolved path is still under base_path
+        # This catches all path traversal attempts including URL-encoded sequences
+        try:
+            full_path.relative_to(self.base_path.resolve())
+        except ValueError:
+            raise ValueError(f"Path traversal attempt detected: {key}")
+
+        return full_path
 
     async def upload_file(
         self, file: BinaryIO, key: str, content_type: str | None = None
     ) -> str:
-        """Upload file to local storage."""
-        file_path = self._get_full_path(key)
+        """Upload file to local storage.
+
+        Raises:
+            ValueError: If key contains path traversal attempt
+        """
+        file_path = self._get_full_path(key)  # Validates path safety
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Read file content

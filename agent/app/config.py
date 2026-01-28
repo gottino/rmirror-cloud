@@ -125,6 +125,21 @@ class SyncConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="RMIRROR_SYNC_", extra="ignore")
 
 
+class DevConfig(BaseSettings):
+    """Development configuration.
+
+    These settings control development-specific behavior that should be
+    disabled in production builds.
+    """
+
+    dev_mode: bool = Field(
+        default=False,
+        description="Enable development mode (relaxes SSL verification for corporate proxies)"
+    )
+
+    model_config = SettingsConfigDict(env_prefix="RMIRROR_", extra="ignore")
+
+
 class Config(BaseSettings):
     """Main configuration."""
 
@@ -133,6 +148,7 @@ class Config(BaseSettings):
     web: WebConfig = Field(default_factory=WebConfig)
     tray: TrayConfig = Field(default_factory=TrayConfig)
     sync: SyncConfig = Field(default_factory=SyncConfig)
+    dev: DevConfig = Field(default_factory=DevConfig)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -200,12 +216,12 @@ class Config(BaseSettings):
             return cls()
 
     def save(self, config_path: Optional[Path] = None) -> None:
-        """Save configuration to YAML file."""
+        """Save configuration to YAML file with secure permissions."""
         if config_path is None:
             config_path = self.get_default_config_path()
 
-        # Create parent directory if it doesn't exist
-        config_path.parent.mkdir(parents=True, exist_ok=True)
+        # Create parent directory with restricted permissions (owner-only access)
+        config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
         # Convert to dict and save
         config_dict = {
@@ -214,6 +230,7 @@ class Config(BaseSettings):
             "web": self.web.model_dump(),
             "tray": self.tray.model_dump(),
             "sync": self.sync.model_dump(),
+            "dev": self.dev.model_dump(),
         }
 
         with open(config_path, "w") as f:
@@ -225,5 +242,8 @@ class Config(BaseSettings):
                 sort_keys=False,
                 width=float('inf'),  # Never wrap lines
             )
+
+        # Set file permissions to owner-only read/write (0o600)
+        config_path.chmod(0o600)
 
         print(f"Configuration saved to: {config_path}")
