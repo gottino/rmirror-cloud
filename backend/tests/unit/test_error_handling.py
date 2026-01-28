@@ -186,15 +186,20 @@ class TestWebhookErrors:
 
         client = TestClient(app)
 
-        # Unknown event type
-        response = client.post(
-            "/v1/webhooks/clerk",
-            json={"type": "unknown.event.type", "data": {"something": "here"}},
-        )
+        # Patch settings to enable debug mode (webhook secret not required in debug)
+        with patch("app.api.webhooks.clerk.get_settings") as mock_settings:
+            mock_settings.return_value.debug = True
+            mock_settings.return_value.clerk_webhook_secret = None
 
-        # Should handle gracefully (200 OK to acknowledge, or 400 for invalid)
-        # The key is it doesn't crash (500)
-        assert response.status_code in [200, 400, 401, 403]
+            # Unknown event type
+            response = client.post(
+                "/v1/webhooks/clerk",
+                json={"type": "unknown.event.type", "data": {"something": "here"}},
+            )
+
+            # Should handle gracefully (200 OK to acknowledge, or 400 for invalid)
+            # The key is it doesn't crash (500)
+            assert response.status_code in [200, 400, 401, 403]
 
 
 class TestDatabaseErrors:
