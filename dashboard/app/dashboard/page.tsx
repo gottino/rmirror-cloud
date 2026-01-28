@@ -135,7 +135,7 @@ export default function Home() {
         await trackAgentDownload(token);
       }
     }
-    window.location.href = 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.4.1/rMirror-1.4.1.dmg';
+    window.location.href = 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.5.0/rMirror-1.5.0.dmg';
   };
 
   const fetchNotebooks = async () => {
