@@ -112,6 +112,14 @@ echo ""
 echo -e "${YELLOW}→${NC} Code signing..."
 if [ -n "$CODESIGN_IDENTITY" ]; then
     echo -e "   Signing with identity: $CODESIGN_IDENTITY"
+
+    # Strip existing signatures from bundled binaries first
+    # PyInstaller bundles Python libraries that may have pre-existing signatures
+    # without timestamps, which causes codesign --timestamp to fail
+    echo -e "   Stripping existing signatures from bundled binaries..."
+    find "$DIST_DIR/rMirror.app" -type f \( -name "*.so" -o -name "*.dylib" \) \
+        -exec codesign --remove-signature {} \; 2>/dev/null || true
+
     # Sign with hardened runtime enabled (required for notarization)
     codesign --force --deep --sign "$CODESIGN_IDENTITY" \
         --options runtime \
