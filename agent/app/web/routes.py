@@ -10,6 +10,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
 
+from app.__version__ import __version__
 from app.config import Config
 from app.sync.cloud_sync import CloudSync, CloudSyncError
 
@@ -288,7 +289,7 @@ def register_routes(app: Flask) -> None:
             try:
                 with run_async_safely(cloud_sync) as loop:
                     # Get agent info
-                    agent_version = "1.0.0"
+                    agent_version = __version__
                     agent_platform = platform.system()
                     agent_hostname = platform.node()
 
@@ -428,3 +429,25 @@ def register_routes(app: Flask) -> None:
     def health():
         """Health check endpoint."""
         return jsonify({"status": "healthy"})
+
+    @app.route("/updates")
+    def updates_page():
+        """Updates page - check for agent updates."""
+        return render_template("updates.html")
+
+    @app.route("/api/updates/check", methods=["POST"])
+    def api_check_updates():
+        """Check for available agent updates."""
+        from app.updater import check_for_updates
+
+        with run_async_safely(None) as loop:
+            update_info = loop.run_until_complete(check_for_updates())
+
+        return jsonify({
+            "has_update": update_info.has_update,
+            "current_version": update_info.current_version,
+            "latest_version": update_info.latest_version,
+            "download_url": update_info.download_url,
+            "release_notes": update_info.release_notes,
+            "error": update_info.error,
+        })

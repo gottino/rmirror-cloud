@@ -38,6 +38,7 @@ class TrayApp(rumps.App):
             self.status_item,
             rumps.separator,
             rumps.MenuItem("Open Web UI", callback=self.open_web_ui),
+            rumps.MenuItem("Check for Updates", callback=self.check_for_updates),
             rumps.MenuItem("Settings", callback=self.open_settings),
             rumps.separator,
             rumps.MenuItem("Quit rMirror Agent", callback=self.quit_app),
@@ -60,6 +61,11 @@ class TrayApp(rumps.App):
     def open_settings(self, sender: rumps.MenuItem) -> None:
         """Open settings page in browser."""
         url = f"http://{self.config.web.host}:{self.config.web.port}"
+        launch_browser_app_mode(url, app_mode=self.config.web.app_mode)
+
+    def check_for_updates(self, sender: rumps.MenuItem) -> None:
+        """Open the dashboard with updates overlay."""
+        url = f"http://{self.config.web.host}:{self.config.web.port}?updates=1"
         launch_browser_app_mode(url, app_mode=self.config.web.app_mode)
 
     def quit_app(self, sender: rumps.MenuItem) -> None:

@@ -1011,6 +1011,30 @@
             color: var(--warm-charcoal);
             background: var(--soft-cream);
         }
+
+        /* Footer */
+        .app-footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--soft-cream);
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .footer-divider {
+            margin: 0 10px;
+            color: #ccc;
+        }
+
+        .footer-link {
+            color: var(--terracotta);
+            text-decoration: none;
+        }
+
+        .footer-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -1249,6 +1273,13 @@
                 </button>
             </div>
         </div>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <span id="agent-version">Loading...</span>
+            <span class="footer-divider">|</span>
+            <a href="#" onclick="openUpdates(); return false;" class="footer-link">Check for Updates</a>
+        </footer>
     </div>
 
     <!-- Settings Overlay (Modal) -->
@@ -1348,6 +1379,46 @@
         </div>
     </div>
 
+    <!-- Updates Overlay (Modal) -->
+    <div class="settings-overlay" id="updates-overlay" onclick="closeUpdatesIfClickedOutside(event)">
+        <div class="settings-content" onclick="event.stopPropagation()" style="max-width: 450px;">
+            <div class="settings-header">
+                <h2>Check for Updates</h2>
+                <button class="close-button" onclick="closeUpdates()">&times;</button>
+            </div>
+
+            <div style="text-align: center; padding: 20px 0;">
+                <p style="margin-bottom: 10px; color: var(--warm-charcoal); font-size: 1.05em;">
+                    Current version: <strong id="updates-current-version">Loading...</strong>
+                </p>
+
+                <div id="updates-message" style="display: none; padding: 12px 16px; border-radius: 8px; margin: 20px 0;"></div>
+
+                <div id="updates-release-notes" style="display: none; background: var(--soft-cream); border-radius: 8px; padding: 15px; margin: 20px 0; text-align: left;">
+                    <h4 style="font-size: 0.9em; color: var(--warm-charcoal); margin-bottom: 10px;">What's New:</h4>
+                    <pre id="updates-release-notes-content" style="font-family: inherit; font-size: 0.85em; color: var(--warm-gray); white-space: pre-wrap; margin: 0;"></pre>
+                </div>
+
+                <div class="button-group" style="margin-top: 25px; justify-content: center;">
+                    <button id="updates-check-btn" onclick="checkForUpdatesOverlay()" class="primary">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
+                            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
+                        </svg>
+                        Check for Updates
+                    </button>
+                    <button id="updates-download-btn" onclick="downloadUpdate()" class="primary" style="display: none; background: var(--sage-green);">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px;">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        Download Update
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Auth modal functions
         function openAuth() {
@@ -1361,6 +1432,106 @@
         function closeAuthIfClickedOutside(event) {
             if (event.target.id === 'auth-overlay') {
                 closeAuth();
+            }
+        }
+
+        // Updates modal functions
+        let updateDownloadUrl = null;
+
+        function openUpdates() {
+            document.getElementById('updates-overlay').classList.add('active');
+            // Load current version
+            loadCurrentVersion();
+        }
+
+        function closeUpdates() {
+            document.getElementById('updates-overlay').classList.remove('active');
+        }
+
+        function closeUpdatesIfClickedOutside(event) {
+            if (event.target.id === 'updates-overlay') {
+                closeUpdates();
+            }
+        }
+
+        async function loadCurrentVersion() {
+            try {
+                const response = await fetch('/api/updates/check', { method: 'POST' });
+                const data = await response.json();
+                document.getElementById('updates-current-version').textContent = data.current_version;
+            } catch (error) {
+                document.getElementById('updates-current-version').textContent = 'Unknown';
+            }
+        }
+
+        async function checkForUpdatesOverlay() {
+            const checkBtn = document.getElementById('updates-check-btn');
+            const downloadBtn = document.getElementById('updates-download-btn');
+            const message = document.getElementById('updates-message');
+            const releaseNotes = document.getElementById('updates-release-notes');
+            const releaseNotesContent = document.getElementById('updates-release-notes-content');
+
+            // Reset state
+            message.style.display = 'none';
+            releaseNotes.style.display = 'none';
+            downloadBtn.style.display = 'none';
+
+            // Show loading state
+            checkBtn.disabled = true;
+            const originalText = checkBtn.innerHTML;
+            checkBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite; vertical-align: middle; margin-right: 6px;">
+                    <circle cx="12" cy="12" r="10"/>
+                </svg>
+                Checking...
+            `;
+
+            try {
+                const response = await fetch('/api/updates/check', { method: 'POST' });
+                const data = await response.json();
+
+                document.getElementById('updates-current-version').textContent = data.current_version;
+
+                if (data.error) {
+                    message.style.background = '#f8d7da';
+                    message.style.color = '#721c24';
+                    message.textContent = data.error;
+                    message.style.display = 'block';
+                } else if (data.has_update) {
+                    message.style.background = '#fff3cd';
+                    message.style.color = '#856404';
+                    message.innerHTML = `<strong>Update available!</strong> Version ${data.latest_version} is ready.`;
+                    message.style.display = 'block';
+
+                    if (data.release_notes) {
+                        releaseNotesContent.textContent = data.release_notes;
+                        releaseNotes.style.display = 'block';
+                    }
+
+                    if (data.download_url) {
+                        updateDownloadUrl = data.download_url;
+                        downloadBtn.style.display = 'inline-flex';
+                    }
+                } else {
+                    message.style.background = '#d4edda';
+                    message.style.color = '#155724';
+                    message.innerHTML = `<strong>You're up to date!</strong> Version ${data.current_version} is the latest.`;
+                    message.style.display = 'block';
+                }
+            } catch (error) {
+                message.style.background = '#f8d7da';
+                message.style.color = '#721c24';
+                message.textContent = 'Unable to check for updates. Please check your internet connection.';
+                message.style.display = 'block';
+            } finally {
+                checkBtn.disabled = false;
+                checkBtn.innerHTML = originalText;
+            }
+        }
+
+        function downloadUpdate() {
+            if (updateDownloadUrl) {
+                window.open(updateDownloadUrl, '_blank');
             }
         }
 
@@ -2291,6 +2462,24 @@
         // Refresh status on load
         refreshStatus();
         loadNotebookTree();
+
+        // Load agent version in footer
+        (async () => {
+            try {
+                const response = await fetch('/api/updates/check', { method: 'POST' });
+                const data = await response.json();
+                document.getElementById('agent-version').textContent = `v${data.current_version}`;
+            } catch (error) {
+                document.getElementById('agent-version').textContent = 'rMirror Agent';
+            }
+        })();
+
+        // Auto-open updates overlay if ?updates=1 in URL
+        if (new URLSearchParams(window.location.search).get('updates') === '1') {
+            openUpdates();
+            // Clean up URL
+            window.history.replaceState({}, '', window.location.pathname);
+        }
 
         // Auto-refresh quota every 30 seconds
         setInterval(async () => {

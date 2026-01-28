@@ -18,11 +18,13 @@ NC='\033[0m' # No Color
 
 # Configuration
 APP_NAME="rMirror"
-VERSION="1.4.1"
 BUNDLE_ID="io.rmirror.agent"
 
-# Directories
+# Extract version from centralized version module
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION=$(grep '__version__' "$SCRIPT_DIR/app/__version__.py" | sed 's/__version__ = "\(.*\)"/\1/')
+
+# Directories
 BUILD_DIR="$SCRIPT_DIR/build"
 DIST_DIR="$SCRIPT_DIR/dist"
 RESOURCES_DIR="$SCRIPT_DIR/resources"

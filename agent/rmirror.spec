@@ -1,11 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import re
 import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 # Get the agent directory
 agent_dir = Path(SPECPATH)
+
+# Extract version from centralized version module
+version_file = agent_dir / 'app' / '__version__.py'
+with open(version_file) as f:
+    version_match = re.search(r'__version__ = "(.+)"', f.read())
+    app_version = version_match.group(1) if version_match else "1.0.0"
 
 block_cipher = None
 
@@ -109,8 +116,8 @@ app = BUNDLE(
     bundle_identifier='io.rmirror.agent',
     info_plist={
         'CFBundleDisplayName': 'rMirror',
-        'CFBundleShortVersionString': '1.1.0',
-        'CFBundleVersion': '2',
+        'CFBundleShortVersionString': app_version,
+        'CFBundleVersion': app_version,
         'LSMinimumSystemVersion': '12.0',
         'LSUIElement': True,  # Run as background app (no Dock icon)
         'NSHighResolutionCapable': True,

@@ -84,7 +84,32 @@ else
 fi
 echo ""
 
-# Step 2: Update dashboard download link
+# Step 2: Generate and upload version.json for auto-update checking
+echo -e "${YELLOW}→${NC} Uploading version manifest..."
+DOWNLOAD_URL="https://f000.backblazeb2.com/file/${BUCKET_NAME}/releases/v${VERSION}/rMirror-${VERSION}.dmg"
+
+cat > /tmp/version.json << EOF
+{
+  "version": "${VERSION}",
+  "download_url": "${DOWNLOAD_URL}",
+  "release_notes": "",
+  "published_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "min_supported_version": "1.0.0"
+}
+EOF
+
+b2 file upload "$BUCKET_NAME" /tmp/version.json "releases/latest/version.json"
+
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✓${NC} Version manifest uploaded"
+else
+    echo -e "${RED}✗${NC} Version manifest upload failed"
+    exit 1
+fi
+rm /tmp/version.json
+echo ""
+
+# Step 3: Update dashboard download link
 echo -e "${YELLOW}→${NC} Updating dashboard download link..."
 
 if [ ! -f "$DASHBOARD_FILE" ]; then
@@ -98,7 +123,7 @@ sed -i '' "s|releases/v[0-9.]*\/rMirror-[0-9.]*.dmg|releases/v${VERSION}/rMirror
 echo -e "${GREEN}✓${NC} Dashboard updated to v${VERSION}"
 echo ""
 
-# Step 3: Show diff and ask for confirmation
+# Step 4: Show diff and ask for confirmation
 echo -e "${YELLOW}→${NC} Changes to commit:"
 cd ..
 git diff --stat dashboard/

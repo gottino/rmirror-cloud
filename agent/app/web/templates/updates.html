@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Check for Updates - rMirror Agent</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 50px 40px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+
+        .icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 2em;
+            margin-bottom: 15px;
+            color: #1d1d1f;
+        }
+
+        .version-info {
+            color: #86868b;
+            font-size: 1em;
+            margin-bottom: 25px;
+        }
+
+        p {
+            color: #86868b;
+            font-size: 1.1em;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+
+        .message {
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+            display: none;
+        }
+
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            display: block;
+        }
+
+        .message.update-available {
+            background: #fff3cd;
+            color: #856404;
+            display: block;
+        }
+
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            display: block;
+        }
+
+        .release-notes {
+            background: #f5f5f7;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 25px;
+            text-align: left;
+            display: none;
+        }
+
+        .release-notes h3 {
+            font-size: 0.9em;
+            color: #1d1d1f;
+            margin-bottom: 10px;
+        }
+
+        .release-notes pre {
+            font-family: inherit;
+            font-size: 0.9em;
+            color: #86868b;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin: 5px;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:disabled {
+            background: #c4c4c4;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: #f5f5f7;
+            color: #1d1d1f;
+        }
+
+        button.secondary:hover {
+            background: #e5e5e7;
+        }
+
+        button.download {
+            background: #34c759;
+        }
+
+        button.download:hover {
+            background: #28a745;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .buttons {
+            margin-top: 10px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon" id="icon">&#x2699;</div>
+        <h1 id="title">Check for Updates</h1>
+        <p class="version-info" id="version-info">Loading version info...</p>
+
+        <div class="message" id="message"></div>
+
+        <div class="release-notes" id="release-notes">
+            <h3>What's New:</h3>
+            <pre id="release-notes-content"></pre>
+        </div>
+
+        <div class="buttons">
+            <button id="check-btn" onclick="checkForUpdates()">Check for Updates</button>
+            <button id="download-btn" class="download hidden" onclick="downloadUpdate()">Download Update</button>
+            <button class="secondary" onclick="window.location.href='/'">Back to Dashboard</button>
+        </div>
+    </div>
+
+    <script>
+        let downloadUrl = null;
+
+        // Immediately fetch current version on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const response = await fetch('/api/updates/check', { method: 'POST' });
+                const data = await response.json();
+                document.getElementById('version-info').textContent =
+                    `Current version: ${data.current_version}`;
+            } catch (error) {
+                document.getElementById('version-info').textContent = 'Unable to determine version';
+            }
+        });
+
+        async function checkForUpdates() {
+            const checkBtn = document.getElementById('check-btn');
+            const downloadBtn = document.getElementById('download-btn');
+            const message = document.getElementById('message');
+            const releaseNotes = document.getElementById('release-notes');
+            const releaseNotesContent = document.getElementById('release-notes-content');
+            const icon = document.getElementById('icon');
+            const title = document.getElementById('title');
+            const versionInfo = document.getElementById('version-info');
+
+            // Reset state
+            message.className = 'message';
+            message.style.display = 'none';
+            releaseNotes.style.display = 'none';
+            downloadBtn.classList.add('hidden');
+
+            // Show loading state
+            checkBtn.disabled = true;
+            checkBtn.innerHTML = '<span class="spinner"></span>Checking...';
+
+            try {
+                const response = await fetch('/api/updates/check', { method: 'POST' });
+                const data = await response.json();
+
+                versionInfo.textContent = `Current version: ${data.current_version}`;
+
+                if (data.error) {
+                    icon.innerHTML = '&#x26A0;';
+                    title.textContent = 'Update Check Failed';
+                    message.className = 'message error';
+                    message.textContent = data.error;
+                    message.style.display = 'block';
+                } else if (data.has_update) {
+                    icon.innerHTML = '&#x1F389;';
+                    title.textContent = 'Update Available!';
+                    message.className = 'message update-available';
+                    message.textContent = `A new version (${data.latest_version}) is available!`;
+                    message.style.display = 'block';
+
+                    if (data.release_notes) {
+                        releaseNotesContent.textContent = data.release_notes;
+                        releaseNotes.style.display = 'block';
+                    }
+
+                    if (data.download_url) {
+                        downloadUrl = data.download_url;
+                        downloadBtn.classList.remove('hidden');
+                    }
+                } else {
+                    icon.innerHTML = '&#x2713;';
+                    title.textContent = 'Up to Date!';
+                    message.className = 'message success';
+                    message.textContent = `You're running the latest version (${data.current_version}).`;
+                    message.style.display = 'block';
+                }
+            } catch (error) {
+                icon.innerHTML = '&#x26A0;';
+                title.textContent = 'Update Check Failed';
+                message.className = 'message error';
+                message.textContent = 'Unable to check for updates. Please check your internet connection.';
+                message.style.display = 'block';
+            } finally {
+                checkBtn.disabled = false;
+                checkBtn.textContent = 'Check Again';
+            }
+        }
+
+        function downloadUpdate() {
+            if (downloadUrl) {
+                window.open(downloadUrl, '_blank');
+            }
+        }
+    </script>
+</body>
+</html>
