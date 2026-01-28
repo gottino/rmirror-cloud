@@ -10,6 +10,7 @@ from slowapi.errors import RateLimitExceeded
 from app.api import api_router
 from app.config import get_settings
 from app.middleware.rate_limit import get_rate_limit_key
+from app.middleware.security_headers import SecurityHeadersMiddleware
 
 settings = get_settings()
 
@@ -54,9 +55,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
+
+# Add security headers middleware
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Include API routers
 app.include_router(api_router, prefix=f"/{settings.api_version}")
