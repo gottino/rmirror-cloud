@@ -62,7 +62,7 @@ jobs:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
-          DEBUG: ${{ secrets.DEBUG }}
+          DEBUG: ${{ vars.DEBUG }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           CLERK_WEBHOOK_SECRET: ${{ secrets.CLERK_WEBHOOK_SECRET }}
           CLERK_JWKS_URL: ${{ secrets.CLERK_JWKS_URL }}
