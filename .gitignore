@@ -117,3 +117,25 @@ GETTING_STARTED.md
 # Test scripts with secrets (do not commit)
 backend/test_*.py
 backend/get_*.py
+
+# Claude-mem generated CLAUDE.md files (keep only root and .claude/)
+**/CLAUDE.md
+!CLAUDE.md
+!.claude/CLAUDE.md
+
+# Garbage nested directories created by claude-mem
+agent/agent/
+agent/backend/
+agent/dashboard/
+agent/dev-context/
+backend/backend/
+backend/agent/
+backend/dashboard/
+backend/dev-context/
+dashboard/dashboard/
+dashboard/backend/
+dashboard/agent/
+dashboard/dev-context/
+
+# Literal ~ directories (should never exist)
+~
