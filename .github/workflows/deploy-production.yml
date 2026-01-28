@@ -62,8 +62,10 @@ jobs:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          DEBUG: ${{ secrets.DEBUG }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           CLERK_WEBHOOK_SECRET: ${{ secrets.CLERK_WEBHOOK_SECRET }}
+          CLERK_JWKS_URL: ${{ secrets.CLERK_JWKS_URL }}
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
           NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: ${{ secrets.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL }}
           NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: ${{ secrets.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL }}
@@ -107,8 +109,10 @@ jobs:
                update_env dashboard/.env NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL \"$NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL\" && \
 
                # Update backend .env
+               update_env backend/.env DEBUG \"$DEBUG\" && \
                update_env backend/.env RESEND_API_KEY \"$RESEND_API_KEY\" && \
                update_env backend/.env CLERK_WEBHOOK_SECRET \"$CLERK_WEBHOOK_SECRET\" && \
+               update_env backend/.env CLERK_JWKS_URL \"$CLERK_JWKS_URL\" && \
                update_env backend/.env S3_ENDPOINT_URL \"$B2_ENDPOINT_URL\" && \
                update_env backend/.env S3_ACCESS_KEY \"$B2_ACCESS_KEY_ID\" && \
                update_env backend/.env S3_SECRET_KEY \"$B2_SECRET_ACCESS_KEY\" && \
