@@ -12,6 +12,7 @@ import httpx
 from packaging import version
 
 from app.__version__ import __version__
+from app.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,11 @@ async def check_for_updates() -> UpdateInfo:
     current = __version__
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        # Respect dev_mode for SSL verification (corporate proxies)
+        config = Config.load()
+        verify_ssl = not config.dev.dev_mode
+
+        async with httpx.AsyncClient(timeout=10.0, verify=verify_ssl) as client:
             response = await client.get(VERSION_URL)
             response.raise_for_status()
             data = response.json()
