@@ -95,7 +95,7 @@ class EncryptionService:
         Decrypt a configuration string for a specific user.
 
         Args:
-            encrypted_config: Encrypted configuration string
+            encrypted_config: Encrypted configuration string (or legacy unencrypted JSON)
             user_id: User ID for key derivation
 
         Returns:
@@ -103,12 +103,21 @@ class EncryptionService:
 
         Raises:
             cryptography.fernet.InvalidToken: If decryption fails (wrong key or corrupted data)
+            json.JSONDecodeError: If content is neither valid encrypted data nor valid JSON
 
         Example:
             >>> encrypted = "gAAAAABh..."
             >>> config = service.decrypt_config(encrypted, user_id=42)
             >>> print(config["notion_token"])
         """
+        # Handle legacy unencrypted JSON configs (migration path)
+        # Fernet-encrypted data always starts with 'gAAAAA'
+        if encrypted_config.startswith("{"):
+            try:
+                return json.loads(encrypted_config)
+            except json.JSONDecodeError:
+                pass  # Fall through to normal decryption
+
         user_fernet = self._get_user_key(user_id)
 
         # Decrypt
