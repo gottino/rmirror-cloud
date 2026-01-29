@@ -20,20 +20,20 @@ const clerkAppearance = {
     colorBackground: '#ffffff',
     colorInputBackground: '#ffffff',
     colorInputText: '#2d2a2e',
-    // Border colors
-    colorNeutral: '#e8e4df',
+    // Border colors (darker for better contrast)
+    colorNeutral: '#c9c4be',
   },
   elements: {
     // Card styling
     card: 'shadow-lg',
     // Social buttons
-    socialButtonsBlockButton: 'border-[#e8e4df] hover:bg-[#faf8f5]',
+    socialButtonsBlockButton: 'border-[#c9c4be] hover:bg-[#faf8f5]',
     socialButtonsBlockButtonText: 'text-[#2d2a2e]',
     // User button
-    userButtonPopoverCard: 'border border-[#e8e4df]',
+    userButtonPopoverCard: 'border border-[#c9c4be]',
     userButtonPopoverActionButton: 'hover:bg-[#faf8f5]',
     userButtonPopoverActionButtonText: 'text-[#2d2a2e]',
-    userButtonPopoverFooter: 'border-t border-[#e8e4df]',
+    userButtonPopoverFooter: 'border-t border-[#c9c4be]',
     // User profile modal
     modalContent: 'bg-white',
     navbarButton: 'text-[#2d2a2e] hover:bg-[#faf8f5]',
