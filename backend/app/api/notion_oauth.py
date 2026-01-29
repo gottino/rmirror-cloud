@@ -412,13 +412,14 @@ async def create_database(
 
             # Create new integration config sharing the same OAuth token
             other_config_dict = other_config.get_config()
+            shared_token = _get_notion_token(other_config_dict)
             config = IntegrationConfig(
                 user_id=current_user.id,
                 target_name=target_name,
                 is_enabled=False,
             )
             config.set_config({
-                "access_token": other_config_dict.get("access_token"),
+                "access_token": shared_token,  # Use helper to get token from either format
                 "workspace_id": other_config_dict.get("workspace_id"),
                 "workspace_name": other_config_dict.get("workspace_name"),
             })
@@ -549,13 +550,14 @@ async def select_database(
 
             # Create new integration config sharing the same OAuth token
             other_config_dict = other_config.get_config()
+            shared_token = _get_notion_token(other_config_dict)
             config = IntegrationConfig(
                 user_id=current_user.id,
                 target_name=target_name,
                 is_enabled=False,
             )
             config.set_config({
-                "access_token": other_config_dict.get("access_token"),
+                "access_token": shared_token,  # Use helper to get token from either format
                 "workspace_id": other_config_dict.get("workspace_id"),
                 "workspace_name": other_config_dict.get("workspace_name"),
             })
