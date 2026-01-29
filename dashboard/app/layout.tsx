@@ -10,29 +10,25 @@ export const metadata: Metadata = {
 // rMirror design system colors for Clerk components
 const clerkAppearance = {
   variables: {
-    // Primary color affects default avatar background, focus rings, etc.
+    // Primary color affects buttons, links, focus rings, avatar background
     colorPrimary: '#c85a54',
+    colorPrimaryHover: '#b54a44',
+    // Text colors
+    colorText: '#2d2a2e',
+    colorTextSecondary: '#8b8680',
+    // Background colors
+    colorBackground: '#ffffff',
+    colorInputBackground: '#ffffff',
+    colorInputText: '#2d2a2e',
+    // Border colors
+    colorNeutral: '#e8e4df',
   },
   elements: {
     // Card styling
-    card: 'bg-white shadow-lg border border-[#e8e4df]',
-    // Text colors
-    headerTitle: 'text-[#2d2a2e]',
-    headerSubtitle: 'text-[#8b8680]',
+    card: 'shadow-lg',
     // Social buttons
     socialButtonsBlockButton: 'border-[#e8e4df] hover:bg-[#faf8f5]',
     socialButtonsBlockButtonText: 'text-[#2d2a2e]',
-    // Dividers
-    dividerLine: 'bg-[#e8e4df]',
-    dividerText: 'text-[#8b8680]',
-    // Form fields
-    formFieldLabel: 'text-[#2d2a2e]',
-    formFieldInput: 'border-[#e8e4df] focus:border-[#c85a54] focus:ring-[#c85a54]',
-    // Primary button (terracotta)
-    formButtonPrimary: 'bg-[#c85a54] hover:bg-[#b54a44]',
-    // Links
-    footerActionLink: 'text-[#c85a54] hover:text-[#b54a44]',
-    identityPreviewEditButton: 'text-[#c85a54]',
     // User button
     userButtonPopoverCard: 'border border-[#e8e4df]',
     userButtonPopoverActionButton: 'hover:bg-[#faf8f5]',
@@ -42,7 +38,6 @@ const clerkAppearance = {
     modalContent: 'bg-white',
     navbarButton: 'text-[#2d2a2e] hover:bg-[#faf8f5]',
     navbarButtonIcon: 'text-[#8b8680]',
-    profileSectionPrimaryButton: 'text-[#c85a54]',
   },
 };
 
