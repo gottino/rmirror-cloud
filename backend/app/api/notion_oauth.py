@@ -19,6 +19,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/notion", tags=["notion-oauth"])
 
 
+def _get_notion_token(config_dict: dict) -> Optional[str]:
+    """
+    Get Notion API token from integration config, supporting both formats.
+
+    Supports:
+    - OAuth flow: stores token as 'access_token'
+    - Manual API token: stores token as 'api_token'
+
+    Returns the token or None if not found.
+    """
+    return config_dict.get("access_token") or config_dict.get("api_token")
+
+
 async def _run_initial_sync_background(user_id: int, target_name: str):
     """
     Run initial sync in background to avoid blocking the API response.
@@ -278,7 +291,7 @@ async def list_databases(
             )
 
         config_dict = config.get_config()
-        access_token = config_dict.get("access_token")
+        access_token = _get_notion_token(config_dict)
 
         if not access_token:
             raise HTTPException(
@@ -326,7 +339,7 @@ async def list_pages(
             )
 
         config_dict = config.get_config()
-        access_token = config_dict.get("access_token")
+        access_token = _get_notion_token(config_dict)
 
         if not access_token:
             raise HTTPException(
@@ -414,7 +427,7 @@ async def create_database(
             db.refresh(config)
 
         config_dict = config.get_config()
-        access_token = config_dict.get("access_token")
+        access_token = _get_notion_token(config_dict)
 
         if not access_token:
             raise HTTPException(
@@ -551,7 +564,7 @@ async def select_database(
             db.refresh(config)
 
         config_dict = config.get_config()
-        access_token = config_dict.get("access_token")
+        access_token = _get_notion_token(config_dict)
 
         if not access_token:
             raise HTTPException(
