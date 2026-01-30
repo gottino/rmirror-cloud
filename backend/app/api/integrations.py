@@ -338,27 +338,26 @@ async def test_integration(
 
         # Create sync target based on type
         if target_name == "notion":
-            # Support both OAuth (access_token) and manual (api_token) for backwards compatibility
-            access_token = config_dict.get("access_token") or config_dict.get("api_token")
+            access_token = config_dict.get("access_token")
             database_id = config_dict.get("database_id")
 
             if not access_token or not database_id:
                 raise HTTPException(
                     status_code=400,
-                    detail="Notion integration requires access_token/api_token and database_id",
+                    detail="Notion integration requires access_token and database_id. Please reconnect to Notion.",
                 )
 
             target = NotionSyncTarget(access_token=access_token, database_id=database_id)
 
         elif target_name == "notion-todos":
             # Notion todos integration - syncs to separate todos database
-            access_token = config_dict.get("access_token") or config_dict.get("api_token")
-            database_id = config_dict.get("database_id")  # todos_database_id
+            access_token = config_dict.get("access_token")
+            database_id = config_dict.get("database_id")
 
             if not access_token or not database_id:
                 raise HTTPException(
                     status_code=400,
-                    detail="Notion Todos integration requires access_token and database_id",
+                    detail="Notion Todos integration requires access_token and database_id. Please reconnect to Notion.",
                 )
 
             target = NotionTodosSyncTarget(access_token=access_token, database_id=database_id)

@@ -19,17 +19,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/notion", tags=["notion-oauth"])
 
 
-def _get_notion_token(config_dict: dict) -> Optional[str]:
-    """
-    Get Notion API token from integration config, supporting both formats.
-
-    Supports:
-    - OAuth flow: stores token as 'access_token'
-    - Manual API token: stores token as 'api_token'
-
-    Returns the token or None if not found.
-    """
-    return config_dict.get("access_token") or config_dict.get("api_token")
 
 
 async def _run_initial_sync_background(user_id: int, target_name: str):
@@ -291,7 +280,7 @@ async def list_databases(
             )
 
         config_dict = config.get_config()
-        access_token = _get_notion_token(config_dict)
+        access_token = config_dict.get("access_token")
 
         if not access_token:
             raise HTTPException(
@@ -339,7 +328,7 @@ async def list_pages(
             )
 
         config_dict = config.get_config()
-        access_token = _get_notion_token(config_dict)
+        access_token = config_dict.get("access_token")
 
         if not access_token:
             raise HTTPException(
@@ -412,14 +401,14 @@ async def create_database(
 
             # Create new integration config sharing the same OAuth token
             other_config_dict = other_config.get_config()
-            shared_token = _get_notion_token(other_config_dict)
+            shared_token = other_config_dict.get("access_token")
             config = IntegrationConfig(
                 user_id=current_user.id,
                 target_name=target_name,
                 is_enabled=False,
             )
             config.set_config({
-                "access_token": shared_token,  # Use helper to get token from either format
+                "access_token": shared_token,
                 "workspace_id": other_config_dict.get("workspace_id"),
                 "workspace_name": other_config_dict.get("workspace_name"),
             })
@@ -428,7 +417,7 @@ async def create_database(
             db.refresh(config)
 
         config_dict = config.get_config()
-        access_token = _get_notion_token(config_dict)
+        access_token = config_dict.get("access_token")
 
         if not access_token:
             raise HTTPException(
@@ -550,14 +539,14 @@ async def select_database(
 
             # Create new integration config sharing the same OAuth token
             other_config_dict = other_config.get_config()
-            shared_token = _get_notion_token(other_config_dict)
+            shared_token = other_config_dict.get("access_token")
             config = IntegrationConfig(
                 user_id=current_user.id,
                 target_name=target_name,
                 is_enabled=False,
             )
             config.set_config({
-                "access_token": shared_token,  # Use helper to get token from either format
+                "access_token": shared_token,
                 "workspace_id": other_config_dict.get("workspace_id"),
                 "workspace_name": other_config_dict.get("workspace_name"),
             })
@@ -566,7 +555,7 @@ async def select_database(
             db.refresh(config)
 
         config_dict = config.get_config()
-        access_token = _get_notion_token(config_dict)
+        access_token = config_dict.get("access_token")
 
         if not access_token:
             raise HTTPException(

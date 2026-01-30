@@ -334,8 +334,14 @@ async def trigger_sync(
             config_dict = json.loads(config.config_json)
 
             if config.target_name == "notion":
+                access_token = config_dict.get("access_token")
+                if not access_token:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Notion integration requires OAuth authentication. Please reconnect to Notion."
+                    )
                 target = NotionSyncTarget(
-                    api_token=config_dict.get("api_token"),
+                    access_token=access_token,
                     database_id=config_dict.get("database_id"),
                 )
                 sync_manager.register_target(target)
