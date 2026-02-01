@@ -1,11 +1,11 @@
 """Initial sync service for triggering first sync when integration is connected."""
 
 import hashlib
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
-import httpx
 from sqlalchemy.orm import Session
 
 from app.models.notebook import Notebook
@@ -56,6 +56,7 @@ async def trigger_initial_sync(
 
     # Get all pages with completed OCR for this user
     # Join through notebook to get user's pages
+    # Only sync actual notebooks (not PDFs, EPUBs, or folders)
     pages_query = (
         db.query(Page, NotebookPage, Notebook)
         .join(NotebookPage, Page.id == NotebookPage.page_id)
@@ -63,6 +64,7 @@ async def trigger_initial_sync(
         .filter(
             Notebook.user_id == user_id,
             Notebook.deleted == False,
+            Notebook.document_type == "notebook",  # Only sync actual notebooks
             Page.ocr_status == OcrStatus.COMPLETED.value,
             Page.ocr_text.isnot(None),
             Page.ocr_text != "",
@@ -214,6 +216,9 @@ async def _create_notebook_pages_in_notion(
         logger.warning(f"Missing Notion credentials for user {user_id}")
         return 0
 
+    # Import NotionSyncTarget here to avoid circular imports
+    from app.integrations.notion_sync import NotionSyncTarget
+
     # Collect unique notebooks
     notebooks_to_create: Dict[str, Notebook] = {}
     for page, notebook_page, notebook in pages_data:
@@ -238,14 +243,36 @@ async def _create_notebook_pages_in_notion(
 
     logger.info(f"Creating {len(notebooks_to_create)} notebook pages in Notion for user {user_id}")
 
+    # Create NotionSyncTarget instance for creating pages with full metadata
+    notion_target = NotionSyncTarget(access_token, database_id)
+
     created_count = 0
     for notebook_uuid, notebook in notebooks_to_create.items():
         try:
-            # Create notebook page in Notion using direct HTTP call
-            notion_page_id = await _create_notion_notebook_page(
-                access_token=access_token,
-                database_id=database_id,
-                notebook=notebook,
+            # Extract lastModified from metadata_json (reMarkable's original timestamp)
+            last_modified = None
+            if notebook.metadata_json:
+                try:
+                    meta = json.loads(notebook.metadata_json)
+                    if meta.get("lastModified"):
+                        # Convert milliseconds since epoch to ISO format
+                        last_modified = datetime.fromtimestamp(
+                            int(meta["lastModified"]) / 1000.0
+                        ).isoformat()
+                except (ValueError, KeyError, TypeError) as e:
+                    logger.warning(f"Failed to parse lastModified from metadata_json: {e}")
+
+            # Get last_opened as ISO string
+            last_opened = notebook.last_opened.isoformat() if notebook.last_opened else None
+
+            # Create notebook page in Notion using NotionSyncTarget (has full metadata support)
+            notion_page_id = await notion_target._create_notion_page(
+                notebook_uuid=notebook.notebook_uuid,
+                title=notebook.visible_name or "Untitled",
+                pages=[],  # Empty - pages synced separately
+                full_path=notebook.full_path or "",
+                last_opened=last_opened,
+                last_modified=last_modified,
             )
 
             if notion_page_id:
@@ -271,67 +298,6 @@ async def _create_notebook_pages_in_notion(
             # Continue with other notebooks
 
     return created_count
-
-
-async def _create_notion_notebook_page(
-    access_token: str,
-    database_id: str,
-    notebook: Notebook,
-) -> Optional[str]:
-    """
-    Create a notebook page in Notion.
-
-    Args:
-        access_token: Notion OAuth access token
-        database_id: Notion database ID
-        notebook: Notebook model
-
-    Returns:
-        Notion page ID if successful, None otherwise
-    """
-    # Build page properties
-    properties = {
-        "Name": {"title": [{"text": {"content": notebook.visible_name or "Untitled"}}]},
-        "UUID": {"rich_text": [{"text": {"content": notebook.notebook_uuid}}]},
-        "Path": {"rich_text": [{"text": {"content": ""}}]},  # Can be populated later
-        "Pages": {"number": 0},  # Will be updated as pages are synced
-        "Synced At": {"date": {"start": datetime.utcnow().isoformat()}},
-        "Status": {"select": {"name": "Syncing"}},
-    }
-
-    # Add heading block for content
-    children = [
-        {
-            "object": "block",
-            "type": "heading_2",
-            "heading_2": {
-                "rich_text": [{"type": "text", "text": {"content": "Notebook Content"}}]
-            },
-        }
-    ]
-
-    # Create page using direct HTTP (works reliably with API 2022-06-28)
-    response = httpx.post(
-        "https://api.notion.com/v1/pages",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Notion-Version": "2022-06-28",
-            "Content-Type": "application/json",
-        },
-        json={
-            "parent": {"database_id": database_id},
-            "properties": properties,
-            "children": children,
-        },
-        verify=False,
-        timeout=30.0,
-    )
-
-    if response.status_code == 200:
-        return response.json().get("id")
-    else:
-        logger.error(f"Notion API error: {response.status_code} - {response.text[:200]}")
-        return None
 
 
 def _calculate_content_hash(text: str) -> str:

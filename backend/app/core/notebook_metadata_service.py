@@ -161,15 +161,8 @@ class NotebookMetadataService:
                 notebook.deleted = metadata["deleted"]
             if "version" in metadata:
                 notebook.version = metadata["version"]
-            if "last_modified" in metadata:
-                # Convert string to datetime if needed
-                if isinstance(metadata["last_modified"], str):
-                    try:
-                        notebook.updated_at = datetime.fromisoformat(
-                            metadata["last_modified"].replace("Z", "+00:00")
-                        )
-                    except ValueError:
-                        pass
+            # Note: last_modified from reMarkable is stored in metadata_json, not updated_at
+            # updated_at auto-updates on commit, so we can't use it for reMarkable timestamps
             if "last_opened" in metadata:
                 if isinstance(metadata["last_opened"], str):
                     try:

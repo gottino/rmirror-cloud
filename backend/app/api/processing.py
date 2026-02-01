@@ -601,6 +601,20 @@ async def update_notebook_metadata(
                                 pages_array = content_data.get("cPages", {}).get("pages", [])
                             page_count = len(pages_array)
 
+                    # Extract lastModified from metadata_json (reMarkable's original timestamp)
+                    # Don't use notebook.updated_at as it auto-updates on every DB change
+                    last_modified_at = None
+                    if notebook.metadata_json:
+                        try:
+                            meta = json.loads(notebook.metadata_json)
+                            if meta.get("lastModified"):
+                                # Convert milliseconds since epoch to ISO format
+                                last_modified_at = datetime.fromtimestamp(
+                                    int(meta["lastModified"]) / 1000.0
+                                ).isoformat()
+                        except (ValueError, KeyError, TypeError) as e:
+                            logger.warning(f"Failed to parse lastModified from metadata_json: {e}")
+
                     # Build lightweight metadata-only data (no page content)
                     notebook_metadata = {
                         "notebook_uuid": notebook.notebook_uuid,
@@ -609,7 +623,7 @@ async def update_notebook_metadata(
                         "page_count": page_count,
                         "full_path": notebook.full_path or "",
                         "last_opened_at": notebook.last_opened.isoformat() if notebook.last_opened else None,
-                        "last_modified_at": notebook.updated_at.isoformat(),
+                        "last_modified_at": last_modified_at,
                     }
 
                     # Calculate metadata-only content hash
