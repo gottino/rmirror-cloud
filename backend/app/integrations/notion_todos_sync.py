@@ -19,9 +19,19 @@ class NotionTodosSyncTarget(SyncTarget):
 
     This integration syncs todos as separate pages in a Notion database,
     making them proper tasks that can be managed independently from notebooks.
+
+    Supports adaptive property usage:
+    - For newly created databases: uses Workflow (select type)
+    - For existing databases with Status (status type): uses Status
     """
 
-    def __init__(self, access_token: str, database_id: str, verify_ssl: bool = False):
+    def __init__(
+        self,
+        access_token: str,
+        database_id: str,
+        verify_ssl: bool = False,
+        use_status_property: bool = False,
+    ):
         """
         Initialize Notion todos sync target.
 
@@ -29,10 +39,13 @@ class NotionTodosSyncTarget(SyncTarget):
             access_token: Notion OAuth access token or integration API token
             database_id: Notion database ID for todos
             verify_ssl: Whether to verify SSL certificates (False for corporate environments)
+            use_status_property: If True, use Status (status type) instead of Workflow (select)
+                               This is True for existing databases with Status property
         """
         super().__init__("notion-todos")
         self.access_token = access_token
         self.database_id = database_id
+        self.use_status_property = use_status_property
 
         # Create httpx client with SSL verification control
         if verify_ssl:
@@ -43,7 +56,10 @@ class NotionTodosSyncTarget(SyncTarget):
             http_client = httpx.Client(verify=False)
             self.client = NotionClient(auth=access_token, client=http_client)
 
-        self.logger.info(f"Initialized Notion Todos sync target with database {database_id}")
+        self.logger.info(
+            f"Initialized Notion Todos sync target with database {database_id} "
+            f"(use_status_property={use_status_property})"
+        )
 
     async def sync_item(self, item: SyncItem) -> SyncResult:
         """Sync a single item to Notion todos database."""
@@ -66,6 +82,10 @@ class NotionTodosSyncTarget(SyncTarget):
 
         Unlike the notebook integration which adds todos as blocks,
         this creates a proper database entry that can be tracked and managed.
+
+        Adapts to database configuration:
+        - If use_status_property=True: uses Status (status type) property
+        - If use_status_property=False: uses Workflow (select type) property
         """
         try:
             todo_data = item.data
@@ -74,6 +94,9 @@ class NotionTodosSyncTarget(SyncTarget):
             notebook_uuid = todo_data.get("notebook_uuid", "")
             notebook_name = todo_data.get("notebook_name", "")
             page_number = todo_data.get("page_number")
+            confidence = todo_data.get("confidence")
+            date_extracted = todo_data.get("date_extracted")
+            source_link = todo_data.get("source_link")
 
             if not todo_text.strip():
                 return SyncResult(
@@ -81,21 +104,42 @@ class NotionTodosSyncTarget(SyncTarget):
                     metadata={"reason": "Empty todo text"},
                 )
 
-            # Determine status based on completion
-            status = "Done" if is_completed else "Not started"
+            # Determine workflow/status value based on completion
+            workflow_value = "Done" if is_completed else "Not started"
 
-            # Build properties for the todo page
+            # Build base properties for the todo page
             properties = {
                 "Task": {"title": [{"text": {"content": todo_text[:2000]}}]},  # Notion limit
-                "Status": {"status": {"name": status}},
+                "Completed": {"checkbox": is_completed},
                 "Notebook": {"rich_text": [{"text": {"content": notebook_name[:2000]}}]},
                 "Notebook UUID": {"rich_text": [{"text": {"content": notebook_uuid}}]},
+                "Tags": {"multi_select": [{"name": "remarkable"}]},
                 "Synced At": {"date": {"start": datetime.utcnow().isoformat()}},
             }
+
+            # Use Status (status type) or Workflow (select type) based on database
+            if self.use_status_property:
+                # Existing database with smart Status property
+                properties["Status"] = {"status": {"name": workflow_value}}
+            else:
+                # New database with Workflow select property
+                properties["Workflow"] = {"select": {"name": workflow_value}}
 
             # Add page number if available
             if page_number is not None:
                 properties["Page"] = {"number": page_number}
+
+            # Add confidence if available
+            if confidence is not None:
+                properties["Confidence"] = {"number": confidence}
+
+            # Add date written if available
+            if date_extracted:
+                properties["Date Written"] = {"date": {"start": date_extracted}}
+
+            # Add source link if available
+            if source_link:
+                properties["Link to Source"] = {"url": source_link}
 
             # Create page in todos database
             response = self.client.pages.create(
@@ -111,9 +155,11 @@ class NotionTodosSyncTarget(SyncTarget):
                 target_id=page_id,
                 metadata={
                     "action": "todo_page_created",
-                    "status": status,
+                    "workflow": workflow_value,
+                    "completed": is_completed,
                     "notebook": notebook_name,
                     "page_number": page_number,
+                    "use_status_property": self.use_status_property,
                 }
             )
 
@@ -145,20 +191,38 @@ class NotionTodosSyncTarget(SyncTarget):
             is_completed = todo_data.get("is_completed", False) or todo_data.get("completed", False)
             notebook_name = todo_data.get("notebook_name", "")
             page_number = todo_data.get("page_number")
+            confidence = todo_data.get("confidence")
+            date_extracted = todo_data.get("date_extracted")
+            source_link = todo_data.get("source_link")
 
-            # Determine status
-            status = "Done" if is_completed else "Not started"
+            # Determine workflow/status value
+            workflow_value = "Done" if is_completed else "Not started"
 
             # Update properties
             properties = {
                 "Task": {"title": [{"text": {"content": todo_text[:2000]}}]},
-                "Status": {"status": {"name": status}},
+                "Completed": {"checkbox": is_completed},
                 "Notebook": {"rich_text": [{"text": {"content": notebook_name[:2000]}}]},
                 "Synced At": {"date": {"start": datetime.utcnow().isoformat()}},
             }
 
+            # Use Status (status type) or Workflow (select type) based on database
+            if self.use_status_property:
+                properties["Status"] = {"status": {"name": workflow_value}}
+            else:
+                properties["Workflow"] = {"select": {"name": workflow_value}}
+
             if page_number is not None:
                 properties["Page"] = {"number": page_number}
+
+            if confidence is not None:
+                properties["Confidence"] = {"number": confidence}
+
+            if date_extracted:
+                properties["Date Written"] = {"date": {"start": date_extracted}}
+
+            if source_link:
+                properties["Link to Source"] = {"url": source_link}
 
             self.client.pages.update(page_id=external_id, properties=properties)
 
@@ -166,7 +230,12 @@ class NotionTodosSyncTarget(SyncTarget):
             return SyncResult(
                 status=SyncStatus.SUCCESS,
                 target_id=external_id,
-                metadata={"action": "updated", "status": status},
+                metadata={
+                    "action": "updated",
+                    "workflow": workflow_value,
+                    "completed": is_completed,
+                    "use_status_property": self.use_status_property,
+                },
             )
 
         except Exception as e:

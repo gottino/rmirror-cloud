@@ -27,6 +27,15 @@ class NotionOAuthService:
         if not all([self.client_id, self.client_secret, self.redirect_uri]):
             logger.warning("Notion OAuth credentials not configured")
 
+    def _get_http_client(self) -> httpx.Client:
+        """
+        Create httpx client with SSL verification based on debug mode.
+
+        Returns:
+            httpx.Client instance
+        """
+        return httpx.Client(verify=not self.debug)
+
     def _get_notion_client(self, access_token: str) -> NotionClient:
         """
         Create Notion client with SSL verification disabled in debug mode.
@@ -39,7 +48,7 @@ class NotionOAuthService:
         """
         if self.debug:
             # Create httpx client with SSL verification disabled
-            http_client = httpx.Client(verify=False)
+            http_client = self._get_http_client()
             return NotionClient(
                 auth=access_token,
                 client=http_client,
@@ -207,6 +216,11 @@ class NotionOAuthService:
         """
         Create a new Notion database configured for rMirror sync.
 
+        Uses raw HTTP with initial_data_source.properties per API 2025-09-03.
+        Note: status property type cannot be created via API, so we use select
+        with a "Workflow" property instead. Users can manually convert to Status
+        in Notion UI if desired.
+
         Args:
             access_token: Notion OAuth access token
             parent_page_id: Optional parent page ID (if None, creates a parent page first)
@@ -242,11 +256,13 @@ class NotionOAuthService:
         parent = {"type": "page_id", "page_id": parent_page_id}
 
         # Define database schema based on type
+        # Note: status type cannot be created via API, use select with "Workflow" instead
         if database_type == "todos":
             properties = {
                 "Task": {"title": {}},  # Todo text
-                "Status": {
-                    "status": {
+                "Completed": {"checkbox": {}},  # Simple completion checkbox
+                "Workflow": {  # Use select since status can't be created via API
+                    "select": {
                         "options": [
                             {"name": "Not started", "color": "default"},
                             {"name": "In progress", "color": "blue"},
@@ -257,7 +273,10 @@ class NotionOAuthService:
                 "Notebook": {"rich_text": {}},  # Source notebook name
                 "Notebook UUID": {"rich_text": {}},  # For linking/deduplication
                 "Page": {"number": {"format": "number"}},  # Page number where todo was found
-                "Created": {"created_time": {}},  # When todo was created
+                "Confidence": {"number": {"format": "percent"}},  # OCR confidence
+                "Date Written": {"date": {}},  # When todo was written (estimated)
+                "Link to Source": {"url": {}},  # Link to source notebook/page
+                "Tags": {"multi_select": {}},  # Tags (e.g., "remarkable")
                 "Synced At": {"date": {}},  # Last sync timestamp
                 "Priority": {
                     "select": {
@@ -274,7 +293,7 @@ class NotionOAuthService:
                 "Name": {"title": {}},  # Notebook name
                 "UUID": {"rich_text": {}},  # Notebook UUID for deduplication
                 "Path": {"rich_text": {}},  # Folder path in reMarkable
-                "Tags": {"multi_select": {}},  # Tags extracted from path (e.g., "Work/Projects" → ["Work", "Projects"])
+                "Tags": {"multi_select": {}},  # Tags extracted from path
                 "Pages": {"number": {"format": "number"}},  # Number of pages
                 "Last Opened": {"date": {}},  # When notebook was last opened on reMarkable
                 "Last Modified": {"date": {}},  # When notebook was last modified on reMarkable
@@ -291,42 +310,45 @@ class NotionOAuthService:
             }
 
         try:
-            # Create database with just the title property
-            # Note: With API 2025-09-03, properties passed here won't be created
-            # We need to add them separately via the data source API
-            # is_inline=True makes it appear as an inline block in the parent page
-            response = client.databases.create(
-                parent=parent,
-                title=[{"type": "text", "text": {"content": database_title}}],
-                properties=properties,  # Still pass for old API compatibility
-                is_inline=True,  # Create as inline database in parent page
+            # Use raw HTTP to support initial_data_source (SDK doesn't support it yet)
+            http_client = self._get_http_client()
+
+            response = http_client.post(
+                "https://api.notion.com/v1/databases",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Notion-Version": "2025-09-03",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "parent": parent,
+                    "title": [{"type": "text", "text": {"content": database_title}}],
+                    "is_inline": True,
+                    "initial_data_source": {
+                        "properties": properties
+                    }
+                }
             )
 
-            database_id = response["id"]
-            self.logger.info(f"Created database: {database_id}")
+            http_client.close()
+            response.raise_for_status()
+            result = response.json()
 
-            # Add properties using the new API (2025-09-03)
-            try:
-                self.logger.info("Adding properties to database using new API...")
-                await self.add_database_properties(
-                    access_token=access_token,
-                    database_id=database_id,
-                    database_type=database_type
-                )
-                self.logger.info("Successfully added properties to database")
-            except Exception as prop_error:
-                self.logger.warning(f"Failed to add properties (will be created on first use): {prop_error}")
-                # Don't fail the whole operation if property addition fails
-                # Properties can be added later
+            database_id = result["id"]
+            self.logger.info(f"Created database with initial_data_source: {database_id}")
 
             return {
                 "database_id": database_id,
-                "url": response.get("url", ""),
+                "url": result.get("url", ""),
                 "title": database_title,
                 "type": database_type,
-                "created_time": response.get("created_time", ""),
+                "created_time": result.get("created_time", ""),
             }
 
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text if hasattr(e.response, 'text') else str(e)
+            logger.error(f"HTTP error creating Notion database: {error_body}")
+            raise Exception(f"Failed to create Notion database: {error_body}")
         except Exception as e:
             logger.error(f"Error creating Notion database: {e}")
             raise Exception(f"Failed to create Notion database: {str(e)}")
@@ -429,10 +451,12 @@ class NotionOAuthService:
             self.logger.info(f"Found data source: {data_source_id}")
 
             # Step 2: Define properties based on type
+            # Note: status type cannot be created via API, use select with "Workflow" instead
             if database_type == "todos":
                 properties = {
-                    "Status": {
-                        "status": {
+                    "Completed": {"checkbox": {}},
+                    "Workflow": {  # Use select since status can't be created via API
+                        "select": {
                             "options": [
                                 {"name": "Not started", "color": "default"},
                                 {"name": "In progress", "color": "blue"},
@@ -443,7 +467,10 @@ class NotionOAuthService:
                     "Notebook": {"rich_text": {}},
                     "Notebook UUID": {"rich_text": {}},
                     "Page": {"number": {"format": "number"}},
-                    "Created": {"created_time": {}},
+                    "Confidence": {"number": {"format": "percent"}},
+                    "Date Written": {"date": {}},
+                    "Link to Source": {"url": {}},
+                    "Tags": {"multi_select": {}},
                     "Synced At": {"date": {}},
                     "Priority": {
                         "select": {
@@ -477,7 +504,7 @@ class NotionOAuthService:
 
             # Step 3: Update data source properties using raw HTTP client
             # (notion-client library doesn't support data_sources endpoint yet)
-            http_client = httpx.Client(verify=not self.debug)
+            http_client = self._get_http_client()
 
             response = http_client.patch(
                 f"https://api.notion.com/v1/data_sources/{data_source_id}",

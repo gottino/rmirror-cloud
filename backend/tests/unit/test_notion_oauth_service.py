@@ -9,19 +9,9 @@ Tests cover:
 - Property management
 """
 
-import sys
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
-import importlib
-
-
-# These tests require httpx.Client mocking which has cross-Python-version issues
-# They pass locally but fail in CI due to module import caching differences
-requires_httpx_mock = pytest.mark.skipif(
-    sys.version_info < (3, 12),
-    reason="httpx.Client mocking requires Python 3.12+ due to module caching"
-)
 
 
 class TestNotionOAuthServiceOAuthFlow:
@@ -152,7 +142,6 @@ class TestNotionOAuthServiceDatabaseListing:
 class TestNotionOAuthServiceDatabaseCreation:
     """Tests for database creation with initial_data_source API."""
 
-    @requires_httpx_mock
     @pytest.mark.asyncio
     async def test_create_rmirror_database_todos_uses_workflow_not_status(
         self, notion_oauth_settings
@@ -173,35 +162,34 @@ class TestNotionOAuthServiceDatabaseCreation:
         mock_http.post.return_value = mock_response
         mock_http.close.return_value = None
 
-        # Patch httpx.Client globally, reload module, then patch module attributes
-        with patch.object(httpx, "Client", return_value=mock_http):
-            import app.services.notion_oauth
-            importlib.reload(app.services.notion_oauth)
+        with patch("app.services.notion_oauth.get_settings", return_value=notion_oauth_settings):
+            with patch("app.services.notion_oauth.NotionClient", return_value=mock_client):
+                from app.services.notion_oauth import NotionOAuthService
 
-            with patch.object(app.services.notion_oauth, "get_settings", return_value=notion_oauth_settings):
-                with patch.object(app.services.notion_oauth, "NotionClient", return_value=mock_client):
-                    service = app.services.notion_oauth.NotionOAuthService()
-                    result = await service.create_rmirror_database(
-                        access_token="test-token",
-                        database_title="rMirror Todos",
-                        database_type="todos",
-                    )
+                service = NotionOAuthService()
+                # Mock the _get_http_client method
+                service._get_http_client = MagicMock(return_value=mock_http)
 
-                    # Verify the API call was made with Workflow property
-                    assert mock_http.post.called, "httpx.Client.post was not called"
-                    call_args = mock_http.post.call_args
-                    json_body = call_args.kwargs["json"]
-                    properties = json_body["initial_data_source"]["properties"]
+                result = await service.create_rmirror_database(
+                    access_token="test-token",
+                    database_title="rMirror Todos",
+                    database_type="todos",
+                )
 
-                    # Should have Workflow (select), not Status (status type)
-                    assert "Workflow" in properties
-                    assert properties["Workflow"]["select"]["options"][0]["name"] == "Not started"
-                    assert "Status" not in properties  # Status is NOT used for todos
+                # Verify the API call was made with Workflow property
+                assert mock_http.post.called, "httpx.Client.post was not called"
+                call_args = mock_http.post.call_args
+                json_body = call_args.kwargs["json"]
+                properties = json_body["initial_data_source"]["properties"]
 
-                    assert result["database_id"] == "db-todos-123"
-                    assert result["type"] == "todos"
+                # Should have Workflow (select), not Status (status type)
+                assert "Workflow" in properties
+                assert properties["Workflow"]["select"]["options"][0]["name"] == "Not started"
+                assert "Status" not in properties  # Status is NOT used for todos
 
-    @requires_httpx_mock
+                assert result["database_id"] == "db-todos-123"
+                assert result["type"] == "todos"
+
     @pytest.mark.asyncio
     async def test_create_rmirror_database_uses_initial_data_source(
         self, notion_oauth_settings
@@ -221,32 +209,31 @@ class TestNotionOAuthServiceDatabaseCreation:
         mock_http.post.return_value = mock_response
         mock_http.close.return_value = None
 
-        with patch.object(httpx, "Client", return_value=mock_http):
-            import app.services.notion_oauth
-            importlib.reload(app.services.notion_oauth)
+        with patch("app.services.notion_oauth.get_settings", return_value=notion_oauth_settings):
+            with patch("app.services.notion_oauth.NotionClient", return_value=mock_client):
+                from app.services.notion_oauth import NotionOAuthService
 
-            with patch.object(app.services.notion_oauth, "get_settings", return_value=notion_oauth_settings):
-                with patch.object(app.services.notion_oauth, "NotionClient", return_value=mock_client):
-                    service = app.services.notion_oauth.NotionOAuthService()
-                    await service.create_rmirror_database(
-                        access_token="test-token",
-                        database_title="Test DB",
-                        database_type="notebooks",
-                    )
+                service = NotionOAuthService()
+                service._get_http_client = MagicMock(return_value=mock_http)
 
-                    # Verify API call structure
-                    call_args = mock_http.post.call_args
-                    json_body = call_args.kwargs["json"]
+                await service.create_rmirror_database(
+                    access_token="test-token",
+                    database_title="Test DB",
+                    database_type="notebooks",
+                )
 
-                    # Must use initial_data_source wrapper
-                    assert "initial_data_source" in json_body
-                    assert "properties" in json_body["initial_data_source"]
+                # Verify API call structure
+                call_args = mock_http.post.call_args
+                json_body = call_args.kwargs["json"]
 
-                    # Verify API version header
-                    headers = call_args.kwargs["headers"]
-                    assert headers["Notion-Version"] == "2025-09-03"
+                # Must use initial_data_source wrapper
+                assert "initial_data_source" in json_body
+                assert "properties" in json_body["initial_data_source"]
 
-    @requires_httpx_mock
+                # Verify API version header
+                headers = call_args.kwargs["headers"]
+                assert headers["Notion-Version"] == "2025-09-03"
+
     @pytest.mark.asyncio
     async def test_create_rmirror_database_notebooks_schema(self, notion_oauth_settings):
         """Verify notebooks database has correct property schema."""
@@ -264,36 +251,35 @@ class TestNotionOAuthServiceDatabaseCreation:
         mock_http.post.return_value = mock_response
         mock_http.close.return_value = None
 
-        with patch.object(httpx, "Client", return_value=mock_http):
-            import app.services.notion_oauth
-            importlib.reload(app.services.notion_oauth)
+        with patch("app.services.notion_oauth.get_settings", return_value=notion_oauth_settings):
+            with patch("app.services.notion_oauth.NotionClient", return_value=mock_client):
+                from app.services.notion_oauth import NotionOAuthService
 
-            with patch.object(app.services.notion_oauth, "get_settings", return_value=notion_oauth_settings):
-                with patch.object(app.services.notion_oauth, "NotionClient", return_value=mock_client):
-                    service = app.services.notion_oauth.NotionOAuthService()
-                    await service.create_rmirror_database(
-                        access_token="test-token",
-                        database_title="rMirror Notebooks",
-                        database_type="notebooks",
-                    )
+                service = NotionOAuthService()
+                service._get_http_client = MagicMock(return_value=mock_http)
 
-                    call_args = mock_http.post.call_args
-                    json_body = call_args.kwargs["json"]
-                    properties = json_body["initial_data_source"]["properties"]
+                await service.create_rmirror_database(
+                    access_token="test-token",
+                    database_title="rMirror Notebooks",
+                    database_type="notebooks",
+                )
 
-                    # Verify notebooks schema has expected properties
-                    assert "Name" in properties
-                    assert properties["Name"] == {"title": {}}
-                    assert "UUID" in properties
-                    assert "Path" in properties
-                    assert "Tags" in properties
-                    assert "Pages" in properties
-                    assert "Last Opened" in properties
-                    assert "Last Modified" in properties
-                    assert "Synced At" in properties
-                    assert "Status" in properties  # Notebooks use Status (select)
+                call_args = mock_http.post.call_args
+                json_body = call_args.kwargs["json"]
+                properties = json_body["initial_data_source"]["properties"]
 
-    @requires_httpx_mock
+                # Verify notebooks schema has expected properties
+                assert "Name" in properties
+                assert properties["Name"] == {"title": {}}
+                assert "UUID" in properties
+                assert "Path" in properties
+                assert "Tags" in properties
+                assert "Pages" in properties
+                assert "Last Opened" in properties
+                assert "Last Modified" in properties
+                assert "Synced At" in properties
+                assert "Status" in properties  # Notebooks use Status (select)
+
     @pytest.mark.asyncio
     async def test_create_rmirror_database_creates_parent_page_if_none(
         self, notion_oauth_settings
@@ -313,25 +299,24 @@ class TestNotionOAuthServiceDatabaseCreation:
         mock_http.post.return_value = mock_response
         mock_http.close.return_value = None
 
-        with patch.object(httpx, "Client", return_value=mock_http):
-            import app.services.notion_oauth
-            importlib.reload(app.services.notion_oauth)
+        with patch("app.services.notion_oauth.get_settings", return_value=notion_oauth_settings):
+            with patch("app.services.notion_oauth.NotionClient", return_value=mock_client):
+                from app.services.notion_oauth import NotionOAuthService
 
-            with patch.object(app.services.notion_oauth, "get_settings", return_value=notion_oauth_settings):
-                with patch.object(app.services.notion_oauth, "NotionClient", return_value=mock_client):
-                    service = app.services.notion_oauth.NotionOAuthService()
-                    await service.create_rmirror_database(
-                        access_token="test-token",
-                        parent_page_id=None,  # No parent provided
-                        database_title="Test DB",
-                    )
+                service = NotionOAuthService()
+                service._get_http_client = MagicMock(return_value=mock_http)
 
-                    # Verify parent page was created
-                    mock_client.pages.create.assert_called_once()
-                    page_create_call = mock_client.pages.create.call_args
-                    assert page_create_call.kwargs["parent"] == {"type": "workspace", "workspace": True}
+                await service.create_rmirror_database(
+                    access_token="test-token",
+                    parent_page_id=None,  # No parent provided
+                    database_title="Test DB",
+                )
 
-    @requires_httpx_mock
+                # Verify parent page was created
+                mock_client.pages.create.assert_called_once()
+                page_create_call = mock_client.pages.create.call_args
+                assert page_create_call.kwargs["parent"] == {"type": "workspace", "workspace": True}
+
     @pytest.mark.asyncio
     async def test_create_rmirror_database_http_error_handling(self, notion_oauth_settings):
         """Test HTTP error handling during database creation."""
@@ -349,21 +334,20 @@ class TestNotionOAuthServiceDatabaseCreation:
         mock_http.post.return_value = mock_response
         mock_http.close.return_value = None
 
-        with patch.object(httpx, "Client", return_value=mock_http):
-            import app.services.notion_oauth
-            importlib.reload(app.services.notion_oauth)
+        with patch("app.services.notion_oauth.get_settings", return_value=notion_oauth_settings):
+            with patch("app.services.notion_oauth.NotionClient", return_value=mock_client):
+                from app.services.notion_oauth import NotionOAuthService
 
-            with patch.object(app.services.notion_oauth, "get_settings", return_value=notion_oauth_settings):
-                with patch.object(app.services.notion_oauth, "NotionClient", return_value=mock_client):
-                    service = app.services.notion_oauth.NotionOAuthService()
+                service = NotionOAuthService()
+                service._get_http_client = MagicMock(return_value=mock_http)
 
-                    with pytest.raises(Exception) as exc_info:
-                        await service.create_rmirror_database(
-                            access_token="test-token",
-                            database_title="Test DB",
-                        )
+                with pytest.raises(Exception) as exc_info:
+                    await service.create_rmirror_database(
+                        access_token="test-token",
+                        database_title="Test DB",
+                    )
 
-                    assert "Failed to create Notion database" in str(exc_info.value)
+                assert "Failed to create Notion database" in str(exc_info.value)
 
 
 class TestNotionOAuthServiceDatabaseValidation:
@@ -434,7 +418,6 @@ class TestNotionOAuthServiceDatabaseValidation:
 class TestNotionOAuthServicePropertyManagement:
     """Tests for database property management."""
 
-    @requires_httpx_mock
     @pytest.mark.asyncio
     async def test_add_database_properties_todos_uses_workflow(self, notion_oauth_settings):
         """Verify adding properties to todos database uses Workflow (select)."""
@@ -454,31 +437,30 @@ class TestNotionOAuthServicePropertyManagement:
         mock_http.patch.return_value = mock_response
         mock_http.close.return_value = None
 
-        with patch.object(httpx, "Client", return_value=mock_http):
-            import app.services.notion_oauth
-            importlib.reload(app.services.notion_oauth)
+        with patch("app.services.notion_oauth.get_settings", return_value=notion_oauth_settings):
+            with patch("app.services.notion_oauth.NotionClient", return_value=mock_client):
+                from app.services.notion_oauth import NotionOAuthService
 
-            with patch.object(app.services.notion_oauth, "get_settings", return_value=notion_oauth_settings):
-                with patch.object(app.services.notion_oauth, "NotionClient", return_value=mock_client):
-                    service = app.services.notion_oauth.NotionOAuthService()
-                    result = await service.add_database_properties(
-                        access_token="test-token",
-                        database_id="db-123",
-                        database_type="todos",
-                    )
+                service = NotionOAuthService()
+                service._get_http_client = MagicMock(return_value=mock_http)
 
-                    # Verify PATCH call includes Workflow property
-                    call_args = mock_http.patch.call_args
-                    json_body = call_args.kwargs["json"]
-                    properties = json_body["properties"]
+                result = await service.add_database_properties(
+                    access_token="test-token",
+                    database_id="db-123",
+                    database_type="todos",
+                )
 
-                    assert "Workflow" in properties
-                    assert "Status" not in properties  # Should not have Status for todos
+                # Verify PATCH call includes Workflow property
+                call_args = mock_http.patch.call_args
+                json_body = call_args.kwargs["json"]
+                properties = json_body["properties"]
 
-                    assert result["success"] is True
-                    assert result["data_source_id"] == "ds-456"
+                assert "Workflow" in properties
+                assert "Status" not in properties  # Should not have Status for todos
 
-    @requires_httpx_mock
+                assert result["success"] is True
+                assert result["data_source_id"] == "ds-456"
+
     @pytest.mark.asyncio
     async def test_add_database_properties_retrieves_data_source_id(self, notion_oauth_settings):
         """Test that add_database_properties correctly retrieves data source ID."""
@@ -495,22 +477,22 @@ class TestNotionOAuthServicePropertyManagement:
         mock_http.patch.return_value = mock_response
         mock_http.close.return_value = None
 
-        with patch.object(httpx, "Client", return_value=mock_http):
-            import app.services.notion_oauth
-            importlib.reload(app.services.notion_oauth)
+        with patch("app.services.notion_oauth.get_settings", return_value=notion_oauth_settings):
+            with patch("app.services.notion_oauth.NotionClient", return_value=mock_client):
+                from app.services.notion_oauth import NotionOAuthService
 
-            with patch.object(app.services.notion_oauth, "get_settings", return_value=notion_oauth_settings):
-                with patch.object(app.services.notion_oauth, "NotionClient", return_value=mock_client):
-                    service = app.services.notion_oauth.NotionOAuthService()
-                    await service.add_database_properties(
-                        access_token="test-token",
-                        database_id="db-123",
-                        database_type="notebooks",
-                    )
+                service = NotionOAuthService()
+                service._get_http_client = MagicMock(return_value=mock_http)
 
-                    # Verify data source endpoint was called with correct ID
-                    call_args = mock_http.patch.call_args
-                    assert "my-data-source-id" in call_args.args[0]
+                await service.add_database_properties(
+                    access_token="test-token",
+                    database_id="db-123",
+                    database_type="notebooks",
+                )
+
+                # Verify data source endpoint was called with correct ID
+                call_args = mock_http.patch.call_args
+                assert "my-data-source-id" in call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_add_database_properties_no_data_source_error(self, notion_oauth_settings):
