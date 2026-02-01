@@ -389,3 +389,202 @@ def sample_content_file(fixtures_dir: Path) -> Path:
 def folder_metadata_file(fixtures_dir: Path) -> Path:
     """Return path to a folder.metadata file."""
     return fixtures_dir / "folder.metadata"
+
+
+# =============================================================================
+# Notion Integration Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def mock_notion_client():
+    """Mock Notion SDK client for testing Notion integrations."""
+    with patch("notion_client.Client") as mock_class:
+        mock_instance = MagicMock()
+
+        # Configure common return values
+        mock_instance.search.return_value = {"results": []}
+        mock_instance.databases.retrieve.return_value = {
+            "id": "db-123",
+            "title": [{"plain_text": "Test Database"}],
+            "properties": {},
+        }
+        mock_instance.pages.create.return_value = {"id": "page-123"}
+        mock_instance.pages.update.return_value = {"id": "page-123"}
+        mock_instance.blocks.children.list.return_value = {"results": [], "has_more": False}
+        mock_instance.blocks.children.append.return_value = {"results": [{"id": "block-123"}]}
+        mock_instance.blocks.delete.return_value = {}
+
+        mock_class.return_value = mock_instance
+        yield mock_instance
+
+
+@pytest.fixture
+def mock_httpx_client():
+    """Mock httpx client for raw API calls in Notion tests."""
+    with patch("httpx.Client") as mock_class:
+        mock_instance = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "db-123", "url": "https://notion.so/db-123"}
+        mock_response.raise_for_status.return_value = None
+
+        mock_instance.post.return_value = mock_response
+        mock_instance.patch.return_value = mock_response
+        mock_instance.close.return_value = None
+
+        mock_class.return_value = mock_instance
+        yield mock_instance
+
+
+@pytest.fixture
+def mock_httpx_async_client():
+    """Mock async httpx client for OAuth token exchange."""
+    from unittest.mock import AsyncMock
+
+    with patch("httpx.AsyncClient") as mock_class:
+        mock_instance = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "access_token": "test-access-token",
+            "workspace_id": "ws-123",
+            "workspace_name": "Test Workspace",
+            "bot_id": "bot-123",
+            "owner": {"type": "user"},
+        }
+        mock_response.raise_for_status.return_value = None
+
+        mock_instance.post = AsyncMock(return_value=mock_response)
+        mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+        mock_instance.__aexit__ = AsyncMock(return_value=None)
+
+        mock_class.return_value = mock_instance
+        yield mock_instance
+
+
+@pytest.fixture
+def notion_oauth_settings():
+    """Mock settings for Notion OAuth tests."""
+    mock_settings = MagicMock()
+    mock_settings.notion_client_id = "test-client-id"
+    mock_settings.notion_client_secret = "test-secret"
+    mock_settings.notion_redirect_uri = "http://localhost:3000/callback"
+    mock_settings.debug = True
+    return mock_settings
+
+
+@pytest.fixture
+def sample_notion_database_response():
+    """Sample Notion database API response for testing."""
+    return {
+        "id": "db-123",
+        "object": "database",
+        "title": [{"type": "text", "text": {"content": "Test Database"}, "plain_text": "Test Database"}],
+        "url": "https://notion.so/db-123",
+        "created_time": "2026-01-01T00:00:00.000Z",
+        "last_edited_time": "2026-01-15T12:00:00.000Z",
+        "properties": {
+            "Name": {"id": "title", "type": "title"},
+            "UUID": {"id": "uuid", "type": "rich_text"},
+            "Status": {"id": "status", "type": "status"},
+            "Workflow": {"id": "workflow", "type": "select"},
+        },
+        "data_sources": [{"id": "ds-456"}],
+    }
+
+
+@pytest.fixture
+def sample_notion_page_response():
+    """Sample Notion page API response for testing."""
+    return {
+        "id": "page-123",
+        "object": "page",
+        "parent": {"type": "database_id", "database_id": "db-123"},
+        "url": "https://notion.so/page-123",
+        "created_time": "2026-01-01T00:00:00.000Z",
+        "properties": {
+            "Name": {
+                "type": "title",
+                "title": [{"type": "text", "text": {"content": "Test Page"}, "plain_text": "Test Page"}],
+            },
+            "UUID": {"type": "rich_text", "rich_text": [{"text": {"content": "nb-123"}}]},
+        },
+    }
+
+
+@pytest.fixture
+def sample_todo_sync_item():
+    """Sample SyncItem for todo syncing."""
+    from app.core.sync_engine import SyncItem
+    from app.models.sync_record import SyncItemType
+
+    return SyncItem(
+        item_type=SyncItemType.TODO,
+        item_id="todo-123",
+        content_hash="abc123def456",
+        data={
+            "text": "Buy groceries",
+            "is_completed": False,
+            "notebook_uuid": "nb-123",
+            "notebook_name": "Shopping List",
+            "page_number": 1,
+            "confidence": 0.95,
+            "date_extracted": "2026-01-15T10:00:00",
+            "source_link": "https://example.com/notebook/nb-123",
+        },
+        source_table="todos",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+
+
+@pytest.fixture
+def sample_notebook_sync_item():
+    """Sample SyncItem for notebook syncing."""
+    from app.core.sync_engine import SyncItem
+    from app.models.sync_record import SyncItemType
+
+    return SyncItem(
+        item_type=SyncItemType.NOTEBOOK,
+        item_id="nb-123",
+        content_hash="notebook-hash-456",
+        data={
+            "notebook_uuid": "nb-123",
+            "title": "Test Notebook",
+            "full_path": "Work/Projects/Client A",
+            "pages": [
+                {"page_number": 1, "text": "Page 1 content"},
+                {"page_number": 2, "text": "Page 2 content"},
+            ],
+            "last_opened_at": "2026-01-15T10:00:00",
+            "last_modified_at": "2026-01-15T09:00:00",
+        },
+        source_table="notebooks",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+
+
+@pytest.fixture
+def sample_page_text_sync_item():
+    """Sample SyncItem for page text syncing."""
+    from app.core.sync_engine import SyncItem
+    from app.models.sync_record import SyncItemType
+
+    return SyncItem(
+        item_type=SyncItemType.PAGE_TEXT,
+        item_id="page-text-123",
+        content_hash="page-hash-789",
+        data={
+            "text": "This is the OCR text from page 1",
+            "page_number": 1,
+            "notebook_uuid": "nb-123",
+            "notebook_name": "Test Notebook",
+            "existing_block_id": None,
+            "existing_notebook_page_id": None,
+        },
+        source_table="pages",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
