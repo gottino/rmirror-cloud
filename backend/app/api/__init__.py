@@ -12,6 +12,7 @@ from app.api import (
     pages,
     processing,
     quota,
+    search,
     sync,
     todos,
     users,
@@ -30,6 +31,7 @@ api_router.include_router(notebooks.router, prefix="/notebooks", tags=["notebook
 api_router.include_router(pages.router, prefix="/pages", tags=["pages"])
 api_router.include_router(processing.router, prefix="/processing", tags=["processing"])
 api_router.include_router(quota.router, prefix="/quota", tags=["quota"])
+api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 api_router.include_router(notion_oauth.router, prefix="/integrations", tags=["integrations", "notion-oauth"])
 api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
