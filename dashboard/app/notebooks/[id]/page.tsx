@@ -1,8 +1,8 @@
 'use client';
 
 import { useAuth, UserButton } from '@clerk/nextjs';
-import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState, useRef } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu } from 'lucide-react';
@@ -19,9 +19,11 @@ interface PageCardProps {
   copiedPageId: number | null;
   setCopiedPageId: (id: number | null) => void;
   quota: QuotaStatus | null;
+  isTargetPage?: boolean;
+  cardRef?: (el: HTMLDivElement | null) => void;
 }
 
-function PageCard({ page, token, copiedPageId, setCopiedPageId, quota }: PageCardProps) {
+function PageCard({ page, token, copiedPageId, setCopiedPageId, quota, isTargetPage, cardRef }: PageCardProps) {
   const [showPdf, setShowPdf] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfBlob, setPdfBlob] = useState<string | null>(null);
@@ -69,6 +71,7 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId, quota }: PageCar
 
   return (
     <div
+      ref={cardRef}
       className="relative transition-all duration-500 ease-in-out"
       style={{
         perspective: '1000px',
@@ -103,10 +106,10 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId, quota }: PageCar
 
       {/* Main card with flip animation */}
       <div
-        className="relative rounded-lg transition-all duration-500 ease-in-out"
+        className={`relative rounded-lg transition-all duration-500 ease-in-out ${isTargetPage ? 'ring-2 ring-[var(--terracotta)]' : ''}`}
         style={{
           backgroundColor: 'var(--card)',
-          border: '1px solid var(--border)',
+          border: isTargetPage ? '1px solid var(--terracotta)' : '1px solid var(--border)',
           transformStyle: 'preserve-3d',
           transform: showPdf ? 'rotateY(180deg)' : 'rotateY(0deg)',
           height: showPdf ? '800px' : 'auto',
@@ -345,9 +348,10 @@ function SyncProgress({ pages }: SyncProgressProps) {
   );
 }
 
-export default function NotebookPage() {
+function NotebookPageContent() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { getToken, isSignedIn } = useAuth();
   const [notebook, setNotebook] = useState<NotebookWithPages | null>(null);
   const [loading, setLoading] = useState(true);
@@ -361,6 +365,10 @@ export default function NotebookPage() {
   const [quotaModalOpen, setQuotaModalOpen] = useState(false);
   const [quotaModalData, setQuotaModalData] = useState<QuotaStatus | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+
+  // Target page from URL query param (for search result navigation)
+  const targetPage = searchParams.get('page');
+  const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   // Development mode: use JWT token from localStorage
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
@@ -411,6 +419,25 @@ export default function NotebookPage() {
 
     fetchNotebook();
   }, [params.id, effectiveIsSignedIn, getToken, router, isDevelopmentMode]);
+
+  // Scroll to target page when navigating from search results
+  useEffect(() => {
+    if (notebook && targetPage && !loading) {
+      const pageNum = parseInt(targetPage, 10);
+      if (!isNaN(pageNum)) {
+        // Small delay to ensure DOM is rendered
+        setTimeout(() => {
+          const pageEl = pageRefs.current.get(pageNum);
+          if (pageEl) {
+            pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            // Add highlight animation
+            pageEl.classList.add('highlight-pulse');
+            setTimeout(() => pageEl.classList.remove('highlight-pulse'), 2000);
+          }
+        }, 100);
+      }
+    }
+  }, [notebook, targetPage, loading]);
 
   // Handle export
   const handleExport = async (format: 'markdown' | 'pdf') => {
@@ -753,6 +780,8 @@ export default function NotebookPage() {
                     copiedPageId={copiedPageId}
                     setCopiedPageId={setCopiedPageId}
                     quota={quota}
+                    isTargetPage={targetPage === String(page.page_number)}
+                    cardRef={(el) => el && pageRefs.current.set(page.page_number, el)}
                   />
                 ))}
               </div>
@@ -826,5 +855,26 @@ export default function NotebookPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// Loading fallback for Suspense
+function NotebookLoading() {
+  return (
+    <div className="flex h-screen items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--terracotta)' }}></div>
+        <p className="mt-4" style={{ color: 'var(--warm-gray)' }}>Loading notebook...</p>
+      </div>
+    </div>
+  );
+}
+
+// Wrap in Suspense for useSearchParams
+export default function NotebookPage() {
+  return (
+    <Suspense fallback={<NotebookLoading />}>
+      <NotebookPageContent />
+    </Suspense>
   );
 }

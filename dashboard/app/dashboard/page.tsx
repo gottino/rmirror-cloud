@@ -1,15 +1,16 @@
 'use client';
 
 import { useAuth, UserButton } from '@clerk/nextjs';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, CreditCard, Menu, Home as HomeIcon, Folder } from 'lucide-react';
-import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus } from '@/lib/api';
+import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, CreditCard, Menu, Home as HomeIcon, Folder, Loader2 } from 'lucide-react';
+import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus, type SearchResponse } from '@/lib/api';
 import { QuotaWarning } from '@/components/QuotaWarning';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
+import { SearchResults } from '@/components/SearchResults';
 
 // Group notebooks by date
 function groupNotebooksByDate(notebooks: NotebookTreeNode[]) {
@@ -108,9 +109,10 @@ function findNodeByUuid(nodes: NotebookTreeNode[], uuid: string): NotebookTreeNo
   return null;
 }
 
-export default function Home() {
+function DashboardContent() {
   const { getToken, isSignedIn } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tree, setTree] = useState<NotebookTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +123,13 @@ export default function Home() {
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const [showQuotaModal, setShowQuotaModal] = useState(false);
+
+  // Search state
+  const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const debounceTimer = useRef<NodeJS.Timeout>();
+  const initializedFromUrl = useRef(false);
 
   // Development mode bypass
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
@@ -196,11 +205,91 @@ export default function Home() {
     }
   };
 
+  // Update URL params without triggering navigation
+  const updateUrlParams = useCallback((query: string) => {
+    const newUrl = query ? `/dashboard?q=${encodeURIComponent(query)}` : '/dashboard';
+    router.replace(newUrl, { scroll: false });
+  }, [router]);
+
+  // Execute search (extracted for reuse)
+  const executeSearch = useCallback(async (query: string) => {
+    setSearchLoading(true);
+    setIsSearchMode(true);
+
+    try {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+
+      if (!token) {
+        console.error('No auth token available');
+        return;
+      }
+
+      const results = await searchNotebooks(token, query, { limit: 20 });
+      setSearchResults(results);
+    } catch (err) {
+      console.error('Search error:', err);
+      setSearchResults(null);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [isDevelopmentMode, getToken]);
+
+  const handleSearch = async (query: string) => {
+    // Clear previous timer
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+
+    // Short queries: client-side filter only
+    if (query.length < 2) {
+      setIsSearchMode(false);
+      setSearchResults(null);
+      updateUrlParams('');
+      return;
+    }
+
+    // Debounce API call by 300ms
+    debounceTimer.current = setTimeout(async () => {
+      updateUrlParams(query);
+      await executeSearch(query);
+    }, 300);
+  };
+
+  const clearSearch = () => {
+    setSearchQuery('');
+    setIsSearchMode(false);
+    setSearchResults(null);
+    router.replace('/dashboard', { scroll: false });
+  };
+
   useEffect(() => {
     fetchNotebooks();
     fetchAgentStatus();
     fetchQuota();
   }, [effectiveIsSignedIn]);
+
+  // Restore search state from URL params (for back button navigation)
+  useEffect(() => {
+    const urlQuery = searchParams.get('q') || '';
+
+    // Only restore if URL has search params and we haven't initialized yet
+    // or if URL params changed (back/forward navigation)
+    if (urlQuery && urlQuery.length >= 2) {
+      // Check if we need to restore (different from current state)
+      const needsRestore = urlQuery !== searchQuery || !initializedFromUrl.current;
+
+      if (needsRestore) {
+        setSearchQuery(urlQuery);
+        executeSearch(urlQuery);
+        initializedFromUrl.current = true;
+      }
+    } else if (!urlQuery && isSearchMode) {
+      // URL cleared but we're in search mode - clear search
+      setSearchQuery('');
+      setIsSearchMode(false);
+      setSearchResults(null);
+    }
+  }, [searchParams, executeSearch]);
 
   // Get current folder node and its contents
   const getCurrentFolderNode = (): NotebookTreeNode[] => {
@@ -494,9 +583,12 @@ export default function Home() {
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
                   <input
                     type="text"
-                    placeholder="Search notebooks..."
+                    placeholder="Search notebooks and content..."
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      handleSearch(e.target.value);
+                    }}
                     className="w-full pl-10 pr-10 py-2 rounded-lg"
                     style={{
                       border: '1px solid var(--border)',
@@ -505,9 +597,15 @@ export default function Home() {
                       color: 'var(--foreground)'
                     }}
                   />
+                  {searchLoading && (
+                    <Loader2
+                      className="absolute right-10 top-1/2 transform -translate-y-1/2 w-4 h-4 animate-spin"
+                      style={{ color: 'var(--terracotta)' }}
+                    />
+                  )}
                   {searchQuery && (
                     <button
-                      onClick={() => setSearchQuery('')}
+                      onClick={clearSearch}
                       className="absolute right-3 top-1/2 transform -translate-y-1/2"
                       style={{ color: 'var(--warm-gray)' }}
                     >
@@ -540,7 +638,14 @@ export default function Home() {
           </div>
         </header>
         <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
-          {notebooks.length === 0 ? (
+          {isSearchMode && searchResults ? (
+            <SearchResults
+              results={searchResults.results}
+              query={searchResults.query}
+              totalResults={searchResults.total_results}
+              hasMore={searchResults.has_more}
+            />
+          ) : notebooks.length === 0 ? (
             <div className="text-center py-12 rounded-lg max-w-2xl mx-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
               <BookOpen className="w-20 h-20 mx-auto mb-4" style={{ color: 'var(--warm-gray)', opacity: 0.3 }} />
               <h3 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>
@@ -842,5 +947,26 @@ export default function Home() {
         />
       </div>
     </div>
+  );
+}
+
+// Loading fallback for Suspense
+function DashboardLoading() {
+  return (
+    <div className="flex h-screen items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--terracotta)' }}></div>
+        <p className="mt-4" style={{ color: 'var(--warm-gray)' }}>Loading notebooks...</p>
+      </div>
+    </div>
+  );
+}
+
+// Wrap in Suspense for useSearchParams
+export default function Home() {
+  return (
+    <Suspense fallback={<DashboardLoading />}>
+      <DashboardContent />
+    </Suspense>
   );
 }
