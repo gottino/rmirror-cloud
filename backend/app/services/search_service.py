@@ -79,9 +79,14 @@ class PostgreSQLSearchBackend(SearchBackend):
         limit: int = 20,
         fuzzy_threshold: float = 0.3,
     ) -> tuple[list[RawSearchMatch], int]:
-        # Set similarity threshold for session
+        # Set similarity thresholds for session
+        # - similarity_threshold: for notebook name matching (short text)
+        # - strict_word_similarity_threshold: for OCR content matching (long text)
         db.execute(
             text(f"SET pg_trgm.similarity_threshold = {fuzzy_threshold}")
+        )
+        db.execute(
+            text(f"SET pg_trgm.strict_word_similarity_threshold = {fuzzy_threshold}")
         )
 
         # Query for notebook name matches
@@ -105,7 +110,11 @@ class PostgreSQLSearchBackend(SearchBackend):
               AND n.visible_name % :query
         """)
 
-        # Query for content matches
+        # Query for content matches using strict_word_similarity
+        # Note: Regular pg_trgm similarity() doesn't work for long text because
+        # it calculates similarity over the entire string, diluting matches.
+        # strict_word_similarity finds if the query appears as a similar WORD
+        # within the text, which is ideal for OCR content with potential typos.
         content_matches_sql = text("""
             SELECT
                 n.id as notebook_id,
@@ -119,13 +128,13 @@ class PostgreSQLSearchBackend(SearchBackend):
                 np.page_number,
                 p.ocr_text,
                 0.0::float as name_score,
-                similarity(p.ocr_text, :query) as content_score
+                strict_word_similarity(:query, p.ocr_text) as content_score
             FROM pages p
             JOIN notebook_pages np ON np.page_id = p.id
             JOIN notebooks n ON n.id = np.notebook_id
             WHERE n.user_id = :user_id
               AND n.deleted = false
-              AND p.ocr_text % :query
+              AND :query <<% p.ocr_text
               AND p.ocr_status = 'completed'
         """)
 
@@ -156,7 +165,7 @@ class PostgreSQLSearchBackend(SearchBackend):
                  JOIN notebooks n ON n.id = np.notebook_id
                  WHERE n.user_id = :user_id
                    AND n.deleted = false
-                   AND p.ocr_text % :query
+                   AND :query <<% p.ocr_text
                    AND p.ocr_status = 'completed')
             ) AS matched_notebooks
         """)
