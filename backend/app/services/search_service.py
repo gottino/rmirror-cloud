@@ -1,6 +1,5 @@
 """Search service with database-specific backends for fuzzy full-text search."""
 
-import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
