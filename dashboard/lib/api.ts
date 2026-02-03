@@ -418,3 +418,67 @@ export async function checkQuota(token: string): Promise<{ has_quota: boolean; q
 
   return handleApiResponse<{ has_quota: boolean; quota: QuotaStatus }>(response);
 }
+
+// ==================== Search ====================
+
+export interface SearchSnippet {
+  text: string;
+  highlights: [number, number][];
+}
+
+export interface MatchedPage {
+  page_id: number;
+  page_uuid: string | null;
+  page_number: number;
+  snippet: SearchSnippet;
+  score: number;
+}
+
+export interface SearchResult {
+  notebook_id: number;
+  notebook_uuid: string;
+  visible_name: string;
+  document_type: string;
+  full_path: string | null;
+  name_match: boolean;
+  name_score: number;
+  matched_pages: MatchedPage[];
+  total_matched_pages: number;
+  best_score: number;
+  updated_at: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  results: SearchResult[];
+  total_results: number;
+  has_more: boolean;
+  search_mode: 'fuzzy' | 'basic';
+}
+
+export async function searchNotebooks(
+  token: string,
+  query: string,
+  options?: {
+    skip?: number;
+    limit?: number;
+    searchType?: 'all' | 'notebooks' | 'pages';
+    dateRange?: 'any' | 'week' | 'month' | 'year';
+  }
+): Promise<SearchResponse> {
+  const params = new URLSearchParams({ q: query });
+  if (options?.skip) params.set('skip', options.skip.toString());
+  if (options?.limit) params.set('limit', options.limit.toString());
+  if (options?.searchType && options.searchType !== 'all') {
+    params.set('search_type', options.searchType);
+  }
+  if (options?.dateRange && options.dateRange !== 'any') {
+    params.set('date_range', options.dateRange);
+  }
+
+  const response = await fetch(`${API_URL}/search?${params}`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+
+  return handleApiResponse<SearchResponse>(response);
+}
