@@ -455,6 +455,12 @@ async def create_database(
         logger.warning(f"DEBUG: Before update - old_database_id={old_database_id}, new_database_id={new_database_id}")
         config_dict["database_id"] = new_database_id
         config_dict["database_title"] = result["title"]
+
+        # For newly created todos databases, set use_status_property to False
+        # since we create with Workflow (select) instead of Status (status type)
+        if request.database_type == "todos":
+            config_dict["use_status_property"] = False
+
         config.set_config(config_dict)
         logger.warning(f"DEBUG: Called set_config with database_id={config_dict['database_id']}")
 
@@ -573,7 +579,7 @@ async def select_database(
                 detail="Database not found or not accessible. Make sure the integration has access to this database.",
             )
 
-        # Get database info
+        # Get database info including properties
         db_info = await oauth_service.get_database_info(access_token, database_id)
 
         # Check if switching to a different database OR fresh config - clear old sync records
@@ -597,6 +603,25 @@ async def select_database(
         config_dict["database_id"] = database_id
         if db_info:
             config_dict["database_title"] = db_info["title"]
+
+            # Detect available properties for adaptive sync
+            db_properties = db_info.get("properties", {})
+            available_props = list(db_properties.keys())
+            config_dict["available_properties"] = available_props
+
+            # For todos database, detect if Status (status type) exists
+            # This allows sync to adapt to existing databases with smart Status
+            if database_type == "todos":
+                has_status_prop = (
+                    "Status" in db_properties
+                    and db_properties["Status"].get("type") == "status"
+                )
+                has_workflow_prop = "Workflow" in db_properties
+                config_dict["use_status_property"] = has_status_prop
+                logger.info(
+                    f"Detected todos database properties: Status={has_status_prop}, "
+                    f"Workflow={has_workflow_prop}"
+                )
 
         config.set_config(config_dict)
         config.is_enabled = True  # Enable integration now that database is configured

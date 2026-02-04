@@ -262,7 +262,12 @@ if target_name == "notion":
 
 elif target_name == "notion-todos":
     database_id = config_dict.get("database_id")  # todos database
-    target = NotionTodosSyncTarget(access_token=access_token, database_id=database_id)
+    use_status_property = config_dict.get("use_status_property", False)
+    target = NotionTodosSyncTarget(
+        access_token=access_token,
+        database_id=database_id,
+        use_status_property=use_status_property,  # True for existing dbs with Status
+    )
 ```
 
 #### 3. Update Sync Queue Routing

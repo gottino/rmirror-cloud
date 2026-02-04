@@ -353,6 +353,7 @@ async def test_integration(
             # Notion todos integration - syncs to separate todos database
             access_token = config_dict.get("access_token")
             database_id = config_dict.get("database_id")
+            use_status_property = config_dict.get("use_status_property", False)
 
             if not access_token or not database_id:
                 raise HTTPException(
@@ -360,7 +361,11 @@ async def test_integration(
                     detail="Notion Todos integration requires access_token and database_id. Please reconnect to Notion.",
                 )
 
-            target = NotionTodosSyncTarget(access_token=access_token, database_id=database_id)
+            target = NotionTodosSyncTarget(
+                access_token=access_token,
+                database_id=database_id,
+                use_status_property=use_status_property,
+            )
 
         else:
             raise HTTPException(
