@@ -11,6 +11,7 @@ import { QuotaWarning } from '@/components/QuotaWarning';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
 import { SearchResults } from '@/components/SearchResults';
+import { memo } from 'react';
 
 // Group notebooks by date
 function groupNotebooksByDate(notebooks: NotebookTreeNode[]) {
@@ -109,6 +110,30 @@ function findNodeByUuid(nodes: NotebookTreeNode[], uuid: string): NotebookTreeNo
   return null;
 }
 
+// Memoized logo to prevent flickering during search
+const SidebarLogo = memo(function SidebarLogo({ onClose }: { onClose?: () => void }) {
+  return (
+    <div className="p-6 border-b" style={{ borderColor: 'var(--border)' }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center">
+          <Image src="/rm-icon.png" alt="rMirror" width={32} height={32} style={{ marginRight: '8px', marginTop: '3px'}} />
+          <h1 style={{ fontSize: '1.375rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
+        </div>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="lg:hidden p-2"
+            style={{ color: 'var(--warm-gray)' }}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+      </div>
+      <p style={{ fontSize: '0.875em', color: 'var(--warm-gray)', marginTop: '0.25rem' }}>Cloud Sync</p>
+    </div>
+  );
+});
+
 function DashboardContent() {
   const { getToken, isSignedIn } = useAuth();
   const router = useRouter();
@@ -123,6 +148,9 @@ function DashboardContent() {
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const [showQuotaModal, setShowQuotaModal] = useState(false);
+
+  // Stable callback for closing sidebar (prevents SidebarLogo re-renders)
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
   // Search state
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
@@ -342,7 +370,7 @@ function DashboardContent() {
   }
 
   // Sidebar
-  const Sidebar = () => (
+  const Sidebar = (
     <>
       {/* Mobile overlay */}
       {sidebarOpen && (
@@ -363,22 +391,7 @@ function DashboardContent() {
         style={{ borderColor: 'var(--border)', backgroundColor: 'var(--card)' }}
       >
         {/* Logo */}
-        <div className="p-6 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <Image src="/rm-icon.png" alt="rMirror" width={32} height={32} style={{ marginRight: '8px', marginTop: '3px'}} />
-              <h1 style={{ fontSize: '1.375rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
-            </div>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="lg:hidden p-2"
-              style={{ color: 'var(--warm-gray)' }}
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          <p style={{ fontSize: '0.875em', color: 'var(--warm-gray)', marginTop: '0.25rem' }}>Cloud Sync</p>
-        </div>
+        <SidebarLogo onClose={closeSidebar} />
 
       {/* Folder Navigation */}
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -522,7 +535,7 @@ function DashboardContent() {
   if (loading) {
     return (
       <div className="flex h-screen">
-        <Sidebar />
+        {Sidebar}
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--terracotta)' }}></div>
@@ -536,7 +549,7 @@ function DashboardContent() {
   if (error) {
     return (
       <div className="flex h-screen">
-        <Sidebar />
+        {Sidebar}
         <div className="flex-1 flex items-center justify-center px-4">
           <div className="text-center max-w-md">
             <div style={{ color: 'var(--destructive)', fontSize: '3rem', marginBottom: '1rem' }}>✗</div>
@@ -560,7 +573,7 @@ function DashboardContent() {
 
   return (
     <div className="flex h-screen">
-      <Sidebar />
+      {Sidebar}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Quota Warning Banner */}
         <QuotaWarning onUpgradeClick={() => setShowQuotaModal(true)} />
