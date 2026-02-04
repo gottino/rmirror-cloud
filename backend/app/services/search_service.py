@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -53,9 +54,25 @@ class SearchBackend(ABC):
         skip: int = 0,
         limit: int = 20,
         fuzzy_threshold: float = 0.3,
+        parent_uuid: str | None = None,
+        notebook_id: int | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> tuple[list[RawSearchMatch], int]:
         """
         Execute search and return raw matches.
+
+        Args:
+            db: Database session
+            user_id: User ID to filter by
+            query: Search query string
+            skip: Pagination offset
+            limit: Maximum results
+            fuzzy_threshold: Similarity threshold (PostgreSQL only)
+            parent_uuid: Filter to folder and subfolders
+            notebook_id: Filter to single notebook
+            date_from: Filter notebooks updated after this date
+            date_to: Filter notebooks updated before this date
 
         Returns:
             Tuple of (matches, total_count)
@@ -78,6 +95,10 @@ class PostgreSQLSearchBackend(SearchBackend):
         skip: int = 0,
         limit: int = 20,
         fuzzy_threshold: float = 0.3,
+        parent_uuid: str | None = None,
+        notebook_id: int | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> tuple[list[RawSearchMatch], int]:
         # Set similarity thresholds for session
         # - similarity_threshold: for notebook name matching (short text)
@@ -89,8 +110,29 @@ class PostgreSQLSearchBackend(SearchBackend):
             text(f"SET pg_trgm.strict_word_similarity_threshold = {fuzzy_threshold}")
         )
 
+        # Build dynamic filter conditions
+        filter_conditions = ""
+        if notebook_id is not None:
+            filter_conditions += " AND n.id = :notebook_id"
+        if parent_uuid is not None:
+            # Filter to folder and its subfolders using full_path
+            # The parent folder's full_path will be a prefix of children's full_path
+            filter_conditions += """
+              AND (n.notebook_uuid = :parent_uuid
+                   OR n.parent_uuid = :parent_uuid
+                   OR n.full_path LIKE (
+                       SELECT nf.full_path || '/%'
+                       FROM notebooks nf
+                       WHERE nf.notebook_uuid = :parent_uuid AND nf.user_id = :user_id
+                   ))
+            """
+        if date_from is not None:
+            filter_conditions += " AND n.updated_at >= :date_from"
+        if date_to is not None:
+            filter_conditions += " AND n.updated_at <= :date_to"
+
         # Query for notebook name matches
-        name_matches_sql = text("""
+        name_matches_sql = text(f"""
             SELECT
                 n.id as notebook_id,
                 n.notebook_uuid,
@@ -108,6 +150,7 @@ class PostgreSQLSearchBackend(SearchBackend):
             WHERE n.user_id = :user_id
               AND n.deleted = false
               AND n.visible_name % :query
+              {filter_conditions}
         """)
 
         # Query for content matches using strict_word_similarity
@@ -115,7 +158,7 @@ class PostgreSQLSearchBackend(SearchBackend):
         # it calculates similarity over the entire string, diluting matches.
         # strict_word_similarity finds if the query appears as a similar WORD
         # within the text, which is ideal for OCR content with potential typos.
-        content_matches_sql = text("""
+        content_matches_sql = text(f"""
             SELECT
                 n.id as notebook_id,
                 n.notebook_uuid,
@@ -136,6 +179,7 @@ class PostgreSQLSearchBackend(SearchBackend):
               AND n.deleted = false
               AND :query <<% p.ocr_text
               AND p.ocr_status = 'completed'
+              {filter_conditions}
         """)
 
         # Combined query with pagination
@@ -151,13 +195,14 @@ class PostgreSQLSearchBackend(SearchBackend):
         """)
 
         # Count query
-        count_sql = text("""
+        count_sql = text(f"""
             SELECT COUNT(DISTINCT notebook_id) FROM (
                 (SELECT n.id as notebook_id
                  FROM notebooks n
                  WHERE n.user_id = :user_id
                    AND n.deleted = false
-                   AND n.visible_name % :query)
+                   AND n.visible_name % :query
+                   {filter_conditions})
                 UNION
                 (SELECT n.id as notebook_id
                  FROM pages p
@@ -166,14 +211,25 @@ class PostgreSQLSearchBackend(SearchBackend):
                  WHERE n.user_id = :user_id
                    AND n.deleted = false
                    AND :query <<% p.ocr_text
-                   AND p.ocr_status = 'completed')
+                   AND p.ocr_status = 'completed'
+                   {filter_conditions})
             ) AS matched_notebooks
         """)
 
-        params = {"user_id": user_id, "query": query, "skip": skip, "limit": limit}
+        params = {
+            "user_id": user_id,
+            "query": query,
+            "skip": skip,
+            "limit": limit,
+            "notebook_id": notebook_id,
+            "parent_uuid": parent_uuid,
+            "date_from": date_from,
+            "date_to": date_to,
+        }
 
         results = db.execute(combined_sql, params).fetchall()
-        total_count = db.execute(count_sql, {"user_id": user_id, "query": query}).scalar()
+        count_params = {k: v for k, v in params.items() if k not in ("skip", "limit")}
+        total_count = db.execute(count_sql, count_params).scalar()
 
         matches = [
             RawSearchMatch(
@@ -211,16 +267,64 @@ class SQLiteSearchBackend(SearchBackend):
         skip: int = 0,
         limit: int = 20,
         fuzzy_threshold: float = 0.3,
+        parent_uuid: str | None = None,
+        notebook_id: int | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> tuple[list[RawSearchMatch], int]:
         # Use ORM queries for SQLite (LIKE-based)
         like_pattern = f"%{query}%"
+
+        # Build base filters
+        base_filters = [
+            Notebook.user_id == user_id,
+            Notebook.deleted == False,
+        ]
+
+        # Add optional filters
+        if notebook_id is not None:
+            base_filters.append(Notebook.id == notebook_id)
+        if parent_uuid is not None:
+            # For SQLite, we need to find the parent folder's full_path first
+            parent_folder = (
+                db.query(Notebook)
+                .filter(
+                    Notebook.notebook_uuid == parent_uuid,
+                    Notebook.user_id == user_id,
+                )
+                .first()
+            )
+            if parent_folder and parent_folder.full_path:
+                # Match folder itself, direct children, or descendants
+                from sqlalchemy import or_
+
+                base_filters.append(
+                    or_(
+                        Notebook.notebook_uuid == parent_uuid,
+                        Notebook.parent_uuid == parent_uuid,
+                        Notebook.full_path.like(f"{parent_folder.full_path}/%"),
+                    )
+                )
+            else:
+                # Parent not found or no path, filter to just the uuid match
+                from sqlalchemy import or_
+
+                base_filters.append(
+                    or_(
+                        Notebook.notebook_uuid == parent_uuid,
+                        Notebook.parent_uuid == parent_uuid,
+                    )
+                )
+        if date_from is not None:
+            base_filters.append(Notebook.updated_at >= date_from)
+        if date_to is not None:
+            base_filters.append(Notebook.updated_at <= date_to)
 
         # Get notebook name matches
         name_matches = (
             db.query(Notebook)
             .filter(
-                Notebook.user_id == user_id,
-                Notebook.deleted == False,
+                *base_filters,
                 Notebook.visible_name.ilike(like_pattern),
             )
             .all()
@@ -232,8 +336,7 @@ class SQLiteSearchBackend(SearchBackend):
             .join(NotebookPage, NotebookPage.page_id == Page.id)
             .join(Notebook, Notebook.id == NotebookPage.notebook_id)
             .filter(
-                Notebook.user_id == user_id,
-                Notebook.deleted == False,
+                *base_filters,
                 Page.ocr_text.ilike(like_pattern),
                 Page.ocr_status == "completed",
             )
@@ -456,6 +559,10 @@ def search(
     skip: int = 0,
     limit: int = 20,
     fuzzy_threshold: float = 0.3,
+    parent_uuid: str | None = None,
+    notebook_id: int | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
 ) -> SearchResponse:
     """
     Execute full-text search across notebooks and pages.
@@ -467,6 +574,10 @@ def search(
         skip: Pagination offset
         limit: Maximum results to return
         fuzzy_threshold: Similarity threshold (0-1, PostgreSQL only)
+        parent_uuid: Filter to folder and subfolders
+        notebook_id: Filter to single notebook
+        date_from: Filter notebooks updated after this date
+        date_to: Filter notebooks updated before this date
 
     Returns:
         SearchResponse with results and metadata
@@ -482,6 +593,10 @@ def search(
         skip=0,  # Get all for proper aggregation
         limit=limit * 10,  # Fetch extra for page aggregation
         fuzzy_threshold=fuzzy_threshold,
+        parent_uuid=parent_uuid,
+        notebook_id=notebook_id,
+        date_from=date_from,
+        date_to=date_to,
     )
 
     # Aggregate into SearchResult objects

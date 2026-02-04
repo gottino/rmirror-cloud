@@ -462,19 +462,19 @@ export async function searchNotebooks(
   options?: {
     skip?: number;
     limit?: number;
-    searchType?: 'all' | 'notebooks' | 'pages';
-    dateRange?: 'any' | 'week' | 'month' | 'year';
+    parentUuid?: string;      // Filter to folder and subfolders
+    notebookId?: number;      // Filter to single notebook
+    dateFrom?: string;        // ISO date string
+    dateTo?: string;          // ISO date string
   }
 ): Promise<SearchResponse> {
   const params = new URLSearchParams({ q: query });
   if (options?.skip) params.set('skip', options.skip.toString());
   if (options?.limit) params.set('limit', options.limit.toString());
-  if (options?.searchType && options.searchType !== 'all') {
-    params.set('search_type', options.searchType);
-  }
-  if (options?.dateRange && options.dateRange !== 'any') {
-    params.set('date_range', options.dateRange);
-  }
+  if (options?.parentUuid) params.set('parent_uuid', options.parentUuid);
+  if (options?.notebookId) params.set('notebook_id', options.notebookId.toString());
+  if (options?.dateFrom) params.set('date_from', options.dateFrom);
+  if (options?.dateTo) params.set('date_to', options.dateTo);
 
   const response = await fetch(`${API_URL}/search?${params}`, {
     headers: { 'Authorization': `Bearer ${token}` },

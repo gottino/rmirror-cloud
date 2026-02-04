@@ -1,12 +1,12 @@
 'use client';
 
 import { useAuth, UserButton } from '@clerk/nextjs';
-import { Suspense, useEffect, useState, useRef } from 'react';
+import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
-import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu } from 'lucide-react';
-import { getNotebook, getQuotaStatus, QuotaExceededError, type NotebookWithPages, type Page, type QuotaStatus } from '@/lib/api';
+import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu, Search, X, Loader2 } from 'lucide-react';
+import { getNotebook, getQuotaStatus, searchNotebooks, QuotaExceededError, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
@@ -370,6 +370,13 @@ function NotebookPageContent() {
   const targetPage = searchParams.get('page');
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
+  // In-notebook search state
+  const [notebookSearchQuery, setNotebookSearchQuery] = useState('');
+  const [notebookSearchResults, setNotebookSearchResults] = useState<SearchResponse | null>(null);
+  const [notebookSearchLoading, setNotebookSearchLoading] = useState(false);
+  const [isNotebookSearchMode, setIsNotebookSearchMode] = useState(false);
+  const searchDebounceTimer = useRef<NodeJS.Timeout>();
+
   // Development mode: use JWT token from localStorage
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
@@ -536,6 +543,59 @@ function NotebookPageContent() {
     };
   }, [exportMenuOpen]);
 
+  // Handle in-notebook search
+  const handleNotebookSearch = useCallback(async (query: string) => {
+    // Clear previous timer
+    if (searchDebounceTimer.current) clearTimeout(searchDebounceTimer.current);
+
+    if (query.length < 2) {
+      setIsNotebookSearchMode(false);
+      setNotebookSearchResults(null);
+      return;
+    }
+
+    // Debounce API call by 300ms
+    searchDebounceTimer.current = setTimeout(async () => {
+      setNotebookSearchLoading(true);
+      setIsNotebookSearchMode(true);
+
+      try {
+        const token = isDevelopmentMode
+          ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+          : await getToken();
+
+        if (!token || !notebook) return;
+
+        const results = await searchNotebooks(token, query, {
+          notebookId: notebook.id,
+          limit: 50,
+        });
+        setNotebookSearchResults(results);
+      } catch (err) {
+        console.error('Notebook search error:', err);
+        setNotebookSearchResults(null);
+      } finally {
+        setNotebookSearchLoading(false);
+      }
+    }, 300);
+  }, [isDevelopmentMode, getToken, notebook]);
+
+  const clearNotebookSearch = () => {
+    setNotebookSearchQuery('');
+    setIsNotebookSearchMode(false);
+    setNotebookSearchResults(null);
+  };
+
+  // Scroll to a specific page
+  const scrollToPage = (pageNumber: number) => {
+    const pageEl = pageRefs.current.get(pageNumber);
+    if (pageEl) {
+      pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      pageEl.classList.add('highlight-pulse');
+      setTimeout(() => pageEl.classList.remove('highlight-pulse'), 2000);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--background)' }}>
@@ -654,9 +714,46 @@ function NotebookPageContent() {
           <div className="max-w-4xl mx-auto">
             {/* Notebook header with metadata and actions */}
             <div className="mb-8">
-              <h1 style={{ fontSize: '2.25rem', fontWeight: 600, color: 'var(--warm-charcoal)', marginBottom: '1rem' }}>
-                {notebook.visible_name || notebook.title || 'Untitled'}
-              </h1>
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+                <h1 style={{ fontSize: '2.25rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>
+                  {notebook.visible_name || notebook.title || 'Untitled'}
+                </h1>
+                {/* In-notebook search */}
+                <div className="relative w-full md:w-64">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4" style={{ color: 'var(--warm-gray)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search in this notebook..."
+                    value={notebookSearchQuery}
+                    onChange={(e) => {
+                      setNotebookSearchQuery(e.target.value);
+                      handleNotebookSearch(e.target.value);
+                    }}
+                    className="w-full pl-9 pr-8 py-2 rounded-lg"
+                    style={{
+                      border: '1px solid var(--border)',
+                      fontSize: '0.875em',
+                      backgroundColor: 'var(--card)',
+                      color: 'var(--foreground)'
+                    }}
+                  />
+                  {notebookSearchLoading && (
+                    <Loader2
+                      className="absolute right-8 top-1/2 transform -translate-y-1/2 w-4 h-4 animate-spin"
+                      style={{ color: 'var(--terracotta)' }}
+                    />
+                  )}
+                  {notebookSearchQuery && (
+                    <button
+                      onClick={clearNotebookSearch}
+                      className="absolute right-2 top-1/2 transform -translate-y-1/2"
+                      style={{ color: 'var(--warm-gray)' }}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
 
               {/* Metadata row */}
               <div className="flex flex-wrap items-center gap-6 mb-4" style={{ fontSize: '0.875em', color: 'var(--warm-gray)' }}>
@@ -760,8 +857,47 @@ function NotebookPageContent() {
             {/* Sync Progress */}
             <SyncProgress pages={notebook.pages} />
 
-            {/* Pages */}
-            {sortedPages.length === 0 ? (
+            {/* In-notebook search results */}
+            {isNotebookSearchMode && notebookSearchResults ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p style={{ fontSize: '0.925em', color: 'var(--warm-gray)' }}>
+                    {notebookSearchResults.total_results > 0 ? (
+                      <>{notebookSearchResults.results[0]?.matched_pages.length || 0} matches in this notebook</>
+                    ) : (
+                      <>No matches found for "{notebookSearchQuery}"</>
+                    )}
+                  </p>
+                  <button
+                    onClick={clearNotebookSearch}
+                    style={{ fontSize: '0.875em', color: 'var(--terracotta)' }}
+                  >
+                    Show all pages
+                  </button>
+                </div>
+                {notebookSearchResults.results[0]?.matched_pages.map((matchedPage) => (
+                  <button
+                    key={matchedPage.page_id}
+                    onClick={() => {
+                      clearNotebookSearch();
+                      setTimeout(() => scrollToPage(matchedPage.page_number), 100);
+                    }}
+                    className="block w-full text-left p-4 rounded-lg transition-all hover:border-[var(--terracotta)]"
+                    style={{
+                      backgroundColor: 'var(--card)',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    <div style={{ fontWeight: 500, color: 'var(--warm-charcoal)', marginBottom: '0.5rem' }}>
+                      Page {matchedPage.page_number}
+                    </div>
+                    <div style={{ fontSize: '0.875em', color: 'var(--warm-gray)' }}>
+                      {matchedPage.snippet.text}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : sortedPages.length === 0 ? (
               <div className="text-center py-12 rounded-lg" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>
                   No pages found
@@ -771,6 +907,7 @@ function NotebookPageContent() {
                 </p>
               </div>
             ) : (
+              /* Pages */
               <div className="space-y-6">
                 {sortedPages.map((page) => (
                   <PageCard

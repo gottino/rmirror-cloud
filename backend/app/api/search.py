@@ -1,6 +1,7 @@
 """Search API endpoint for full-text fuzzy search across notebooks and pages."""
 
 import logging
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -41,6 +42,22 @@ async def search_notebooks(
             description="Similarity threshold (0-1, PostgreSQL only). Lower = more fuzzy.",
         ),
     ] = 0.3,
+    parent_uuid: Annotated[
+        str | None,
+        Query(description="Filter to folder and its subfolders by notebook_uuid"),
+    ] = None,
+    notebook_id: Annotated[
+        int | None,
+        Query(description="Filter to a single notebook by ID"),
+    ] = None,
+    date_from: Annotated[
+        datetime | None,
+        Query(description="Filter notebooks updated after this date (ISO format)"),
+    ] = None,
+    date_to: Annotated[
+        datetime | None,
+        Query(description="Filter notebooks updated before this date (ISO format)"),
+    ] = None,
 ):
     """
     Search across notebook names and OCR page content.
@@ -59,11 +76,18 @@ async def search_notebooks(
         skip: Pagination offset (default 0)
         limit: Results per page (default 20, max 50)
         fuzzy_threshold: Similarity threshold for fuzzy matching (default 0.3)
+        parent_uuid: Filter to folder and its subfolders by notebook_uuid
+        notebook_id: Filter to a single notebook by ID
+        date_from: Filter notebooks updated after this date
+        date_to: Filter notebooks updated before this date
 
     Returns:
         SearchResponse with matching notebooks, pages, and snippets
     """
-    logger.info(f"Search request: user={current_user.id}, query='{q}', skip={skip}, limit={limit}")
+    logger.info(
+        f"Search request: user={current_user.id}, query='{q}', skip={skip}, limit={limit}, "
+        f"parent_uuid={parent_uuid}, notebook_id={notebook_id}, date_from={date_from}, date_to={date_to}"
+    )
 
     result = search_service.search(
         db=db,
@@ -72,6 +96,10 @@ async def search_notebooks(
         skip=skip,
         limit=limit,
         fuzzy_threshold=fuzzy_threshold,
+        parent_uuid=parent_uuid,
+        notebook_id=notebook_id,
+        date_from=date_from,
+        date_to=date_to,
     )
 
     logger.info(

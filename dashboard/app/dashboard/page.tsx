@@ -156,8 +156,25 @@ function DashboardContent() {
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [isSearchMode, setIsSearchMode] = useState(false);
+  const [dateRange, setDateRange] = useState<'any' | 'week' | 'month' | 'year'>('any');
   const debounceTimer = useRef<NodeJS.Timeout>();
   const initializedFromUrl = useRef(false);
+
+  // Helper to convert date range to ISO date string
+  const getDateFromRange = useCallback((range: 'any' | 'week' | 'month' | 'year'): string | undefined => {
+    if (range === 'any') return undefined;
+    const now = new Date();
+    switch (range) {
+      case 'week':
+        return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      case 'month':
+        return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      case 'year':
+        return new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString();
+      default:
+        return undefined;
+    }
+  }, []);
 
   // Development mode bypass
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
@@ -234,13 +251,18 @@ function DashboardContent() {
   };
 
   // Update URL params without triggering navigation
-  const updateUrlParams = useCallback((query: string) => {
-    const newUrl = query ? `/dashboard?q=${encodeURIComponent(query)}` : '/dashboard';
+  const updateUrlParams = useCallback((query: string, range?: 'any' | 'week' | 'month' | 'year', folderUuid?: string) => {
+    const params = new URLSearchParams();
+    if (query) params.set('q', query);
+    if (folderUuid) params.set('folder', folderUuid);
+    if (range && range !== 'any') params.set('range', range);
+
+    const newUrl = params.toString() ? `/dashboard?${params}` : '/dashboard';
     router.replace(newUrl, { scroll: false });
   }, [router]);
 
   // Execute search (extracted for reuse)
-  const executeSearch = useCallback(async (query: string) => {
+  const executeSearch = useCallback(async (query: string, range?: 'any' | 'week' | 'month' | 'year') => {
     setSearchLoading(true);
     setIsSearchMode(true);
 
@@ -254,7 +276,19 @@ function DashboardContent() {
         return;
       }
 
-      const results = await searchNotebooks(token, query, { limit: 20 });
+      // Get current folder UUID for scoped search
+      const currentFolderUuid = currentFolderPath.length > 0
+        ? currentFolderPath[currentFolderPath.length - 1]
+        : undefined;
+
+      // Use provided range or current dateRange state
+      const effectiveRange = range ?? dateRange;
+
+      const results = await searchNotebooks(token, query, {
+        limit: 20,
+        parentUuid: currentFolderUuid,
+        dateFrom: getDateFromRange(effectiveRange),
+      });
       setSearchResults(results);
     } catch (err) {
       console.error('Search error:', err);
@@ -262,7 +296,7 @@ function DashboardContent() {
     } finally {
       setSearchLoading(false);
     }
-  }, [isDevelopmentMode, getToken]);
+  }, [isDevelopmentMode, getToken, currentFolderPath, dateRange, getDateFromRange]);
 
   const handleSearch = async (query: string) => {
     // Clear previous timer
@@ -276,18 +310,36 @@ function DashboardContent() {
       return;
     }
 
+    // Get current folder UUID for URL
+    const currentFolderUuid = currentFolderPath.length > 0
+      ? currentFolderPath[currentFolderPath.length - 1]
+      : undefined;
+
     // Debounce API call by 300ms
     debounceTimer.current = setTimeout(async () => {
-      updateUrlParams(query);
+      updateUrlParams(query, dateRange, currentFolderUuid);
       await executeSearch(query);
     }, 300);
   };
 
   const clearSearch = () => {
     setSearchQuery('');
+    setDateRange('any');
     setIsSearchMode(false);
     setSearchResults(null);
     router.replace('/dashboard', { scroll: false });
+  };
+
+  // Handle date range filter change
+  const handleDateRangeChange = (range: 'any' | 'week' | 'month' | 'year') => {
+    setDateRange(range);
+    if (searchQuery.length >= 2) {
+      const currentFolderUuid = currentFolderPath.length > 0
+        ? currentFolderPath[currentFolderPath.length - 1]
+        : undefined;
+      updateUrlParams(searchQuery, range, currentFolderUuid);
+      executeSearch(searchQuery, range);
+    }
   };
 
   useEffect(() => {
@@ -299,21 +351,24 @@ function DashboardContent() {
   // Restore search state from URL params (for back button navigation)
   useEffect(() => {
     const urlQuery = searchParams.get('q') || '';
+    const urlRange = (searchParams.get('range') || 'any') as 'any' | 'week' | 'month' | 'year';
 
     // Only restore if URL has search params and we haven't initialized yet
     // or if URL params changed (back/forward navigation)
     if (urlQuery && urlQuery.length >= 2) {
       // Check if we need to restore (different from current state)
-      const needsRestore = urlQuery !== searchQuery || !initializedFromUrl.current;
+      const needsRestore = urlQuery !== searchQuery || urlRange !== dateRange || !initializedFromUrl.current;
 
       if (needsRestore) {
         setSearchQuery(urlQuery);
-        executeSearch(urlQuery);
+        setDateRange(urlRange);
+        executeSearch(urlQuery, urlRange);
         initializedFromUrl.current = true;
       }
     } else if (!urlQuery && isSearchMode) {
       // URL cleared but we're in search mode - clear search
       setSearchQuery('');
+      setDateRange('any');
       setIsSearchMode(false);
       setSearchResults(null);
     }
@@ -596,7 +651,7 @@ function DashboardContent() {
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
                   <input
                     type="text"
-                    placeholder="Search notebooks and content..."
+                    placeholder={currentFolderPath.length > 0 ? "Search in this folder..." : "Search notebooks and content..."}
                     value={searchQuery}
                     onChange={(e) => {
                       setSearchQuery(e.target.value);
@@ -626,6 +681,27 @@ function DashboardContent() {
                     </button>
                   )}
                 </div>
+                {/* Date filter chips - shown when in search mode */}
+                {isSearchMode && (
+                  <div className="flex gap-2 mt-2">
+                    {(['any', 'week', 'month', 'year'] as const).map((range) => (
+                      <button
+                        key={range}
+                        onClick={() => handleDateRangeChange(range)}
+                        className="px-3 py-1 rounded-full text-sm transition-colors"
+                        style={{
+                          backgroundColor: dateRange === range ? 'var(--terracotta)' : 'var(--soft-cream)',
+                          color: dateRange === range ? 'white' : 'var(--warm-charcoal)',
+                          border: dateRange === range ? 'none' : '1px solid var(--border)',
+                          fontSize: '0.8em',
+                          fontWeight: 500,
+                        }}
+                      >
+                        {range === 'any' ? 'Any time' : `Last ${range}`}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center space-x-4">
