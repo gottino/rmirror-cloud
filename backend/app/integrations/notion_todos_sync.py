@@ -29,7 +29,7 @@ class NotionTodosSyncTarget(SyncTarget):
         self,
         access_token: str,
         database_id: str,
-        verify_ssl: bool = False,
+        verify_ssl: bool = True,
         use_status_property: bool = False,
     ):
         """
@@ -38,7 +38,7 @@ class NotionTodosSyncTarget(SyncTarget):
         Args:
             access_token: Notion OAuth access token or integration API token
             database_id: Notion database ID for todos
-            verify_ssl: Whether to verify SSL certificates (False for corporate environments)
+            verify_ssl: Whether to verify SSL certificates (default: True)
             use_status_property: If True, use Status (status type) instead of Workflow (select)
                                This is True for existing databases with Status property
         """
@@ -48,13 +48,12 @@ class NotionTodosSyncTarget(SyncTarget):
         self.use_status_property = use_status_property
 
         # Create httpx client with SSL verification control
-        if verify_ssl:
-            self.client = NotionClient(auth=access_token)
-        else:
-            # Disable SSL verification for corporate environments
+        if not verify_ssl:
             self.logger.warning("⚠️ SSL verification disabled for Notion API calls")
             http_client = httpx.Client(verify=False)
             self.client = NotionClient(auth=access_token, client=http_client)
+        else:
+            self.client = NotionClient(auth=access_token)
 
         self.logger.info(
             f"Initialized Notion Todos sync target with database {database_id} "

@@ -37,11 +37,16 @@ def get_jwks_client() -> Optional[PyJWKClient]:
     settings = get_settings()
 
     if not settings.clerk_jwks_url:
+        if not settings.debug:
+            raise RuntimeError(
+                "CLERK_JWKS_URL is required in production. "
+                "Set CLERK_JWKS_URL to your Clerk JWKS endpoint "
+                "(e.g., https://your-app.clerk.accounts.dev/.well-known/jwks.json)"
+            )
         if not _jwks_warned:
             logger.warning(
                 "CLERK_JWKS_URL not configured - JWT signature verification disabled. "
-                "This is a SECURITY RISK in production. Set CLERK_JWKS_URL to your "
-                "Clerk JWKS endpoint (e.g., https://your-app.clerk.accounts.dev/.well-known/jwks.json)"
+                "This is only allowed in debug mode."
             )
             _jwks_warned = True
         return None
@@ -118,8 +123,11 @@ async def get_clerk_user(
                 logger.warning("JWT signature verification failed - possible token tampering")
                 raise credentials_exception
         else:
-            # Development mode: Decode without verification (with warning logged above)
-            decoded = jwt.decode(token, options={"verify_signature": False})
+            # Development mode only: Decode without signature verification but still check expiration
+            decoded = jwt.decode(
+                token,
+                options={"verify_signature": False, "verify_exp": True},
+            )
 
         # Extract user ID from the token (could be Clerk ID or regular user ID)
         sub = decoded.get("sub")

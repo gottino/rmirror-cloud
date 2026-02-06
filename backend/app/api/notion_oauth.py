@@ -1,7 +1,11 @@
 """API endpoints for Notion OAuth flow and database management."""
 
+import base64
+import hashlib
+import hmac
+import json
 import logging
-import secrets
+import time
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -9,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
+from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.user import User
@@ -18,7 +23,35 @@ from app.services.notion_oauth import NotionOAuthService
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/notion", tags=["notion-oauth"])
 
+_OAUTH_STATE_EXPIRY_SECONDS = 600  # 10 minutes
 
+
+def _create_oauth_state(user_id: int, secret_key: str) -> str:
+    """Create an HMAC-signed OAuth state token encoding user_id and expiration."""
+    payload = json.dumps({"uid": user_id, "exp": int(time.time()) + _OAUTH_STATE_EXPIRY_SECONDS})
+    payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode()
+    signature = hmac.new(secret_key.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{signature}"
+
+
+def _validate_oauth_state(state: str, user_id: int, secret_key: str) -> bool:
+    """Validate an HMAC-signed OAuth state token."""
+    try:
+        parts = state.split(".")
+        if len(parts) != 2:
+            return False
+        payload_b64, signature = parts
+        expected_sig = hmac.new(secret_key.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected_sig):
+            return False
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        if payload.get("uid") != user_id:
+            return False
+        if payload.get("exp", 0) < int(time.time()):
+            return False
+        return True
+    except Exception:
+        return False
 
 
 async def _run_initial_sync_background(user_id: int, target_name: str):
@@ -156,12 +189,10 @@ async def get_authorization_url(
     """
     try:
         oauth_service = NotionOAuthService()
+        settings = get_settings()
 
-        # Generate random state for CSRF protection
-        state = secrets.token_urlsafe(32)
-
-        # TODO: Store state in session/cache to validate in callback
-        # For now, we'll just return it and the frontend will pass it back
+        # Generate HMAC-signed state for CSRF protection
+        state = _create_oauth_state(current_user.id, settings.secret_key)
 
         authorization_url = oauth_service.get_authorization_url(state)
 
@@ -186,8 +217,11 @@ async def oauth_callback(
     """
     try:
         oauth_service = NotionOAuthService()
+        settings = get_settings()
 
-        # TODO: Validate state parameter to prevent CSRF
+        # Validate state parameter to prevent CSRF
+        if not _validate_oauth_state(request.state, current_user.id, settings.secret_key):
+            raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
         # Exchange code for token
         token_data = await oauth_service.exchange_code_for_token(request.code)

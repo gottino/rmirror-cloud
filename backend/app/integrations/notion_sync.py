@@ -20,33 +20,33 @@ class NotionSyncTarget(SyncTarget):
     This handles syncing notebooks and pages to a Notion database.
     """
 
-    def __init__(self, access_token: str, database_id: str, verify_ssl: bool = False):
+    def __init__(self, access_token: str, database_id: str, verify_ssl: bool = True):
         """
         Initialize Notion sync target.
 
         Args:
             access_token: Notion OAuth access token or integration API token
             database_id: Notion database ID for notebooks
-            verify_ssl: Whether to verify SSL certificates (False for corporate environments)
+            verify_ssl: Whether to verify SSL certificates (default: True)
         """
         super().__init__("notion")
         self.access_token = access_token
         self.database_id = database_id
+        self.verify_ssl = verify_ssl
 
         # Create httpx client with SSL verification control
-        if verify_ssl:
-            self.client = NotionClient(
-                auth=access_token,
-                notion_version="2025-09-03"  # Use new API version
-            )
-        else:
-            # Disable SSL verification for corporate environments
+        if not verify_ssl:
             self.logger.warning("⚠️ SSL verification disabled for Notion API calls")
             http_client = httpx.Client(verify=False)
             self.client = NotionClient(
                 auth=access_token,
                 client=http_client,
-                notion_version="2025-09-03"  # Use new API version
+                notion_version="2025-09-03"
+            )
+        else:
+            self.client = NotionClient(
+                auth=access_token,
+                notion_version="2025-09-03"
             )
 
         self.markdown_converter = MarkdownToNotionConverter()
@@ -473,7 +473,7 @@ class NotionSyncTarget(SyncTarget):
                         }
                     }
                 },
-                verify=False,  # SSL verification disabled for corporate environments
+                verify=self.verify_ssl,
                 timeout=30.0
             )
 

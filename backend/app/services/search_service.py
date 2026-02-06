@@ -104,10 +104,12 @@ class PostgreSQLSearchBackend(SearchBackend):
         # - similarity_threshold: for notebook name matching (short text)
         # - strict_word_similarity_threshold: for OCR content matching (long text)
         db.execute(
-            text(f"SET pg_trgm.similarity_threshold = {fuzzy_threshold}")
+            text("SET pg_trgm.similarity_threshold = :threshold"),
+            {"threshold": fuzzy_threshold},
         )
         db.execute(
-            text(f"SET pg_trgm.strict_word_similarity_threshold = {fuzzy_threshold}")
+            text("SET pg_trgm.strict_word_similarity_threshold = :threshold"),
+            {"threshold": fuzzy_threshold},
         )
 
         # Build dynamic filter conditions

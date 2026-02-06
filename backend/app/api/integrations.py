@@ -1,6 +1,5 @@
 """API endpoints for managing external service integrations."""
 
-import json
 import logging
 from typing import List
 
@@ -84,13 +83,13 @@ async def create_integration(
                 detail=f"Integration '{request.target_name}' already exists. Use PUT to update.",
             )
 
-        # Create new integration config
+        # Create new integration config with encrypted credentials
         config = IntegrationConfig(
             user_id=current_user.id,
             target_name=request.target_name,
             is_enabled=request.is_enabled,
-            config_json=json.dumps(request.config),
         )
+        config.set_config(request.config)
 
         db.add(config)
         db.commit()
@@ -219,9 +218,9 @@ async def update_integration(
                 status_code=404, detail=f"Integration '{target_name}' not found"
             )
 
-        # Update config
+        # Update config with encrypted credentials
         config.is_enabled = request.is_enabled
-        config.config_json = json.dumps(request.config)
+        config.set_config(request.config)
 
         db.commit()
         db.refresh(config)

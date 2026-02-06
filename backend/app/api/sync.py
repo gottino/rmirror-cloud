@@ -331,7 +331,7 @@ async def trigger_sync(
 
         # Register sync targets
         for config in configs:
-            config_dict = json.loads(config.config_json)
+            config_dict = config.get_config()
 
             if config.target_name == "notion":
                 access_token = config_dict.get("access_token")
