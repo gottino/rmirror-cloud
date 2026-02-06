@@ -18,11 +18,11 @@ from app.models.page import OcrStatus, Page
 from app.models.user import User
 from app.services import search_service
 from app.services.search_service import (
+    RawSearchMatch,
     SQLiteSearchBackend,
     aggregate_results,
     create_snippet,
     get_search_backend,
-    RawSearchMatch,
 )
 from tests.conftest import create_user_with_quota
 
