@@ -206,23 +206,9 @@ class TestAggregateResults:
         assert len(results[0].matched_pages) == 5
         assert results[0].total_matched_pages == 10
 
-    def test_sorts_by_best_score(self):
-        """Should sort results by best score descending."""
+    def test_preserves_input_order(self):
+        """Should preserve input order (backends provide correct ordering)."""
         matches = [
-            RawSearchMatch(
-                notebook_id=1,
-                notebook_uuid="nb-1",
-                visible_name="Low Score",
-                document_type="notebook",
-                full_path="/path/1",
-                updated_at=datetime.utcnow(),
-                page_id=10,
-                page_uuid="p-10",
-                page_number=1,
-                ocr_text="meeting",
-                name_score=0.0,
-                content_score=0.3,
-            ),
             RawSearchMatch(
                 notebook_id=2,
                 notebook_uuid="nb-2",
@@ -237,11 +223,25 @@ class TestAggregateResults:
                 name_score=0.0,
                 content_score=0.9,
             ),
+            RawSearchMatch(
+                notebook_id=1,
+                notebook_uuid="nb-1",
+                visible_name="Low Score",
+                document_type="notebook",
+                full_path="/path/1",
+                updated_at=datetime.utcnow(),
+                page_id=10,
+                page_uuid="p-10",
+                page_number=1,
+                ocr_text="meeting",
+                name_score=0.0,
+                content_score=0.3,
+            ),
         ]
 
         results = aggregate_results(matches, "meeting")
 
-        assert results[0].notebook_id == 2  # Higher score first
+        assert results[0].notebook_id == 2  # Preserves input order
         assert results[1].notebook_id == 1
 
 
@@ -647,3 +647,175 @@ class TestSearchResponseStructure:
         assert result.name_score >= 0
         assert result.best_score >= 0
         assert result.updated_at is not None
+
+
+class TestPaginationCorrectness:
+    """Tests verifying pagination operates at the notebook level correctly."""
+
+    @pytest.fixture
+    def search_user(self, db: Session) -> User:
+        """Create a user for pagination tests."""
+        return create_user_with_quota(db, email="pagination@test.com")
+
+    @pytest.fixture
+    def many_notebooks(self, db: Session, search_user: User) -> list[Notebook]:
+        """Create 10 notebooks with 'Paginate' in the name and varying update times."""
+        notebooks = []
+        for i in range(10):
+            nb = Notebook(
+                notebook_uuid=f"paginate-nb-{i}",
+                user_id=search_user.id,
+                visible_name=f"Paginate Notebook {i}",
+                document_type="notebook",
+                full_path=f"/Work/{i}",
+                deleted=False,
+                created_at=datetime.utcnow(),
+                updated_at=datetime(2026, 1, 1, 0, 0, i),  # deterministic ordering
+            )
+            db.add(nb)
+        db.commit()
+
+        # Refetch to get IDs
+        for i in range(10):
+            nb = db.query(Notebook).filter(
+                Notebook.notebook_uuid == f"paginate-nb-{i}"
+            ).one()
+            notebooks.append(nb)
+        return notebooks
+
+    def test_pagination_no_duplicates_across_pages(
+        self, db: Session, search_user: User, many_notebooks
+    ):
+        """Page 1 and page 2 should have zero overlap in notebook IDs."""
+        page1 = search_service.search(
+            db=db, user_id=search_user.id, query="Paginate", skip=0, limit=5
+        )
+        page2 = search_service.search(
+            db=db, user_id=search_user.id, query="Paginate", skip=5, limit=5
+        )
+
+        ids1 = {r.notebook_uuid for r in page1.results}
+        ids2 = {r.notebook_uuid for r in page2.results}
+
+        assert len(ids1) == 5
+        assert len(ids2) == 5
+        assert ids1.isdisjoint(ids2), f"Overlap found: {ids1 & ids2}"
+
+    def test_pagination_no_gaps(
+        self, db: Session, search_user: User, many_notebooks
+    ):
+        """Fetching all pages sequentially should return the complete set."""
+        all_ids = set()
+        skip = 0
+        limit = 3
+        pages_fetched = 0
+
+        while True:
+            response = search_service.search(
+                db=db, user_id=search_user.id, query="Paginate",
+                skip=skip, limit=limit,
+            )
+            for r in response.results:
+                all_ids.add(r.notebook_uuid)
+            pages_fetched += 1
+
+            if not response.has_more:
+                break
+            skip += limit
+
+            # Safety: prevent infinite loop
+            if pages_fetched > 10:
+                break
+
+        assert len(all_ids) == 10, f"Expected 10 notebooks, got {len(all_ids)}"
+        expected = {f"paginate-nb-{i}" for i in range(10)}
+        assert all_ids == expected
+
+    def test_has_more_correct_at_boundary(
+        self, db: Session, search_user: User, many_notebooks
+    ):
+        """has_more should be False when limit >= total, True when limit < total."""
+        # Exactly matching limit
+        exact = search_service.search(
+            db=db, user_id=search_user.id, query="Paginate", skip=0, limit=10
+        )
+        assert exact.has_more is False
+        assert exact.total_results == 10
+
+        # Smaller limit
+        partial = search_service.search(
+            db=db, user_id=search_user.id, query="Paginate", skip=0, limit=4
+        )
+        assert partial.has_more is True
+        assert partial.total_results == 10
+
+        # Last page (skip=8, limit=4 -> only 2 results left)
+        last = search_service.search(
+            db=db, user_id=search_user.id, query="Paginate", skip=8, limit=4
+        )
+        assert len(last.results) == 2
+        assert last.has_more is False
+
+    def test_total_results_counts_distinct_notebooks(
+        self, db: Session, search_user: User
+    ):
+        """total_results should count distinct notebooks, not raw page matches."""
+        # Create 2 notebooks, each with multiple matching pages
+        for nb_i in range(2):
+            nb = Notebook(
+                notebook_uuid=f"distinct-nb-{nb_i}",
+                user_id=search_user.id,
+                visible_name=f"Distinct Notebook {nb_i}",
+                document_type="notebook",
+                full_path=f"/Distinct/{nb_i}",
+                deleted=False,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            db.add(nb)
+            db.commit()
+            db.refresh(nb)
+
+            for p_i in range(5):
+                page = Page(
+                    notebook_id=nb.id,
+                    page_uuid=f"distinct-page-{nb_i}-{p_i}",
+                    ocr_status=OcrStatus.COMPLETED,
+                    ocr_text=f"findable content about dolphins and whales {p_i}",
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
+                )
+                db.add(page)
+                db.commit()
+                db.refresh(page)
+
+                notebook_page = NotebookPage(
+                    notebook_id=nb.id,
+                    page_id=page.id,
+                    page_number=p_i + 1,
+                )
+                db.add(notebook_page)
+            db.commit()
+
+        response = search_service.search(
+            db=db, user_id=search_user.id, query="dolphins", skip=0, limit=20
+        )
+
+        # Should be 2 notebooks, not 10 (5 pages * 2 notebooks)
+        assert response.total_results == 2
+        assert len(response.results) == 2
+
+    def test_stable_ordering_across_pages(
+        self, db: Session, search_user: User, many_notebooks
+    ):
+        """Results should be in the same order across repeated requests."""
+        response_a = search_service.search(
+            db=db, user_id=search_user.id, query="Paginate", skip=0, limit=10
+        )
+        response_b = search_service.search(
+            db=db, user_id=search_user.id, query="Paginate", skip=0, limit=10
+        )
+
+        ids_a = [r.notebook_uuid for r in response_a.results]
+        ids_b = [r.notebook_uuid for r in response_b.results]
+        assert ids_a == ids_b, "Ordering should be stable across identical requests"
