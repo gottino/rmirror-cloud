@@ -89,6 +89,7 @@ export interface NotebookTreeNode {
   full_path: string | null;
   created_at: string | null;
   last_synced_at: string | null;
+  last_opened: string | null;
   is_folder: boolean;
   preview: string | null;
   sync_progress: SyncProgress | null;

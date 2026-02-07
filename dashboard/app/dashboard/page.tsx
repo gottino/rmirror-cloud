@@ -25,13 +25,14 @@ function groupNotebooksByDate(notebooks: NotebookTreeNode[]) {
   };
 
   notebooks.forEach((notebook) => {
-    if (!notebook.last_synced_at) {
+    const dateStr = notebook.last_opened || notebook.last_synced_at;
+    if (!dateStr) {
       groups['Older'].push(notebook);
       return;
     }
 
-    const syncedDate = new Date(notebook.last_synced_at);
-    const diffInMs = now.getTime() - syncedDate.getTime();
+    const date = new Date(dateStr);
+    const diffInMs = now.getTime() - date.getTime();
     const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
 
     if (diffInDays === 0) {
@@ -46,6 +47,16 @@ function groupNotebooksByDate(notebooks: NotebookTreeNode[]) {
       groups['Older'].push(notebook);
     }
   });
+
+  for (const group of Object.values(groups)) {
+    group.sort((a, b) => {
+      const dateA = a.last_opened || a.last_synced_at;
+      const dateB = b.last_opened || b.last_synced_at;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return new Date(dateB).getTime() - new Date(dateA).getTime();
+    });
+  }
 
   return groups;
 }
@@ -909,10 +920,10 @@ function DashboardContent() {
                                 {notebook.visible_name}
                               </h4>
                               <p style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
-                                {notebook.last_synced_at ? new Date(notebook.last_synced_at).toLocaleDateString('en-US', {
+                                {(notebook.last_opened || notebook.last_synced_at) ? new Date((notebook.last_opened || notebook.last_synced_at)!).toLocaleDateString('en-US', {
                                   month: 'short',
                                   day: 'numeric'
-                                }) : 'Never synced'}
+                                }) : 'No date'}
                               </p>
                             </Link>
                           ))}
@@ -989,11 +1000,11 @@ function DashboardContent() {
                                     {notebook.visible_name}
                                   </h4>
                                   <p style={{ fontSize: '0.8em', color: 'var(--warm-gray)' }}>
-                                    {notebook.last_synced_at ? new Date(notebook.last_synced_at).toLocaleDateString('en-US', {
+                                    {(notebook.last_opened || notebook.last_synced_at) ? new Date((notebook.last_opened || notebook.last_synced_at)!).toLocaleDateString('en-US', {
                                       year: 'numeric',
                                       month: 'short',
                                       day: 'numeric'
-                                    }) : 'Never synced'}
+                                    }) : 'No date'}
                                   </p>
                                 </div>
                               </div>

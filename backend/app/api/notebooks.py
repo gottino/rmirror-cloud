@@ -243,6 +243,7 @@ async def get_notebooks_tree(
             "full_path": notebook.full_path,
             "created_at": notebook.created_at.isoformat() if notebook.created_at else None,
             "last_synced_at": notebook.last_synced_at.isoformat() if notebook.last_synced_at else None,
+            "last_opened": notebook.last_opened.isoformat() if notebook.last_opened else None,
             "is_folder": notebook.notebook_uuid in has_children,
             "preview": preview_map.get(notebook.notebook_uuid),
             "sync_progress": sync_progress_map.get(notebook.notebook_uuid),
