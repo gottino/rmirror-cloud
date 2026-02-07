@@ -17,6 +17,18 @@ from app.schemas.search import (
     SearchSnippet,
 )
 
+# Ranking weights: content matches are more valuable than name matches
+NAME_WEIGHT = 0.6
+CONTENT_WEIGHT = 1.0
+BOTH_MATCH_BONUS = 0.05
+
+
+def compute_ranking_score(name_score: float, content_score: float) -> float:
+    """Compute weighted ranking score. Content matches are preferred over name matches."""
+    base = max(name_score * NAME_WEIGHT, content_score * CONTENT_WEIGHT)
+    bonus = BOTH_MATCH_BONUS if name_score > 0 and content_score > 0 else 0
+    return min(base + bonus, 1.0)
+
 
 @dataclass
 class RawSearchMatch:
@@ -166,7 +178,12 @@ class PostgreSQLSearchBackend(SearchBackend):
                 SELECT a.notebook_id,
                        COALESCE(nh.score, 0) as name_score,
                        COALESCE(ch.score, 0) as content_score,
-                       GREATEST(COALESCE(nh.score, 0), COALESCE(ch.score, 0)) as best_score
+                       LEAST(
+                           GREATEST(COALESCE(nh.score, 0) * 0.6, COALESCE(ch.score, 0))
+                           + CASE WHEN COALESCE(nh.score, 0) > 0 AND COALESCE(ch.score, 0) > 0
+                                  THEN 0.05 ELSE 0 END,
+                           1.0
+                       ) as best_score
                 FROM all_ids a
                 LEFT JOIN name_hits nh ON nh.notebook_id = a.notebook_id
                 LEFT JOIN content_hits ch ON ch.notebook_id = a.notebook_id
@@ -435,7 +452,9 @@ class SQLiteSearchBackend(SearchBackend):
         # Compute per-notebook best_score and updated_at for sorting
         notebook_sort_keys: dict[int, tuple] = {}
         for nid, group in notebook_groups.items():
-            best_score = max(max(m.name_score, m.content_score) for m in group)
+            best_score = max(
+                compute_ranking_score(m.name_score, m.content_score) for m in group
+            )
             updated_at = group[0].updated_at
             notebook_sort_keys[nid] = (best_score, updated_at, nid)
 
@@ -571,8 +590,7 @@ def aggregate_results(
         # Track best score
         notebook_matches[notebook_id]["best_score"] = max(
             notebook_matches[notebook_id]["best_score"],
-            match.name_score,
-            match.content_score,
+            compute_ranking_score(match.name_score, match.content_score),
         )
 
     # Convert to SearchResult objects

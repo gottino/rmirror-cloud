@@ -21,6 +21,7 @@ from app.services.search_service import (
     RawSearchMatch,
     SQLiteSearchBackend,
     aggregate_results,
+    compute_ranking_score,
     create_snippet,
     get_search_backend,
 )
@@ -819,3 +820,87 @@ class TestPaginationCorrectness:
         ids_a = [r.notebook_uuid for r in response_a.results]
         ids_b = [r.notebook_uuid for r in response_b.results]
         assert ids_a == ids_b, "Ordering should be stable across identical requests"
+
+
+class TestRankingConsistency:
+    """Tests for weighted ranking score computation."""
+
+    def test_content_match_ranks_above_weak_name_match(self):
+        """Content match (0.45) should rank above weak name match (0.5 * 0.6 = 0.3)."""
+        matches = [
+            # Notebook A: weak name match only
+            RawSearchMatch(
+                notebook_id=1,
+                notebook_uuid="nb-name",
+                visible_name="Weak Name Match",
+                document_type="notebook",
+                full_path="/a",
+                updated_at=datetime(2026, 1, 1),
+                page_id=None,
+                page_uuid=None,
+                page_number=None,
+                ocr_text=None,
+                name_score=0.5,
+                content_score=0.0,
+            ),
+            # Notebook B: content match only
+            RawSearchMatch(
+                notebook_id=2,
+                notebook_uuid="nb-content",
+                visible_name="No Name Match",
+                document_type="notebook",
+                full_path="/b",
+                updated_at=datetime(2026, 1, 1),
+                page_id=10,
+                page_uuid="p-10",
+                page_number=1,
+                ocr_text="strong content match here",
+                name_score=0.0,
+                content_score=0.45,
+            ),
+        ]
+
+        results = aggregate_results(matches, "query")
+
+        # Notebook B (content 0.45) should have higher best_score than A (name 0.5 * 0.6 = 0.3)
+        nb_name = next(r for r in results if r.notebook_uuid == "nb-name")
+        nb_content = next(r for r in results if r.notebook_uuid == "nb-content")
+        assert nb_content.best_score > nb_name.best_score
+
+    def test_both_match_bonus(self):
+        """Notebook with both name and content match gets bonus over content-only match."""
+        # Notebook A: both match (content_score=0.6 + bonus 0.05 = 0.65)
+        both_score = compute_ranking_score(0.4, 0.6)
+        # Notebook B: content only (content_score=0.6, no bonus)
+        content_only_score = compute_ranking_score(0.0, 0.6)
+
+        assert both_score > content_only_score
+        assert both_score == min(max(0.4 * 0.6, 0.6 * 1.0) + 0.05, 1.0)
+        assert content_only_score == 0.6
+
+    def test_scores_remain_in_range(self):
+        """best_score should always be in [0, 1] for various input combinations."""
+        test_cases = [
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (1.0, 1.0),
+            (0.5, 0.5),
+            (0.9, 0.95),
+            (0.3, 0.7),
+        ]
+
+        for name_score, content_score in test_cases:
+            score = compute_ranking_score(name_score, content_score)
+            assert 0.0 <= score <= 1.0, (
+                f"Score {score} out of range for name={name_score}, content={content_score}"
+            )
+
+    def test_strong_name_match_still_ranks_well(self):
+        """A very strong name match (0.9 * 0.6 = 0.54) should rank above weak content (0.3)."""
+        strong_name = compute_ranking_score(0.9, 0.0)
+        weak_content = compute_ranking_score(0.0, 0.3)
+
+        assert strong_name > weak_content
+        assert strong_name == 0.9 * 0.6  # 0.54
+        assert weak_content == 0.3
