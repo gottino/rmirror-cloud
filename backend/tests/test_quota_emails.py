@@ -120,8 +120,8 @@ def test_no_duplicate_emails_after_100_percent(db: Session):
     # Setup: User already at 100% (30/30)
     user = create_user_with_quota(db, used=30, limit=30)
 
-    # Mock email service
-    with patch("app.utils.email.get_email_service") as mock_get_email:
+    # Mock email service at the correct import location
+    with patch("app.services.quota_service.get_email_service") as mock_get_email:
         mock_email_service = MagicMock()
         mock_get_email.return_value = mock_email_service
 
@@ -224,8 +224,8 @@ def test_no_email_for_pro_tier(db: Session):
         tier=SubscriptionTier.PRO,
     )
 
-    # Mock email service
-    with patch("app.utils.email.get_email_service") as mock_get_email:
+    # Mock email service at the correct import location
+    with patch("app.services.quota_service.get_email_service") as mock_get_email:
         mock_email_service = MagicMock()
         mock_get_email.return_value = mock_email_service
 

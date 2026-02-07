@@ -34,8 +34,8 @@ class TestOCRServiceErrors:
             with pytest.raises(Exception) as exc_info:
                 await ocr_service.extract_text_from_pdf(b"fake_pdf_bytes")
 
-            # Should raise but not expose internal details
-            assert "timeout" in str(exc_info.value).lower() or exc_info.value is not None
+            # Should raise with timeout-related message
+            assert "timed out" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
     async def test_ocr_service_rate_limit(self, db: Session):
@@ -56,7 +56,7 @@ class TestOCRServiceErrors:
 
             # Provide fake API key directly to constructor
             ocr_service = OCRService(api_key="test-api-key-for-ci")
-            with pytest.raises(Exception):
+            with pytest.raises(Exception, match="Rate limit exceeded"):
                 await ocr_service.extract_text_from_pdf(b"fake_pdf_bytes")
 
     @pytest.mark.asyncio
@@ -75,14 +75,9 @@ class TestOCRServiceErrors:
 
             # Provide fake API key directly to constructor
             ocr_service = OCRService(api_key="test-api-key-for-ci")
-            # Should handle gracefully - either return empty string or raise
-            try:
-                result = await ocr_service.extract_text_from_pdf(b"fake_pdf_bytes")
-                # If it doesn't raise, it should return empty or default text
-                assert result is not None
-            except Exception:
-                # Acceptable to raise on invalid response
-                pass
+            # Empty content list should return empty string (line 148 in ocr_service.py)
+            result = await ocr_service.extract_text_from_pdf(b"fake_pdf_bytes")
+            assert result == ""
 
 
 class TestStorageServiceErrors:
@@ -197,9 +192,8 @@ class TestWebhookErrors:
                 json={"type": "unknown.event.type", "data": {"something": "here"}},
             )
 
-            # Should handle gracefully (200 OK to acknowledge, or 400 for invalid)
-            # The key is it doesn't crash (500)
-            assert response.status_code in [200, 400, 401, 403]
+            # Debug mode without secret: should accept and return 200
+            assert response.status_code == 200
 
 
 class TestDatabaseErrors:
@@ -208,15 +202,16 @@ class TestDatabaseErrors:
     def test_db_connection_handling(self, db: Session):
         """Database operations should handle connection issues gracefully."""
         from app.models.user import User
+        from sqlalchemy.exc import SQLAlchemyError
 
-        # Test that invalid queries don't crash the app
+        # Test that invalid queries raise a proper database error
         try:
             # Query with invalid filter should handle gracefully
             result = db.query(User).filter(User.id == "not_an_integer").first()
-            # SQLAlchemy might auto-convert or raise
-        except Exception as e:
-            # Should be a database error, not a crash
-            assert "sql" in str(type(e).__name__).lower() or isinstance(e, Exception)
+            # SQLAlchemy might auto-convert the string - that's acceptable behavior
+        except SQLAlchemyError:
+            # SQLAlchemy-specific error is the expected failure mode
+            pass
 
     def test_db_rollback_on_error(self, db: Session):
         """Database should rollback on constraint violations."""
