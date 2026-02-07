@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -105,7 +106,11 @@ class SyncWorker:
             if not pending_items:
                 return
 
-            logger.info(f"Processing {len(pending_items)} pending sync items")
+            logger.info(
+                "Processing %d pending sync items",
+                len(pending_items),
+                extra={"event": "sync.batch", "batch_size": len(pending_items)},
+            )
 
             # Mark all items as 'processing' immediately to prevent other workers
             # from picking them up (FOR UPDATE locks are released on commit)
@@ -119,8 +124,15 @@ class SyncWorker:
                     await self._process_queue_item(db, queue_item)
                 except Exception as e:
                     logger.error(
-                        f"Error processing queue item {queue_item.id}: {e}",
-                        exc_info=True
+                        "Sync item failed",
+                        exc_info=True,
+                        extra={
+                            "event": "sync.fail",
+                            "queue_id": queue_item.id,
+                            "target": queue_item.target_name,
+                            "error": str(e),
+                            "retry_count": queue_item.retry_count,
+                        },
                     )
                     # Mark as failed
                     queue_item.status = 'failed'
@@ -141,10 +153,20 @@ class SyncWorker:
         """
         # Increment retry count (status already set to 'processing' by caller)
         queue_item.retry_count += 1
+        _item_start = time.monotonic()
 
         logger.info(
-            f"Processing queue item {queue_item.id}: "
-            f"{queue_item.item_type} -> {queue_item.target_name}"
+            "Processing queue item %d: %s -> %s",
+            queue_item.id,
+            queue_item.item_type,
+            queue_item.target_name,
+            extra={
+                "event": "sync.start",
+                "queue_id": queue_item.id,
+                "target": queue_item.target_name,
+                "page_uuid": getattr(queue_item, "page_uuid", None),
+                "notebook_uuid": getattr(queue_item, "notebook_uuid", None),
+            },
         )
 
         # Get integration config
@@ -169,7 +191,7 @@ class SyncWorker:
 
         # Process based on item type
         if queue_item.item_type == 'page_text':
-            await self._process_page_sync(db, queue_item, config)
+            await self._process_page_sync(db, queue_item, config, _item_start)
         else:
             logger.warning(f"Unsupported item type: {queue_item.item_type}")
             queue_item.status = 'failed'
@@ -180,7 +202,8 @@ class SyncWorker:
         self,
         db: Session,
         queue_item: SyncQueue,
-        config: IntegrationConfig
+        config: IntegrationConfig,
+        _item_start: float = 0.0,
     ):
         """
         Process a page text sync.
@@ -189,6 +212,7 @@ class SyncWorker:
             db: Database session
             queue_item: Queue item
             config: Integration config
+            _item_start: Monotonic start time for duration tracking
         """
         # Get the page data
         page = db.query(Page).filter(Page.id == int(queue_item.item_id)).first()
@@ -361,15 +385,35 @@ class SyncWorker:
             queue_item.status = 'completed'
             queue_item.completed_at = datetime.utcnow()
 
+            duration_ms = round((time.monotonic() - _item_start) * 1000, 1)
             logger.info(
-                f"✅ Successfully synced page {page.id} (page {queue_item.page_number}) "
-                f"to {queue_item.target_name}"
+                "Sync item completed: page %d -> %s",
+                page.id,
+                queue_item.target_name,
+                extra={
+                    "event": "sync.done",
+                    "queue_id": queue_item.id,
+                    "target": queue_item.target_name,
+                    "duration_ms": duration_ms,
+                    "page_uuid": queue_item.page_uuid,
+                    "notebook_uuid": queue_item.notebook_uuid,
+                },
             )
         else:
+            duration_ms = round((time.monotonic() - _item_start) * 1000, 1)
             queue_item.status = 'failed'
             queue_item.error_message = result.error_message
             logger.error(
-                f"❌ Failed to sync page {page.id}: {result.error_message}"
+                "Sync item failed: page %d: %s",
+                page.id,
+                result.error_message,
+                extra={
+                    "event": "sync.fail",
+                    "queue_id": queue_item.id,
+                    "target": queue_item.target_name,
+                    "duration_ms": duration_ms,
+                    "error": result.error_message,
+                },
             )
 
         db.commit()

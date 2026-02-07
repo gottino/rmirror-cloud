@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import time
 
 import anthropic
 import httpx
@@ -97,6 +98,7 @@ class OCRService:
                 "Return only the formatted Markdown text, no explanations."
             )
 
+        start = time.monotonic()
         try:
             # Call Claude Vision API
             message = self.client.messages.create(
@@ -123,17 +125,41 @@ class OCRService:
                 ],
             )
 
+            duration_ms = round((time.monotonic() - start) * 1000, 1)
+
             # Extract text from response
             if message.content and len(message.content) > 0:
                 extracted_text = message.content[0].text
-                logger.info(f"Successfully extracted {len(extracted_text)} characters")
+                logger.info(
+                    "OCR completed: %d chars in %.1fms",
+                    len(extracted_text),
+                    duration_ms,
+                    extra={
+                        "event": "ocr.done",
+                        "duration_ms": duration_ms,
+                        "input_bytes": len(pdf_bytes),
+                        "output_chars": len(extracted_text),
+                        "model": "claude-haiku-4-5",
+                    },
+                )
                 return extracted_text
 
             logger.warning("Claude API returned empty response")
             return ""
 
         except Exception as e:
-            logger.error(f"Failed to extract text from PDF: {e}")
+            duration_ms = round((time.monotonic() - start) * 1000, 1)
+            logger.error(
+                "OCR failed after %.1fms: %s",
+                duration_ms,
+                e,
+                extra={
+                    "event": "ocr.fail",
+                    "duration_ms": duration_ms,
+                    "input_bytes": len(pdf_bytes),
+                    "error": str(e),
+                },
+            )
             raise
 
     async def extract_text_from_image(
@@ -193,6 +219,7 @@ class OCRService:
                 "Return only the formatted Markdown text, no explanations."
             )
 
+        start = time.monotonic()
         try:
             # Call Claude Vision API
             message = self.client.messages.create(
@@ -219,15 +246,39 @@ class OCRService:
                 ],
             )
 
+            duration_ms = round((time.monotonic() - start) * 1000, 1)
+
             # Extract text from response
             if message.content and len(message.content) > 0:
                 extracted_text = message.content[0].text
-                logger.info(f"Successfully extracted {len(extracted_text)} characters")
+                logger.info(
+                    "OCR completed: %d chars in %.1fms",
+                    len(extracted_text),
+                    duration_ms,
+                    extra={
+                        "event": "ocr.done",
+                        "duration_ms": duration_ms,
+                        "input_bytes": len(image_bytes),
+                        "output_chars": len(extracted_text),
+                        "model": "claude-haiku-4-5",
+                    },
+                )
                 return extracted_text
 
             logger.warning("Claude API returned empty response")
             return ""
 
         except Exception as e:
-            logger.error(f"Failed to extract text from image: {e}")
+            duration_ms = round((time.monotonic() - start) * 1000, 1)
+            logger.error(
+                "OCR failed after %.1fms: %s",
+                duration_ms,
+                e,
+                extra={
+                    "event": "ocr.fail",
+                    "duration_ms": duration_ms,
+                    "input_bytes": len(image_bytes),
+                    "error": str(e),
+                },
+            )
             raise

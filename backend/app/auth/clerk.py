@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
+from app.middleware.request_context import user_id_var
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,9 @@ async def get_clerk_user(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found. Please complete registration via webhook.",
             )
+
+        # Store user_id in context for structured logging
+        user_id_var.set(user.id)
 
         return user
 
