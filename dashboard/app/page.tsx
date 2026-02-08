@@ -4,11 +4,19 @@ import { useAuth } from '@clerk/nextjs';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { Check, ArrowRight, Github, Zap, Search as SearchIcon, Cloud, Puzzle, CheckCircle } from 'lucide-react';
 import { MacWindowFrame } from '@/components/MacWindowFrame';
 
 export default function LandingPage() {
+  return (
+    <Suspense>
+      <LandingPageInner />
+    </Suspense>
+  );
+}
+
+function LandingPageInner() {
   const { isSignedIn } = useAuth();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
