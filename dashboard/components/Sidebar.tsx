@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import Image from 'next/image';
-import { HomeIcon, Puzzle, CreditCard, Settings, X } from 'lucide-react';
+import { HomeIcon, Puzzle, X } from 'lucide-react';
 import { useAuth } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import { getAgentStatus, type AgentStatus } from '@/lib/api';
@@ -101,10 +101,10 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
             href="/dashboard"
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
             style={{
-              backgroundColor: isActive('/dashboard') && !isActive('/integrations') && !isActive('/billing')
+              backgroundColor: isActive('/dashboard') && !isActive('/integrations')
                 ? 'var(--primary)'
                 : 'transparent',
-              color: isActive('/dashboard') && !isActive('/integrations') && !isActive('/billing')
+              color: isActive('/dashboard') && !isActive('/integrations')
                 ? 'var(--primary-foreground)'
                 : 'var(--warm-charcoal)',
               fontSize: '0.925em',
@@ -132,32 +132,6 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
           >
             <Puzzle className="w-5 h-5" />
             Integrations
-          </Link>
-          <Link
-            href="/billing"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
-            style={{
-              backgroundColor: isActive('/billing') ? 'var(--primary)' : 'transparent',
-              color: isActive('/billing') ? 'var(--primary-foreground)' : 'var(--warm-charcoal)',
-              fontSize: '0.925em',
-              fontWeight: 500
-            }}
-          >
-            <CreditCard className="w-5 h-5" />
-            Billing
-          </Link>
-          <Link
-            href="/settings"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
-            style={{
-              backgroundColor: isActive('/settings') ? 'var(--primary)' : 'transparent',
-              color: isActive('/settings') ? 'var(--primary-foreground)' : 'var(--warm-charcoal)',
-              fontSize: '0.925em',
-              fontWeight: 500
-            }}
-          >
-            <Settings className="w-5 h-5" />
-            Settings
           </Link>
         </div>
 

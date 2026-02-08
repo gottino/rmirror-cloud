@@ -1,6 +1,7 @@
 'use client';
 
-import { useAuth, useUser, UserButton } from '@clerk/nextjs';
+import { useAuth, useUser } from '@clerk/nextjs';
+import UserMenu from '@/components/UserMenu';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Settings, Download, Trash2, AlertTriangle, Menu, Loader2 } from 'lucide-react';
@@ -183,7 +184,7 @@ export default function SettingsPage() {
                 DEV MODE
               </div>
             ) : (
-              isSignedIn && <UserButton afterSignOutUrl="/" />
+              isSignedIn && <UserMenu />
             )}
           </div>
         </header>

@@ -38,6 +38,8 @@ const clerkAppearance = {
     userButtonPopoverActionButton: 'hover:bg-[#faf8f5]',
     userButtonPopoverActionButtonText: 'text-[#2d2a2e]',
     userButtonPopoverFooter: 'border-t border-[#c9c4be]',
+    // Hide Clerk's built-in "Delete Account" — our Settings page handles deletion properly
+    userProfileSection__danger: 'hidden',
     // User profile modal
     modalContent: 'bg-white',
     navbarButton: 'text-[#2d2a2e] hover:bg-[#faf8f5]',

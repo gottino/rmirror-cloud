@@ -1,7 +1,8 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { useAuth, UserButton } from '@clerk/nextjs';
+import { useAuth } from '@clerk/nextjs';
+import UserMenu from '@/components/UserMenu';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Menu } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
@@ -160,7 +161,7 @@ function NotionSetupContent() {
                 </p>
               </div>
             </div>
-            <UserButton />
+            <UserMenu />
           </div>
         </header>
 

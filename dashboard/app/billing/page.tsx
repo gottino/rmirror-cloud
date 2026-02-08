@@ -1,6 +1,7 @@
 'use client';
 
-import { useAuth, UserButton } from '@clerk/nextjs';
+import { useAuth } from '@clerk/nextjs';
+import UserMenu from '@/components/UserMenu';
 import { useEffect, useState } from 'react';
 import { CheckCircle, Mail, AlertTriangle, Menu } from 'lucide-react';
 import { getQuotaStatus, type QuotaStatus } from '@/lib/api';
@@ -103,7 +104,7 @@ export default function BillingPage() {
                 DEV MODE
               </div>
             ) : (
-              isSignedIn && <UserButton afterSignOutUrl="/" />
+              isSignedIn && <UserMenu />
             )}
           </div>
         </header>

@@ -1,11 +1,12 @@
 'use client';
 
-import { useAuth, UserButton } from '@clerk/nextjs';
+import { useAuth } from '@clerk/nextjs';
 import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu, Search, X, Loader2 } from 'lucide-react';
+import UserMenu from '@/components/UserMenu';
 import { getNotebook, getQuotaStatus, searchNotebooks, QuotaExceededError, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
@@ -702,7 +703,7 @@ function NotebookPageContent() {
                     DEV MODE
                   </div>
                 ) : (
-                  isSignedIn && <UserButton afterSignOutUrl="/" />
+                  isSignedIn && <UserMenu />
                 )}
               </div>
             </div>
