@@ -3,18 +3,32 @@
 import { useAuth } from '@clerk/nextjs';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
-import { Check, ArrowRight, Github, Zap, Search as SearchIcon, Cloud, Puzzle } from 'lucide-react';
+import { Check, ArrowRight, Github, Zap, Search as SearchIcon, Cloud, Puzzle, CheckCircle } from 'lucide-react';
 import { MacWindowFrame } from '@/components/MacWindowFrame';
 
 export default function LandingPage() {
   const { isSignedIn } = useAuth();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [showDeletedBanner, setShowDeletedBanner] = useState(false);
   const heroRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (searchParams.get('deleted') === 'true') {
+      setShowDeletedBanner(true);
+      // Auto-dismiss after 8 seconds
+      const timer = setTimeout(() => setShowDeletedBanner(false), 8000);
+      // Clean up the URL
+      window.history.replaceState({}, '', '/');
+      return () => clearTimeout(timer);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -57,6 +71,25 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--background)' }}>
+      {/* Account deleted banner */}
+      {showDeletedBanner && (
+        <div
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-6 py-3 rounded-lg shadow-lg"
+          style={{ backgroundColor: 'var(--card)', border: '1px solid var(--sage-green)' }}
+        >
+          <CheckCircle className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--sage-green)' }} />
+          <span style={{ fontSize: '0.925em', color: 'var(--warm-charcoal)', fontWeight: 500 }}>
+            Your account has been deleted. All your data has been removed.
+          </span>
+          <button
+            onClick={() => setShowDeletedBanner(false)}
+            style={{ color: 'var(--warm-gray)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.25em', lineHeight: 1 }}
+          >
+            &times;
+          </button>
+        </div>
+      )}
+
       {/* Hero Section */}
       <section
         ref={heroRef}

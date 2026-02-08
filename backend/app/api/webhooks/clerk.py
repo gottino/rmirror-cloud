@@ -254,6 +254,12 @@ async def handle_user_deleted(data: dict, db: Session):
     """
     Handle user.deleted event from Clerk.
 
+    If the user was already deleted from our DB (via the Settings danger zone),
+    this is a follow-up webhook — just log and return.
+
+    If the user still exists (deletion initiated from Clerk dashboard directly),
+    perform the full cleanup: S3 files + DB cascade.
+
     Args:
         data: User data from Clerk
         db: Database session
@@ -261,16 +267,51 @@ async def handle_user_deleted(data: dict, db: Session):
     clerk_user_id = data.get("id")
 
     if not clerk_user_id:
-        print(f"Missing Clerk user ID in user.deleted event: {data}")
+        logger.warning(f"Missing Clerk user ID in user.deleted event: {data}")
         return
 
     # Find user
     user = db.query(User).filter(User.clerk_user_id == clerk_user_id).first()
     if not user:
-        print(f"User with Clerk ID {clerk_user_id} not found")
+        # User already deleted from our DB (API-initiated deletion)
+        logger.info(
+            f"User with Clerk ID {clerk_user_id} not found in DB — "
+            "likely already deleted via API. No-op."
+        )
         return
 
-    # Deactivate user instead of deleting
-    user.is_active = False
-    db.commit()
-    print(f"Deactivated user: {user.email} (Clerk ID: {clerk_user_id})")
+    # User exists — deletion was initiated from Clerk dashboard, not our UI.
+    # Perform full cleanup.
+    logger.info(
+        f"Clerk-initiated deletion for user {user.email} (Clerk ID: {clerk_user_id}). "
+        "Performing full account cleanup."
+    )
+
+    from app.dependencies import get_storage_service
+    from app.services.account_service import AccountService
+
+    storage = get_storage_service()
+    try:
+        summary = await AccountService.delete_account(
+            user_id=user.id,
+            db=db,
+            storage=storage,
+            clerk_secret_key=None,  # Don't call Clerk API back — Clerk already deleted the user
+        )
+        logger.info(
+            f"Completed Clerk-initiated deletion for user {user.email}: {summary}"
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed Clerk-initiated deletion for user {user.email} "
+            f"(Clerk ID: {clerk_user_id}): {e}"
+        )
+        # Fall back to soft delete so the user is at least deactivated
+        try:
+            user_check = db.query(User).filter(User.id == user.id).first()
+            if user_check:
+                user_check.is_active = False
+                db.commit()
+                logger.info(f"Fell back to soft-delete for user {user.email}")
+        except Exception:
+            pass
