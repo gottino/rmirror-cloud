@@ -270,27 +270,18 @@ async def test_export_pages_no_ocr_text(db: Session):
 
 
 @pytest.mark.asyncio
-async def test_export_interspersed_non_ocr_pages(db: Session):
-    """Pages without NotebookPage mappings (orphaned) are still included in export."""
+async def test_export_pages_without_pdf_get_placeholders(db: Session):
+    """Pages with OCR text but no PDF get placeholder PDFs in export."""
     user = _create_user(db)
     nb = _create_notebook(db, user, "Mixed Pages", full_path="Mixed Pages")
 
-    # Page 1: fully OCR'd with PDF and NotebookPage mapping
+    # Page 1: fully OCR'd with PDF
     _create_page(db, nb, 1, ocr_text="First page text", pdf_s3_key="pages/p1.pdf")
 
-    # Page 2: orphaned — has no NotebookPage mapping, no OCR, no PDF
-    orphan = Page(
-        notebook_id=nb.id,
-        page_uuid=f"orphan-page-{datetime.utcnow().timestamp()}",
-        ocr_status=OcrStatus.NOT_SYNCED,
-        ocr_text=None,
-        pdf_s3_key=None,
-        s3_key=None,
-    )
-    db.add(orphan)
-    db.commit()
+    # Page 2: has OCR text but no PDF (common case: old pipeline)
+    _create_page(db, nb, 2, ocr_text="Second page text", pdf_s3_key=None, s3_key=None)
 
-    # Page 3: fully OCR'd with PDF and NotebookPage mapping
+    # Page 3: fully OCR'd with PDF
     _create_page(db, nb, 3, ocr_text="Third page text", pdf_s3_key="pages/p3.pdf")
 
     storage = _mock_storage()
@@ -300,7 +291,7 @@ async def test_export_interspersed_non_ocr_pages(db: Session):
         mock_pdf.create_placeholder_pdf.return_value = b"%PDF-placeholder"
         zip_bytes = await AccountService.generate_data_export(user.id, db, storage)
 
-    # Verify PDFService.create_placeholder_pdf was called for the orphaned page
+    # Verify placeholder was generated for page 2 (no pdf_s3_key)
     mock_pdf.create_placeholder_pdf.assert_called_once()
     placeholder_text = mock_pdf.create_placeholder_pdf.call_args[0][0]
     assert "Content not available" in placeholder_text
@@ -310,17 +301,17 @@ async def test_export_interspersed_non_ocr_pages(db: Session):
     pdf_list = mock_pdf.combine_page_pdfs.call_args[0][0]
     assert len(pdf_list) == 3
 
-    # Verify text export includes all 3 pages
+    # Verify text export includes all 3 pages with their OCR text
     zf = zipfile.ZipFile(BytesIO(zip_bytes))
     txt_files = [n for n in zf.namelist() if n.endswith(".txt") and "Mixed_Pages" in n]
     assert len(txt_files) == 1
 
     content = zf.read(txt_files[0]).decode("utf-8")
     assert "First page text" in content
-    assert "[No OCR text]" in content
+    assert "Second page text" in content
     assert "Third page text" in content
 
-    # Verify metadata page count includes all 3 pages
+    # Verify metadata page count
     metadata = json.loads(zf.read("rmirror-export/metadata.json"))
     assert metadata["total_pages"] == 3
 
