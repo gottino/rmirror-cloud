@@ -7,6 +7,7 @@ from datetime import datetime
 from io import BytesIO
 
 import httpx
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.pdf_service import PDFService
@@ -126,16 +127,24 @@ class AccountService:
                 else:
                     notebook_dir = f"rmirror-export/notebooks/{safe_name}"
 
-                # Get pages in order
-                notebook_pages = (
-                    db.query(NotebookPage, Page)
-                    .join(Page, NotebookPage.page_id == Page.id)
-                    .filter(NotebookPage.notebook_id == notebook.id)
-                    .order_by(NotebookPage.page_number)
+                # Get ALL pages for this notebook, including orphaned ones
+                # without NotebookPage mappings (LEFT OUTER JOIN).
+                all_pages = (
+                    db.query(Page, NotebookPage.page_number)
+                    .outerjoin(
+                        NotebookPage,
+                        (NotebookPage.page_id == Page.id)
+                        & (NotebookPage.notebook_id == notebook.id),
+                    )
+                    .filter(Page.notebook_id == notebook.id)
+                    .order_by(
+                        func.coalesce(NotebookPage.page_number, 999999),
+                        Page.created_at,
+                    )
                     .all()
                 )
 
-                nb_page_count = len(notebook_pages)
+                nb_page_count = len(all_pages)
                 total_pages += nb_page_count
 
                 notebook_index.append(
@@ -148,20 +157,27 @@ class AccountService:
                     }
                 )
 
-                if not notebook_pages:
+                if not all_pages:
                     continue
 
                 # Combine page PDFs into single notebook PDF
                 page_pdfs = []
-                for _nb_page, page in notebook_pages:
+                for idx, (page, _page_number) in enumerate(all_pages):
+                    display_num = _page_number if _page_number is not None else idx + 1
                     if page.pdf_s3_key:
                         try:
                             pdf_bytes = await storage.download_file(page.pdf_s3_key)
                             page_pdfs.append(pdf_bytes)
+                            continue
                         except Exception as e:
                             logger.warning(
                                 f"Failed to download PDF for page {page.id}: {e}"
                             )
+                    # No pdf_s3_key or download failed - generate placeholder
+                    placeholder = PDFService.create_placeholder_pdf(
+                        f"Page {display_num} - Content not available"
+                    )
+                    page_pdfs.append(placeholder)
 
                 if page_pdfs:
                     try:
@@ -174,8 +190,9 @@ class AccountService:
 
                 # Combine OCR text
                 text_lines = [f"# {notebook.visible_name or 'Untitled Notebook'}\n"]
-                for nb_page, page in notebook_pages:
-                    text_lines.append(f"\n## Page {nb_page.page_number}\n")
+                for idx, (page, _page_number) in enumerate(all_pages):
+                    display_num = _page_number if _page_number is not None else idx + 1
+                    text_lines.append(f"\n## Page {display_num}\n")
                     if page.ocr_text:
                         text_lines.append(page.ocr_text)
                     else:

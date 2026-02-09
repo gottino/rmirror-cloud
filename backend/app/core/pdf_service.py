@@ -51,6 +51,83 @@ class PDFService:
             raise
 
     @staticmethod
+    def create_placeholder_pdf(text: str) -> bytes:
+        """
+        Create a minimal single-page PDF with centered text.
+
+        Args:
+            text: The placeholder text to display on the page
+
+        Returns:
+            PDF bytes for a single-page placeholder
+        """
+        # US Letter: 612 x 792 points
+        width, height = 612, 792
+        font_size = 14
+        # Approximate text width for centering (Helvetica ~0.5 * font_size per char)
+        text_width = len(text) * font_size * 0.5
+        x = (width - text_width) / 2
+        y = height / 2
+
+        safe_text = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+        content_stream = (
+            f"BT /F1 {font_size} Tf 0.6 0.6 0.6 rg "
+            f"{x:.1f} {y:.1f} Td ({safe_text}) Tj ET"
+        )
+        stream_bytes = content_stream.encode("latin-1")
+        stream_len = len(stream_bytes)
+
+        # Build a minimal valid PDF manually
+        pdf_parts = []
+        pdf_parts.append(b"%PDF-1.4\n")
+
+        # Object 1: Catalog
+        pdf_parts.append(b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n")
+
+        # Object 2: Pages
+        pdf_parts.append(b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n")
+
+        # Object 3: Page
+        pdf_parts.append(
+            f"3 0 obj<</Type/Page/Parent 2 0 R"
+            f"/MediaBox[0 0 {width} {height}]"
+            f"/Resources<</Font<</F1 4 0 R>>>>>>"
+            f"/Contents 5 0 R>>endobj\n".encode("latin-1")
+        )
+
+        # Object 4: Font
+        pdf_parts.append(
+            b"4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n"
+        )
+
+        # Object 5: Content stream
+        pdf_parts.append(
+            f"5 0 obj<</Length {stream_len}>>stream\n".encode("latin-1")
+        )
+        pdf_parts.append(stream_bytes)
+        pdf_parts.append(b"\nendstream\nendobj\n")
+
+        # Calculate xref offsets
+        body = b"".join(pdf_parts)
+        offsets = []
+        pos = 0
+        full = body
+        for i in range(1, 6):
+            marker = f"{i} 0 obj".encode("latin-1")
+            offset = full.find(marker, pos)
+            offsets.append(offset)
+            pos = offset + 1
+
+        xref_offset = len(body)
+        xref = "xref\n0 6\n0000000000 65535 f \n"
+        for off in offsets:
+            xref += f"{off:010d} 00000 n \n"
+        xref += f"trailer<</Size 6/Root 1 0 R>>\nstartxref\n{xref_offset}\n%%EOF"
+
+        return body + xref.encode("latin-1")
+
+    @staticmethod
     def get_page_count(pdf_bytes: bytes) -> int:
         """
         Get the number of pages in a PDF.
