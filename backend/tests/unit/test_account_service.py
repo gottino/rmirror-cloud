@@ -187,8 +187,8 @@ async def test_generate_data_export(db: Session):
     assert "rmirror-export/metadata.json" in names
 
     # Check that notebook folders exist
-    nb1_txt = [n for n in names if "My_Notebook" in n and n.endswith(".txt")]
-    nb2_txt = [n for n in names if "Work_Notes" in n and n.endswith(".txt")]
+    nb1_txt = [n for n in names if "My_Notebook" in n and n.endswith(".md")]
+    nb2_txt = [n for n in names if "Work_Notes" in n and n.endswith(".md")]
     assert len(nb1_txt) == 1
     assert len(nb2_txt) == 1
 
@@ -236,7 +236,7 @@ async def test_export_notebook_no_pdfs(db: Session):
     names = zf.namelist()
 
     # Should have both text and PDF (with placeholder)
-    txt_files = [n for n in names if n.endswith(".txt") and "Text_Only" in n]
+    txt_files = [n for n in names if n.endswith(".md") and "Text_Only" in n]
     pdf_files = [n for n in names if n.endswith(".pdf") and "Text_Only" in n]
     assert len(txt_files) == 1
     assert len(pdf_files) == 1
@@ -257,7 +257,7 @@ async def test_export_pages_no_ocr_text(db: Session):
         zip_bytes = await AccountService.generate_data_export(user.id, db, storage)
 
     zf = zipfile.ZipFile(BytesIO(zip_bytes))
-    txt_files = [n for n in zf.namelist() if n.endswith(".txt") and "No_OCR" in n]
+    txt_files = [n for n in zf.namelist() if n.endswith(".md") and "No_OCR" in n]
     assert len(txt_files) == 1
 
     content = zf.read(txt_files[0]).decode("utf-8")
@@ -303,7 +303,7 @@ async def test_export_pages_without_pdf_get_placeholders(db: Session):
 
     # Verify text export includes all 3 pages with their OCR text
     zf = zipfile.ZipFile(BytesIO(zip_bytes))
-    txt_files = [n for n in zf.namelist() if n.endswith(".txt") and "Mixed_Pages" in n]
+    txt_files = [n for n in zf.namelist() if n.endswith(".md") and "Mixed_Pages" in n]
     assert len(txt_files) == 1
 
     content = zf.read(txt_files[0]).decode("utf-8")

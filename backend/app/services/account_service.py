@@ -91,7 +91,7 @@ class AccountService:
                 "==================\n\n"
                 "This archive contains all your data from rMirror Cloud.\n\n"
                 "Structure:\n"
-                "  notebooks/     - One folder per notebook with PDF and OCR text\n"
+                "  notebooks/     - One folder per notebook with PDF and OCR markdown\n"
                 "  metadata.json  - Account information and notebook index\n"
                 "  README.txt     - This file\n",
             )
@@ -191,7 +191,7 @@ class AccountService:
                     text_lines.append("\n---\n")
 
                 text_content = "\n".join(text_lines)
-                zf.writestr(f"{notebook_dir}/{safe_name}.txt", text_content)
+                zf.writestr(f"{notebook_dir}/{safe_name}.md", text_content)
 
             # metadata.json
             import json
