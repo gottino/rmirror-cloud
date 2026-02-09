@@ -436,7 +436,7 @@ async def export_notebook(
             detail="Notebook not found",
         )
 
-    # Get pages through the mapping table (source of truth for order)
+    # Get pages through the mapping table (same query as display endpoint)
     notebook_pages = (
         db.query(NotebookPage, Page)
         .join(Page, NotebookPage.page_id == Page.id)
@@ -553,10 +553,14 @@ async def _export_pdf(
             try:
                 pdf_bytes = await storage.download_file(page.pdf_s3_key)
                 page_pdfs.append(pdf_bytes)
+                continue
             except Exception as e:
                 logger.warning(f"Failed to download PDF for page {page.id}: {e}")
-                # Skip pages without accessible PDFs
-                continue
+        # No pdf_s3_key or download failed - generate placeholder
+        placeholder = PDFService.create_placeholder_pdf(
+            f"Page {notebook_page.page_number} - Content not available"
+        )
+        page_pdfs.append(placeholder)
 
     if not page_pdfs:
         raise HTTPException(
