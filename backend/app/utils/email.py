@@ -294,6 +294,74 @@ class EmailService:
             html_content=html_content
         )
 
+    def send_invite_approved_email(
+        self,
+        email: str,
+        name: Optional[str],
+        invite_link: str,
+    ) -> bool:
+        """Send invite approval email with signup link."""
+        display_name = name or "there"
+
+        html_content = f"""
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid #e8e4df;">
+                        <h1 style="color: #2d2a2e; font-size: 32px; font-weight: 600; margin: 0 0 8px 0;">You're In!</h1>
+                        <p style="color: #8b8680; font-size: 16px; margin: 0;">Your rMirror Cloud invite is ready</p>
+                    </div>
+
+                    <!-- Content card -->
+                    <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {display_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Great news! You've been approved for early access to rMirror Cloud. Click the button below to create your account and start syncing your reMarkable notebooks.</p>
+
+                        <!-- Feature callout -->
+                        <div style="background-color: #faf8f5; padding: 16px; border-radius: 8px; border-left: 3px solid #c85a54; margin-bottom: 28px;">
+                            <p style="color: #2d2a2e; font-size: 15px; margin: 0; font-weight: 600;">What you get:</p>
+                            <p style="color: #8b8680; font-size: 14px; margin: 8px 0 0 0;">Automatic notebook sync &bull; AI-powered OCR &bull; Notion integration &bull; Web access from anywhere</p>
+                        </div>
+
+                        <!-- CTA Button -->
+                        <div style="text-align: center; margin: 32px 0 0 0;">
+                            <a href="{invite_link}"
+                               style="display: inline-block; padding: 14px 32px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
+                                Create Your Account
+                            </a>
+                        </div>
+
+                        <p style="color: #8b8680; font-size: 13px; margin: 24px 0 0 0; text-align: center;">
+                            This invite link expires in 7 days.
+                        </p>
+                    </div>
+
+                    <!-- Footer -->
+                    <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                        <p style="color: #8b8680; font-size: 14px; margin: 0 0 8px 0;">
+                            Welcome to the beta!
+                        </p>
+                        <p style="color: #2d2a2e; font-size: 14px; margin: 0; font-weight: 600;">
+                            The rMirror Team
+                        </p>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """
+
+        return self.send_email(
+            to_email=email,
+            subject="You're in! Your rMirror Cloud invite is ready",
+            html_content=html_content,
+            to_name=name,
+        )
+
     def send_quota_warning_email(
         self,
         user_email: str,
