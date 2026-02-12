@@ -175,6 +175,19 @@ async def join_waitlist(
     try:
         db.commit()
         db.refresh(entry)
+
+        # Notify admin of new signup
+        try:
+            from app.utils.email import get_email_service
+
+            email_service = get_email_service()
+            email_service.send_waitlist_notification_email(
+                email=entry.email,
+                name=entry.name,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send waitlist notification: {e}")
+
         return entry
     except IntegrityError:
         db.rollback()

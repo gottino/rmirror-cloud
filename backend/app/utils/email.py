@@ -362,6 +362,68 @@ class EmailService:
             to_name=name,
         )
 
+    def send_waitlist_notification_email(
+        self,
+        email: str,
+        name: Optional[str],
+    ) -> bool:
+        """Notify admin when someone joins the waitlist."""
+        display_name = name or "Not provided"
+        admin_url = f"{settings.dashboard_url}/admin/waitlist"
+
+        html_content = f"""
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 32px;">
+                        <div style="display: inline-block; padding: 12px 24px; background-color: #7a9c89; border-radius: 8px; margin-bottom: 16px;">
+                            <p style="color: #ffffff; font-size: 14px; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">New Waitlist Signup</p>
+                        </div>
+                        <h1 style="color: #2d2a2e; font-size: 28px; font-weight: 600; margin: 0;">Someone wants in!</h1>
+                    </div>
+
+                    <!-- Content card -->
+                    <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                        <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; margin-bottom: 24px;">
+                            <p style="color: #8b8680; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">Email</p>
+                            <p style="color: #2d2a2e; font-size: 16px; font-weight: 600; margin: 0;">{email}</p>
+                        </div>
+                        <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; margin-bottom: 28px;">
+                            <p style="color: #8b8680; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">Name</p>
+                            <p style="color: #2d2a2e; font-size: 16px; font-weight: 600; margin: 0;">{display_name}</p>
+                        </div>
+
+                        <!-- CTA Button -->
+                        <div style="text-align: center;">
+                            <a href="{admin_url}"
+                               style="display: inline-block; padding: 14px 32px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
+                                Review &amp; Approve
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Footer -->
+                    <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                        <p style="color: #8b8680; font-size: 13px; margin: 0;">
+                            Automated notification from rMirror Cloud
+                        </p>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """
+
+        return self.send_email(
+            to_email="support@rmirror.io",
+            subject=f"New waitlist signup: {email}",
+            html_content=html_content,
+        )
+
     def send_quota_warning_email(
         self,
         user_email: str,
