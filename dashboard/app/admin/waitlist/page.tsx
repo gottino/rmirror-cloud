@@ -17,8 +17,12 @@ const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',')
 type StatusFilter = 'all' | 'pending' | 'approved' | 'claimed';
 
 export default function AdminWaitlistPage() {
-  const { getToken, userId } = useAuth();
+  const { getToken, userId, isSignedIn } = useAuth();
   const { isLoaded } = useUser();
+
+  // Development mode bypass — only works on localhost, backend still enforces auth
+  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
+    && typeof window !== 'undefined' && window.location.hostname === 'localhost';
 
   const [data, setData] = useState<WaitlistAdminResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,11 +32,19 @@ export default function AdminWaitlistPage() {
   const [approving, setApproving] = useState<Set<number>>(new Set());
   const [bulkApproving, setBulkApproving] = useState(false);
 
-  const isAdmin = isLoaded && userId && ADMIN_USER_IDS.includes(userId);
+  // In dev mode, trust the admin check since Clerk may not return userId
+  const isAdmin = isDevelopmentMode || (isLoaded && userId && ADMIN_USER_IDS.includes(userId));
+
+  const getAuthToken = async () => {
+    if (isDevelopmentMode) {
+      return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
+    }
+    return await getToken();
+  };
 
   const fetchData = useCallback(async () => {
     try {
-      const token = await getToken();
+      const token = await getAuthToken();
       if (!token) return;
 
       const result = await getWaitlistAdmin(
@@ -60,7 +72,7 @@ export default function AdminWaitlistPage() {
   const handleApprove = async (entryId: number) => {
     setApproving(prev => new Set(prev).add(entryId));
     try {
-      const token = await getToken();
+      const token = await getAuthToken();
       if (!token) return;
       await approveWaitlistEntry(token, entryId);
       await fetchData();
@@ -84,7 +96,7 @@ export default function AdminWaitlistPage() {
     if (selected.size === 0) return;
     setBulkApproving(true);
     try {
-      const token = await getToken();
+      const token = await getAuthToken();
       if (!token) return;
       await approveWaitlistBulk(token, Array.from(selected));
       setSelected(new Set());

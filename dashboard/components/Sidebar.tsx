@@ -20,8 +20,9 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
   const { getToken, isSignedIn, userId } = useAuth();
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
 
-  // Development mode bypass
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  // Development mode bypass — only works on localhost, backend still enforces auth
+  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
+    && typeof window !== 'undefined' && window.location.hostname === 'localhost';
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
 
   const fetchAgentStatus = async () => {
@@ -164,7 +165,7 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
             <MessageSquare className="w-5 h-5" />
             Feedback
           </a>
-          {userId && ADMIN_USER_IDS.includes(userId) && (
+          {(isDevelopmentMode || (userId && ADMIN_USER_IDS.includes(userId))) && (
             <Link
               href="/admin/waitlist"
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"

@@ -18,24 +18,62 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() -> None:
-    """Add beta invite columns to waitlist table."""
-    op.add_column('waitlist', sa.Column('name', sa.String(length=255), nullable=True))
-    op.add_column('waitlist', sa.Column('status', sa.String(length=20), nullable=False, server_default='pending'))
-    op.add_column('waitlist', sa.Column('invite_token', sa.String(length=512), nullable=True))
-    op.add_column('waitlist', sa.Column('approved_at', sa.DateTime(), nullable=True))
-    op.add_column('waitlist', sa.Column('claimed_at', sa.DateTime(), nullable=True))
-    op.add_column('waitlist', sa.Column('claimed_by', sa.String(length=255), nullable=True))
+def _table_exists(table_name: str) -> bool:
+    """Check if a table exists in the database."""
+    conn = op.get_bind()
+    insp = sa.inspect(conn)
+    return table_name in insp.get_table_names()
 
-    op.create_unique_constraint('uq_waitlist_invite_token', 'waitlist', ['invite_token'])
+
+def upgrade() -> None:
+    """Create waitlist table if needed, then add beta invite columns."""
+    if not _table_exists('waitlist'):
+        # Table was never created via migration (only via Base.metadata.create_all)
+        # Create it fresh with all columns including unique constraints inline
+        op.create_table(
+            'waitlist',
+            sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column('email', sa.String(), nullable=False, unique=True),
+            sa.Column('name', sa.String(length=255), nullable=True),
+            sa.Column('status', sa.String(length=20), nullable=False, server_default='pending'),
+            sa.Column('invite_token', sa.String(length=512), nullable=True, unique=True),
+            sa.Column('approved_at', sa.DateTime(), nullable=True),
+            sa.Column('claimed_at', sa.DateTime(), nullable=True),
+            sa.Column('claimed_by', sa.String(length=255), nullable=True),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        )
+        op.create_index('ix_waitlist_id', 'waitlist', ['id'])
+        op.create_index('ix_waitlist_email', 'waitlist', ['email'], unique=True)
+    else:
+        # Table exists (production PostgreSQL) — add new columns
+        op.add_column('waitlist', sa.Column('name', sa.String(length=255), nullable=True))
+        op.add_column('waitlist', sa.Column('status', sa.String(length=20), nullable=False, server_default='pending'))
+        op.add_column('waitlist', sa.Column('invite_token', sa.String(length=512), nullable=True))
+        op.add_column('waitlist', sa.Column('approved_at', sa.DateTime(), nullable=True))
+        op.add_column('waitlist', sa.Column('claimed_at', sa.DateTime(), nullable=True))
+        op.add_column('waitlist', sa.Column('claimed_by', sa.String(length=255), nullable=True))
+        op.create_unique_constraint('uq_waitlist_invite_token', 'waitlist', ['invite_token'])
 
 
 def downgrade() -> None:
     """Remove beta invite columns from waitlist table."""
-    op.drop_constraint('uq_waitlist_invite_token', 'waitlist', type_='unique')
-    op.drop_column('waitlist', 'claimed_by')
-    op.drop_column('waitlist', 'claimed_at')
-    op.drop_column('waitlist', 'approved_at')
-    op.drop_column('waitlist', 'invite_token')
-    op.drop_column('waitlist', 'status')
-    op.drop_column('waitlist', 'name')
+    conn = op.get_bind()
+    dialect = conn.dialect.name
+
+    if dialect == 'sqlite':
+        # SQLite: use batch mode for constraint changes
+        with op.batch_alter_table('waitlist') as batch_op:
+            batch_op.drop_column('claimed_by')
+            batch_op.drop_column('claimed_at')
+            batch_op.drop_column('approved_at')
+            batch_op.drop_column('invite_token')
+            batch_op.drop_column('status')
+            batch_op.drop_column('name')
+    else:
+        op.drop_constraint('uq_waitlist_invite_token', 'waitlist', type_='unique')
+        op.drop_column('waitlist', 'claimed_by')
+        op.drop_column('waitlist', 'claimed_at')
+        op.drop_column('waitlist', 'approved_at')
+        op.drop_column('waitlist', 'invite_token')
+        op.drop_column('waitlist', 'status')
+        op.drop_column('waitlist', 'name')
