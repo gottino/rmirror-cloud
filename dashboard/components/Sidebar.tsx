@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import Image from 'next/image';
-import { HomeIcon, Puzzle, X } from 'lucide-react';
+import { HomeIcon, Puzzle, X, MessageSquare, Shield } from 'lucide-react';
 import { useAuth } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import { getAgentStatus, type AgentStatus } from '@/lib/api';
@@ -13,13 +13,16 @@ interface SidebarProps {
   onClose?: () => void;
 }
 
+const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+
 export default function Sidebar({ open = true, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn, userId } = useAuth();
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
 
-  // Development mode bypass
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  // Development mode bypass — only works on localhost, backend still enforces auth
+  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
+    && typeof window !== 'undefined' && window.location.hostname === 'localhost';
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
 
   const fetchAgentStatus = async () => {
@@ -78,6 +81,21 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
             <h1 style={{ fontSize: '1.375rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>
               rMirror
             </h1>
+            <span
+              style={{
+                fontSize: '0.625rem',
+                fontWeight: 700,
+                color: 'white',
+                background: 'var(--terracotta)',
+                padding: '1px 6px',
+                borderRadius: '9999px',
+                letterSpacing: '0.05em',
+                marginLeft: '6px',
+                alignSelf: 'center',
+              }}
+            >
+              BETA
+            </span>
           </div>
           {onClose && (
             <button
@@ -133,6 +151,35 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
             <Puzzle className="w-5 h-5" />
             Integrations
           </Link>
+          <a
+            href="https://github.com/gottino/rmirror-cloud/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
+            style={{
+              color: 'var(--warm-charcoal)',
+              fontSize: '0.925em',
+              fontWeight: 500
+            }}
+          >
+            <MessageSquare className="w-5 h-5" />
+            Feedback
+          </a>
+          {(isDevelopmentMode || (userId && ADMIN_USER_IDS.includes(userId))) && (
+            <Link
+              href="/admin/waitlist"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
+              style={{
+                backgroundColor: isActive('/admin') ? 'var(--primary)' : 'transparent',
+                color: isActive('/admin') ? 'var(--primary-foreground)' : 'var(--warm-charcoal)',
+                fontSize: '0.925em',
+                fontWeight: 500
+              }}
+            >
+              <Shield className="w-5 h-5" />
+              Admin
+            </Link>
+          )}
         </div>
 
         {/* Agent Status */}

@@ -457,6 +457,103 @@ export interface SearchResponse {
   search_mode: 'fuzzy' | 'basic';
 }
 
+// ==================== Waitlist / Beta Invites ====================
+
+export interface WaitlistEntry {
+  id: number;
+  email: string;
+  name: string | null;
+  status: 'pending' | 'approved' | 'claimed';
+  created_at: string;
+  approved_at: string | null;
+  claimed_at: string | null;
+}
+
+export interface WaitlistAdminResponse {
+  entries: WaitlistEntry[];
+  total: number;
+  stats: {
+    pending: number;
+    approved: number;
+    claimed: number;
+  };
+}
+
+export interface InviteValidationResponse {
+  valid: boolean;
+  email?: string;
+  reason?: string;
+}
+
+/**
+ * Validate an invite token (public, no auth needed)
+ */
+export async function validateInviteToken(token: string): Promise<InviteValidationResponse> {
+  const response = await fetch(`${API_URL}/waitlist/validate-invite?token=${encodeURIComponent(token)}`);
+  return response.json();
+}
+
+/**
+ * Get waitlist entries (admin only)
+ */
+export async function getWaitlistAdmin(
+  token: string,
+  status?: string,
+  skip?: number,
+  limit?: number
+): Promise<WaitlistAdminResponse> {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (skip) params.set('skip', skip.toString());
+  if (limit) params.set('limit', limit.toString());
+
+  const response = await fetch(`${API_URL}/waitlist/admin?${params}`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+
+  if (response.status === 403) {
+    throw new Error('Admin access required');
+  }
+
+  return handleApiResponse<WaitlistAdminResponse>(response);
+}
+
+/**
+ * Approve a single waitlist entry (admin only)
+ */
+export async function approveWaitlistEntry(
+  token: string,
+  entryId: number
+): Promise<WaitlistEntry> {
+  const response = await fetch(`${API_URL}/waitlist/admin/${entryId}/approve`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+
+  return handleApiResponse<WaitlistEntry>(response);
+}
+
+/**
+ * Approve multiple waitlist entries (admin only)
+ */
+export async function approveWaitlistBulk(
+  token: string,
+  ids: number[]
+): Promise<{ approved: number; errors: Array<{ id: number; error: string }> }> {
+  const response = await fetch(`${API_URL}/waitlist/admin/approve-bulk`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ids }),
+  });
+
+  return handleApiResponse<{ approved: number; errors: Array<{ id: number; error: string }> }>(response);
+}
+
+// ==================== Search ====================
+
 export async function searchNotebooks(
   token: string,
   query: string,

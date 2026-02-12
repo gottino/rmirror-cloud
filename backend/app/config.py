@@ -128,6 +128,11 @@ class Settings(BaseSettings):
     # Integration Encryption
     integration_master_key: Optional[str] = None
 
+    # Beta / Admin
+    admin_user_ids: str = ""  # comma-separated Clerk user IDs
+    invite_token_expiry_days: int = 7
+    dashboard_url: str = "https://rmirror.io"
+
 
 @lru_cache
 def get_settings() -> Settings:

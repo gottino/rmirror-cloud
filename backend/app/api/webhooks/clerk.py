@@ -193,6 +193,28 @@ async def handle_user_created(data: dict, db: Session):
     db.commit()
     print(f"Created free tier subscription for user {new_user.id}")
 
+    # Mark waitlist invite as claimed (if exists)
+    try:
+        from app.api.waitlist import WaitlistEntry
+
+        waitlist_entry = (
+            db.query(WaitlistEntry)
+            .filter(
+                WaitlistEntry.email == primary_email,
+                WaitlistEntry.status == "approved",
+            )
+            .first()
+        )
+        if waitlist_entry:
+            waitlist_entry.status = "claimed"
+            waitlist_entry.claimed_at = datetime.utcnow()
+            waitlist_entry.claimed_by = clerk_user_id
+            db.commit()
+            print(f"Marked waitlist invite as claimed for {primary_email}")
+    except Exception as e:
+        print(f"Error marking waitlist invite as claimed: {str(e)}")
+        # Don't fail the webhook if waitlist update fails
+
     # Send welcome email to new user
     try:
         email_service = get_email_service()

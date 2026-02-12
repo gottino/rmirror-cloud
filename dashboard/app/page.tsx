@@ -20,6 +20,7 @@ function LandingPageInner() {
   const { isSignedIn } = useAuth();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
@@ -56,12 +57,13 @@ function LandingPageInner() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/waitlist`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
+      const response = await fetch(`${apiUrl}/waitlist`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, name: name || undefined }),
       });
 
       if (response.ok) {
@@ -187,8 +189,8 @@ function LandingPageInner() {
                   </Link>
                 ) : (
                   <div className="flex flex-col sm:flex-row gap-4">
-                    <Link
-                      href="/sign-up"
+                    <a
+                      href="#waitlist"
                       className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
                       style={{
                         background: 'var(--terracotta)',
@@ -196,9 +198,9 @@ function LandingPageInner() {
                         boxShadow: 'var(--shadow-md)'
                       }}
                     >
-                      Start Free
+                      Request Early Access
                       <ArrowRight className="w-5 h-5" />
-                    </Link>
+                    </a>
                     <a
                       href="https://github.com/gottino/rmirror-cloud"
                       target="_blank"
@@ -225,7 +227,7 @@ function LandingPageInner() {
                   textAlign: isScrolled ? 'center' : 'left'
                 }}
               >
-                Free tier: 30 pages of OCR per month • No credit card required
+                Early beta &bull; Free tier: 30 pages of OCR per month
               </p>
             </div>
 
@@ -305,8 +307,8 @@ function LandingPageInner() {
                   </Link>
                 ) : (
                   <div className="flex flex-col sm:flex-row gap-4">
-                    <Link
-                      href="/sign-up"
+                    <a
+                      href="#waitlist"
                       className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
                       style={{
                         background: 'var(--terracotta)',
@@ -314,9 +316,9 @@ function LandingPageInner() {
                         boxShadow: 'var(--shadow-md)'
                       }}
                     >
-                      Start Free
+                      Request Early Access
                       <ArrowRight className="w-5 h-5" />
-                    </Link>
+                    </a>
                     <a
                       href="https://github.com/gottino/rmirror-cloud"
                       target="_blank"
@@ -337,7 +339,7 @@ function LandingPageInner() {
               </div>
 
               <p className="mt-6 text-sm" style={{ color: 'var(--warm-gray)' }}>
-                Free tier: 30 pages of OCR per month • No credit card required
+                Early beta &bull; Free tier: 30 pages of OCR per month
               </p>
             </div>
 
@@ -653,8 +655,8 @@ function LandingPageInner() {
                   </li>
                 ))}
               </ul>
-              <Link
-                href="/sign-up"
+              <a
+                href="#waitlist"
                 className="block w-full text-center px-6 py-3 rounded-lg font-semibold transition-all"
                 style={{
                   background: 'var(--soft-cream)',
@@ -662,8 +664,8 @@ function LandingPageInner() {
                   border: '2px solid var(--border)'
                 }}
               >
-                Get Started
-              </Link>
+                Request Access
+              </a>
             </div>
 
             {/* Pro Tier */}
@@ -811,10 +813,10 @@ function LandingPageInner() {
         </div>
       </section>
 
-      {/* Final CTA */}
+      {/* Final CTA / Waitlist Form */}
       {!isSignedIn && (
-        <section className="py-20 lg:py-28">
-          <div className="max-w-3xl mx-auto px-6 text-center">
+        <section id="waitlist" className="py-20 lg:py-28">
+          <div className="max-w-lg mx-auto px-6 text-center">
             <h2
               className="text-4xl lg:text-5xl font-bold mb-6"
               style={{ color: 'var(--warm-charcoal)' }}
@@ -822,20 +824,69 @@ function LandingPageInner() {
               Ready to Unlock Your Notes?
             </h2>
             <p className="text-xl mb-10" style={{ color: 'var(--warm-gray)' }}>
-              Start syncing your handwritten notes today - no credit card required.
+              rMirror is in early beta. Request access and we'll send you an invite.
             </p>
-            <Link
-              href="/sign-up"
-              className="inline-flex items-center gap-2 px-10 py-5 rounded-lg text-xl font-semibold transition-all hover:scale-105"
-              style={{
-                background: 'var(--terracotta)',
-                color: 'white',
-                boxShadow: 'var(--shadow-md)'
-              }}
-            >
-              Start Free
-              <ArrowRight className="w-6 h-6" />
-            </Link>
+
+            {!showSuccess ? (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <input
+                  type="text"
+                  placeholder="Name (optional)"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full px-5 py-3.5 rounded-lg text-base"
+                  style={{
+                    background: 'white',
+                    border: '2px solid var(--border)',
+                    color: 'var(--warm-charcoal)',
+                  }}
+                />
+                <input
+                  type="email"
+                  placeholder="Email address"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="w-full px-5 py-3.5 rounded-lg text-base"
+                  style={{
+                    background: 'white',
+                    border: '2px solid var(--border)',
+                    color: 'var(--warm-charcoal)',
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !email}
+                  className="w-full py-3.5 rounded-lg text-lg font-semibold transition-all hover:scale-105"
+                  style={{
+                    background: 'var(--terracotta)',
+                    color: 'white',
+                    boxShadow: 'var(--shadow-md)',
+                    opacity: isSubmitting || !email ? 0.6 : 1,
+                  }}
+                >
+                  {isSubmitting ? 'Requesting...' : 'Request Early Access'}
+                </button>
+                {showError && (
+                  <p className="text-sm" style={{ color: 'var(--terracotta)' }}>
+                    Something went wrong. Please try again.
+                  </p>
+                )}
+              </form>
+            ) : (
+              <div
+                className="p-6 rounded-xl"
+                style={{ background: 'var(--soft-cream)', border: '1px solid var(--sage-green)' }}
+              >
+                <CheckCircle className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--sage-green)' }} />
+                <p className="text-lg font-semibold mb-1" style={{ color: 'var(--warm-charcoal)' }}>
+                  You're on the list!
+                </p>
+                <p style={{ color: 'var(--warm-gray)' }}>
+                  We'll email you when your invite is ready.
+                </p>
+              </div>
+            )}
           </div>
         </section>
       )}
