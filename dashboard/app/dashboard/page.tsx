@@ -149,10 +149,6 @@ const SidebarLogo = memo(function SidebarLogo({ onClose }: { onClose?: () => voi
 
 function DashboardContent() {
   const { getToken, isSignedIn, userId } = useAuth();
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
-    && typeof window !== 'undefined' && window.location.hostname === 'localhost';
-  const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
-  const isAdmin = isDevelopmentMode || (userId && ADMIN_USER_IDS.includes(userId));
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tree, setTree] = useState<NotebookTreeNode[]>([]);
@@ -196,6 +192,8 @@ function DashboardContent() {
   // Development mode bypass
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
+  const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+  const isAdmin = isDevelopmentMode || (userId && ADMIN_USER_IDS.includes(userId));
 
   const handleDownloadClick = async () => {
     if (effectiveIsSignedIn) {
