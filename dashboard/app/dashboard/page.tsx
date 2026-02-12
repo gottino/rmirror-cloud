@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2 } from 'lucide-react';
+import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Shield } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
 import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus, type SearchResponse } from '@/lib/api';
 import { QuotaWarning } from '@/components/QuotaWarning';
@@ -130,6 +130,7 @@ const SidebarLogo = memo(function SidebarLogo({ onClose }: { onClose?: () => voi
         <div className="flex items-center">
           <Image src="/rm-icon.png" alt="rMirror" width={32} height={32} style={{ marginRight: '8px', marginTop: '3px'}} />
           <h1 style={{ fontSize: '1.375rem', fontWeight: 600, color: 'var(--warm-charcoal)', margin: 0 }}>rMirror</h1>
+          <span style={{ fontSize: '0.6rem', fontWeight: 700, color: 'white', background: 'var(--terracotta)', padding: '2px 6px', borderRadius: '9999px', marginLeft: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Beta</span>
         </div>
         {onClose && (
           <button
@@ -147,7 +148,11 @@ const SidebarLogo = memo(function SidebarLogo({ onClose }: { onClose?: () => voi
 });
 
 function DashboardContent() {
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn, userId } = useAuth();
+  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
+    && typeof window !== 'undefined' && window.location.hostname === 'localhost';
+  const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+  const isAdmin = isDevelopmentMode || (userId && ADMIN_USER_IDS.includes(userId));
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tree, setTree] = useState<NotebookTreeNode[]>([]);
@@ -560,6 +565,34 @@ function DashboardContent() {
             <Puzzle className="w-5 h-5" />
             Integrations
           </Link>
+          <a
+            href="https://github.com/gottino/rmirror-cloud/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
+            style={{
+              color: 'var(--warm-charcoal)',
+              fontSize: '0.925em',
+              fontWeight: 500
+            }}
+          >
+            <MessageSquare className="w-5 h-5" />
+            Feedback
+          </a>
+          {isAdmin && (
+            <Link
+              href="/admin/waitlist"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
+              style={{
+                color: 'var(--warm-charcoal)',
+                fontSize: '0.925em',
+                fontWeight: 500
+              }}
+            >
+              <Shield className="w-5 h-5" />
+              Admin
+            </Link>
+          )}
         </div>
 
         {/* Agent Status */}
