@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+html {
+  scroll-behavior: smooth;
+}
+
 /* rMirror Design System - CSS Variables */
 :root {
   /* Color Palette - Warm, sophisticated palette inspired by Moleskine */

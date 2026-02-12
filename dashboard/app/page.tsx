@@ -815,7 +815,7 @@ function LandingPageInner() {
 
       {/* Final CTA / Waitlist Form */}
       {!isSignedIn && (
-        <section id="waitlist" className="py-20 lg:py-28">
+        <section id="waitlist" className="py-20 lg:py-28" style={{ scrollMarginTop: '2rem' }}>
           <div className="max-w-lg mx-auto px-6 text-center">
             <h2
               className="text-4xl lg:text-5xl font-bold mb-6"
