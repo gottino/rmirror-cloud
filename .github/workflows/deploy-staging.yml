@@ -69,6 +69,7 @@ jobs:
           NOTION_REDIRECT_URI=https://staging.rmirror.io/integrations/notion/callback
           RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
           INTEGRATION_MASTER_KEY=${{ secrets.STAGING_INTEGRATION_MASTER_KEY }}
+          ADMIN_USER_IDS=${{ secrets.ADMIN_USER_IDS }}
           ENVEOF
 
           echo "=== Creating dashboard .env ==="
@@ -76,6 +77,7 @@ jobs:
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY=${{ secrets.STAGING_CLERK_SECRET_KEY }}
           NEXT_PUBLIC_API_URL=https://staging.rmirror.io/api/v1
+          NEXT_PUBLIC_ADMIN_USER_IDS=${{ vars.NEXT_PUBLIC_ADMIN_USER_IDS }}
           ENVEOF
 
           echo "=== Backend deployment ==="
