@@ -11,9 +11,9 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import Column, DateTime, Integer, String, func, select
+from sqlalchemy import Column, DateTime, Integer, String, func
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
 from app.config import get_settings
@@ -150,21 +150,22 @@ async def get_admin_user(
 @router.post("", response_model=WaitlistResponse, status_code=201)
 async def join_waitlist(
     data: WaitlistCreate,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ) -> WaitlistEntry:
     """Add an email to the waitlist."""
     # Check if email already exists
-    result = await db.execute(
-        select(WaitlistEntry).where(WaitlistEntry.email == data.email)
+    existing = (
+        db.query(WaitlistEntry)
+        .filter(WaitlistEntry.email == data.email)
+        .first()
     )
-    existing = result.scalar_one_or_none()
 
     if existing:
         # Update name if provided and not already set
         if data.name and not existing.name:
             existing.name = data.name
-            await db.commit()
-            await db.refresh(existing)
+            db.commit()
+            db.refresh(existing)
         return existing
 
     # Create new entry
@@ -172,15 +173,16 @@ async def join_waitlist(
     db.add(entry)
 
     try:
-        await db.commit()
-        await db.refresh(entry)
+        db.commit()
+        db.refresh(entry)
         return entry
     except IntegrityError:
-        await db.rollback()
-        result = await db.execute(
-            select(WaitlistEntry).where(WaitlistEntry.email == data.email)
+        db.rollback()
+        existing = (
+            db.query(WaitlistEntry)
+            .filter(WaitlistEntry.email == data.email)
+            .first()
         )
-        existing = result.scalar_one_or_none()
         if existing:
             return existing
         raise HTTPException(status_code=500, detail="Failed to add email to waitlist")
@@ -189,7 +191,7 @@ async def join_waitlist(
 @router.get("/validate-invite", response_model=InviteValidationResponse)
 async def validate_invite(
     token: str,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """Validate an invite token (public endpoint)."""
     settings = get_settings()
@@ -204,13 +206,14 @@ async def validate_invite(
         )
 
     # Check if the invite has already been claimed
-    result = await db.execute(
-        select(WaitlistEntry).where(
+    entry = (
+        db.query(WaitlistEntry)
+        .filter(
             WaitlistEntry.id == payload.get("wid"),
             WaitlistEntry.email == payload.get("email"),
         )
+        .first()
     )
-    entry = result.scalar_one_or_none()
 
     if not entry:
         return InviteValidationResponse(
@@ -239,30 +242,31 @@ async def get_waitlist_admin(
     skip: int = 0,
     limit: int = 100,
     admin: User = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """List waitlist entries with optional status filter (admin only)."""
-    query = select(WaitlistEntry)
+    query = db.query(WaitlistEntry)
     if status:
-        query = query.where(WaitlistEntry.status == status)
-    query = query.order_by(WaitlistEntry.created_at.desc()).offset(skip).limit(limit)
-
-    result = await db.execute(query)
-    entries = result.scalars().all()
+        query = query.filter(WaitlistEntry.status == status)
+    entries = (
+        query.order_by(WaitlistEntry.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
     # Get total count with filter
-    count_query = select(func.count(WaitlistEntry.id))
+    count_query = db.query(func.count(WaitlistEntry.id))
     if status:
-        count_query = count_query.where(WaitlistEntry.status == status)
-    total = (await db.execute(count_query)).scalar()
+        count_query = count_query.filter(WaitlistEntry.status == status)
+    total = count_query.scalar()
 
     # Get stats
-    stats_result = await db.execute(
-        select(WaitlistEntry.status, func.count(WaitlistEntry.id)).group_by(
-            WaitlistEntry.status
-        )
+    stats_rows = (
+        db.query(WaitlistEntry.status, func.count(WaitlistEntry.id))
+        .group_by(WaitlistEntry.status)
+        .all()
     )
-    stats_rows = stats_result.all()
     stats = {row[0]: row[1] for row in stats_rows}
 
     return WaitlistAdminResponse(
@@ -280,13 +284,14 @@ async def get_waitlist_admin(
 async def approve_waitlist_entry(
     entry_id: int,
     admin: User = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """Approve a single waitlist entry and send invite email (admin only)."""
-    result = await db.execute(
-        select(WaitlistEntry).where(WaitlistEntry.id == entry_id)
+    entry = (
+        db.query(WaitlistEntry)
+        .filter(WaitlistEntry.id == entry_id)
+        .first()
     )
-    entry = result.scalar_one_or_none()
 
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
@@ -304,8 +309,8 @@ async def approve_waitlist_entry(
     entry.invite_token = token
     entry.approved_at = datetime.utcnow()
 
-    await db.commit()
-    await db.refresh(entry)
+    db.commit()
+    db.refresh(entry)
 
     # Send invite email
     try:
@@ -330,7 +335,7 @@ async def approve_waitlist_entry(
 async def approve_waitlist_bulk(
     data: BulkApproveRequest,
     admin: User = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """Approve multiple waitlist entries (admin only)."""
     settings = get_settings()
@@ -338,10 +343,11 @@ async def approve_waitlist_bulk(
     errors = []
 
     for entry_id in data.ids:
-        result = await db.execute(
-            select(WaitlistEntry).where(WaitlistEntry.id == entry_id)
+        entry = (
+            db.query(WaitlistEntry)
+            .filter(WaitlistEntry.id == entry_id)
+            .first()
         )
-        entry = result.scalar_one_or_none()
 
         if not entry:
             errors.append({"id": entry_id, "error": "Not found"})
@@ -357,7 +363,7 @@ async def approve_waitlist_bulk(
         entry.approved_at = datetime.utcnow()
         approved.append(entry)
 
-    await db.commit()
+    db.commit()
 
     # Send invite emails
     from app.utils.email import get_email_service

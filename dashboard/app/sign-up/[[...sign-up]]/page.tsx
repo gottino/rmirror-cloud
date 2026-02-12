@@ -72,7 +72,8 @@ function SignUpGate() {
     setSubmitting(true);
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/waitlist`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
+      const response = await fetch(`${apiUrl}/waitlist`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, name: name || undefined }),
