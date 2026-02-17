@@ -6,10 +6,9 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models.user import User
 from app.models.notebook import Notebook
 from app.models.page import Page
-from app.models.sync_record import IntegrationConfig
+from app.models.user import User
 from app.utils.email import get_email_service
 
 logger = logging.getLogger(__name__)
