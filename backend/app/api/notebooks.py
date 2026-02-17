@@ -108,6 +108,11 @@ async def upload_notebook(
     db.commit()
     db.refresh(notebook)
 
+    # Track first notebook milestone
+    if not current_user.first_notebook_synced_at:
+        current_user.first_notebook_synced_at = datetime.utcnow()
+        db.commit()
+
     return NotebookUploadResponse(
         notebook=notebook,
         message="File uploaded successfully",

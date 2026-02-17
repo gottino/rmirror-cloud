@@ -457,6 +457,57 @@ export interface SearchResponse {
   search_mode: 'fuzzy' | 'basic';
 }
 
+// ==================== Onboarding ====================
+
+export interface OnboardingProgress {
+  state: string;
+  onboarding_started_at: string | null;
+  onboarding_completed_at: string | null;
+  agent_downloaded_at: string | null;
+  agent_first_connected_at: string | null;
+  first_notebook_synced_at: string | null;
+  first_ocr_completed_at: string | null;
+  notion_connected_at: string | null;
+  onboarding_dismissed: boolean;
+  has_notebooks: boolean;
+  has_ocr: boolean;
+  has_notion: boolean;
+}
+
+/**
+ * Get onboarding progress for the current user
+ */
+export async function getOnboardingProgress(token: string): Promise<OnboardingProgress> {
+  const response = await fetch(`${API_URL}/onboarding/progress`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  return handleApiResponse<OnboardingProgress>(response);
+}
+
+/**
+ * Dismiss the onboarding checklist
+ */
+export async function dismissOnboarding(token: string): Promise<void> {
+  try {
+    const response = await fetch(`${API_URL}/onboarding/dismiss`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error('Failed to dismiss onboarding');
+    }
+  } catch (error) {
+    console.error('Error dismissing onboarding:', error);
+  }
+}
+
 // ==================== Waitlist / Beta Invites ====================
 
 export interface WaitlistEntry {

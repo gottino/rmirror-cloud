@@ -7,11 +7,12 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Shield } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
-import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus, type SearchResponse } from '@/lib/api';
+import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, getOnboardingProgress, dismissOnboarding, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus, type SearchResponse, type OnboardingProgress } from '@/lib/api';
 import { QuotaWarning } from '@/components/QuotaWarning';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
 import { SearchResults } from '@/components/SearchResults';
+import { OnboardingChecklist, getDefaultOnboardingSteps } from '@/components/OnboardingChecklist';
 import { memo } from 'react';
 
 // Group notebooks by date
@@ -161,6 +162,7 @@ function DashboardContent() {
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const [showQuotaModal, setShowQuotaModal] = useState(false);
+  const [onboarding, setOnboarding] = useState<OnboardingProgress | null>(null);
 
   // Stable callback for closing sidebar (prevents SidebarLogo re-renders)
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -265,6 +267,34 @@ function DashboardContent() {
     }
   };
 
+  const fetchOnboarding = async () => {
+    if (!effectiveIsSignedIn) return;
+
+    try {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (!token) return;
+
+      const data = await getOnboardingProgress(token);
+      setOnboarding(data);
+    } catch (err) {
+      console.error('Error fetching onboarding:', err);
+    }
+  };
+
+  const handleDismissOnboarding = async () => {
+    setOnboarding(prev => prev ? { ...prev, onboarding_dismissed: true } : null);
+    if (effectiveIsSignedIn) {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (token) {
+        await dismissOnboarding(token);
+      }
+    }
+  };
+
   // Update URL params without triggering navigation
   const updateUrlParams = useCallback((query: string, range?: 'any' | 'week' | 'month' | 'year', folderUuid?: string) => {
     const params = new URLSearchParams();
@@ -361,6 +391,7 @@ function DashboardContent() {
     fetchNotebooks();
     fetchAgentStatus();
     fetchQuota();
+    fetchOnboarding();
   }, [effectiveIsSignedIn]);
 
   // Restore search state from URL params (for back button navigation)
@@ -758,6 +789,23 @@ function DashboardContent() {
           </div>
         </header>
         <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
+          {/* Onboarding Checklist */}
+          {onboarding && !onboarding.onboarding_dismissed && !isSearchMode && (
+            <div className="mb-6">
+              <OnboardingChecklist
+                steps={getDefaultOnboardingSteps({
+                  hasAgent: agentStatus?.has_agent_connected ?? false,
+                  hasNotebook: onboarding.has_notebooks,
+                  hasOcr: onboarding.has_ocr,
+                  hasNotion: onboarding.has_notion,
+                  onDownloadAgent: handleDownloadClick,
+                })}
+                onDismiss={handleDismissOnboarding}
+                onDownloadAgent={handleDownloadClick}
+              />
+            </div>
+          )}
+
           {isSearchMode && searchResults ? (
             <SearchResults
               results={searchResults.results}
