@@ -23,7 +23,7 @@ def upgrade() -> None:
     op.add_column('users', sa.Column('first_notebook_synced_at', sa.DateTime(), nullable=True))
     op.add_column('users', sa.Column('first_ocr_completed_at', sa.DateTime(), nullable=True))
     op.add_column('users', sa.Column('notion_connected_at', sa.DateTime(), nullable=True))
-    op.add_column('users', sa.Column('onboarding_dismissed', sa.Boolean(), nullable=False, server_default=sa.text('0')))
+    op.add_column('users', sa.Column('onboarding_dismissed', sa.Boolean(), nullable=False, server_default=sa.text('false')))
     op.add_column('users', sa.Column('drip_emails_sent', sa.String(255), nullable=False, server_default=''))
 
 
