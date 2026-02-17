@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_active_user
+from app.auth.clerk import get_clerk_active_user
 from app.database import get_db
 from app.models.notebook import Notebook
 from app.models.page import Page
@@ -43,7 +43,7 @@ class OnboardingProgressResponse(BaseModel):
 
 @router.get("/progress", response_model=OnboardingProgressResponse)
 async def get_onboarding_progress(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Session = Depends(get_db),
 ):
     """
@@ -114,7 +114,7 @@ async def get_onboarding_progress(
 @router.post("/progress", response_model=OnboardingProgressResponse)
 async def update_onboarding_progress(
     request: OnboardingProgressRequest,
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Session = Depends(get_db),
 ):
     """
@@ -187,7 +187,7 @@ async def update_onboarding_progress(
 
 @router.post("/agent-downloaded")
 async def track_agent_download(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Session = Depends(get_db),
 ):
     """
@@ -216,7 +216,7 @@ async def track_agent_download(
 
 @router.post("/dismiss")
 async def dismiss_onboarding(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Session = Depends(get_db),
 ):
     """
