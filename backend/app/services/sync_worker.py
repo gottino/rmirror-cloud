@@ -32,6 +32,7 @@ class SyncWorker:
         self.poll_interval = poll_interval
         self.running = False
         self._task: Optional[asyncio.Task] = None
+        self._last_drip_check: Optional[float] = None
 
     async def start(self):
         """Start the background worker."""
@@ -65,6 +66,16 @@ class SyncWorker:
             try:
                 # Process pending items
                 await self._process_pending_items()
+
+                # Check drip emails every hour
+                if self._last_drip_check is None or (time.time() - self._last_drip_check) > 3600:
+                    try:
+                        from app.services.drip_email_service import get_drip_email_service
+                        drip_service = get_drip_email_service()
+                        await drip_service.process_all_drips()
+                        self._last_drip_check = time.time()
+                    except Exception as e:
+                        logger.error(f"Error processing drip emails: {e}")
 
                 # Wait before next poll
                 await asyncio.sleep(self.poll_interval)

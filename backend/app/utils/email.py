@@ -598,6 +598,362 @@ class EmailService:
             to_name=user_name
         )
 
+    def send_agent_nudge_email(self, user_email: str, user_name: str) -> bool:
+        """Send nudge email to users who haven't installed the agent yet (E3)"""
+
+        html_content = f"""
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid #e8e4df;">
+                        <h1 style="color: #2d2a2e; font-size: 28px; font-weight: 600; margin: 0 0 8px 0;">Your notebooks are waiting</h1>
+                        <p style="color: #8b8680; font-size: 16px; margin: 0;">Set up in 5 minutes</p>
+                    </div>
+
+                    <!-- Content card -->
+                    <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">You created your rMirror account, but we haven't seen any notebooks sync yet. The macOS agent takes just a few minutes to set up, and then your reMarkable notes sync automatically in the background.</p>
+
+                        <h2 style="color: #2d2a2e; font-size: 20px; font-weight: 600; margin: 0 0 16px 0;">Here's how to get started:</h2>
+                        <ol style="color: #2d2a2e; font-size: 15px; margin: 0 0 24px 0; padding-left: 20px;">
+                            <li style="margin-bottom: 12px;"><strong>Download the agent</strong> from your dashboard</li>
+                            <li style="margin-bottom: 12px;"><strong>Install and sign in</strong> with your rMirror account</li>
+                            <li style="margin-bottom: 12px;"><strong>Point it to your reMarkable folder</strong> (the agent will find it automatically on most setups)</li>
+                            <li style="margin-bottom: 12px;"><strong>That's it!</strong> Your notebooks will start syncing to the cloud</li>
+                        </ol>
+
+                        <!-- Feature callout -->
+                        <div style="background-color: #faf8f5; padding: 16px; border-radius: 8px; border-left: 3px solid #c85a54; margin-bottom: 28px;">
+                            <p style="color: #2d2a2e; font-size: 15px; margin: 0; font-weight: 600;">Once synced, you'll get:</p>
+                            <p style="color: #8b8680; font-size: 14px; margin: 8px 0 0 0;">AI-powered handwriting OCR &bull; Full-text search &bull; Web access from anywhere &bull; Notion integration</p>
+                        </div>
+
+                        <!-- CTA Button -->
+                        <div style="text-align: center; margin: 32px 0 0 0;">
+                            <a href="https://rmirror.io/dashboard"
+                               style="display: inline-block; padding: 14px 32px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
+                                Download rMirror Agent
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Footer -->
+                    <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                        <p style="color: #8b8680; font-size: 14px; margin: 0 0 8px 0;">
+                            Need help? Just reply to this email.
+                        </p>
+                        <p style="color: #2d2a2e; font-size: 14px; margin: 0; font-weight: 600;">
+                            The rMirror Team
+                        </p>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """
+
+        return self.send_email(
+            to_email=user_email,
+            subject="Your notebooks are waiting — set up in 5 minutes",
+            html_content=html_content,
+            to_name=user_name
+        )
+
+    def send_first_sync_celebration_email(
+        self,
+        user_email: str,
+        user_name: str,
+        notebook_count: int,
+        page_count: int
+    ) -> bool:
+        """Send celebration email after first successful sync (E4)"""
+
+        html_content = f"""
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 32px;">
+                        <div style="display: inline-block; padding: 12px 24px; background-color: #7a9c89; border-radius: 8px; margin-bottom: 16px;">
+                            <p style="color: #ffffff; font-size: 14px; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">Sync Complete</p>
+                        </div>
+                        <h1 style="color: #2d2a2e; font-size: 28px; font-weight: 600; margin: 0;">Your notebooks are in the cloud!</h1>
+                    </div>
+
+                    <!-- Content card -->
+                    <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Your first sync is complete! <strong style="color: #c85a54;">{notebook_count}</strong> notebook(s) with <strong style="color: #c85a54;">{page_count}</strong> pages are now safely in the cloud.</p>
+
+                        <!-- Stats callout -->
+                        <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 28px; display: flex; justify-content: center; gap: 32px;">
+                            <div>
+                                <p style="color: #8b8680; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">Notebooks</p>
+                                <p style="color: #2d2a2e; font-size: 36px; font-weight: 700; margin: 0; line-height: 1;">{notebook_count}</p>
+                            </div>
+                            <div>
+                                <p style="color: #8b8680; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">Pages</p>
+                                <p style="color: #2d2a2e; font-size: 36px; font-weight: 700; margin: 0; line-height: 1;">{page_count}</p>
+                            </div>
+                        </div>
+
+                        <h2 style="color: #2d2a2e; font-size: 20px; font-weight: 600; margin: 0 0 16px 0;">Here's what happens next:</h2>
+                        <div style="background-color: #faf8f5; padding: 16px; border-radius: 8px; border-left: 3px solid #7a9c89; margin-bottom: 28px;">
+                            <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 8px 0;"><strong>OCR is processing your handwriting.</strong></p>
+                            <p style="color: #8b8680; font-size: 14px; margin: 0;">Our AI is reading your handwritten notes and converting them to searchable text. This usually takes a few minutes per page. We'll email you when it's done.</p>
+                        </div>
+
+                        <!-- CTA Button -->
+                        <div style="text-align: center; margin: 32px 0 0 0;">
+                            <a href="https://rmirror.io/dashboard"
+                               style="display: inline-block; padding: 14px 32px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
+                                View Your Notebooks
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Footer -->
+                    <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                        <p style="color: #8b8680; font-size: 13px; margin: 0;">
+                            Happy note-taking!
+                        </p>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """
+
+        return self.send_email(
+            to_email=user_email,
+            subject="Your notebooks are in the cloud!",
+            html_content=html_content,
+            to_name=user_name
+        )
+
+    def send_first_ocr_celebration_email(
+        self,
+        user_email: str,
+        user_name: str,
+        ocr_snippet: Optional[str] = None
+    ) -> bool:
+        """Send celebration email after first OCR completion (E5)"""
+
+        # Build OCR snippet preview block if snippet is provided
+        snippet_html = ""
+        if ocr_snippet:
+            snippet_html = f"""
+                        <!-- OCR preview -->
+                        <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; border: 1px solid #e8e4df; margin-bottom: 28px;">
+                            <p style="color: #8b8680; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 12px 0;">Preview of your handwriting</p>
+                            <p style="color: #2d2a2e; font-size: 15px; font-style: italic; margin: 0; line-height: 1.7; border-left: 3px solid #c85a54; padding-left: 16px;">"{ocr_snippet}"</p>
+                        </div>
+            """
+
+        html_content = f"""
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 32px;">
+                        <div style="display: inline-block; padding: 12px 24px; background-color: #7a9c89; border-radius: 8px; margin-bottom: 16px;">
+                            <p style="color: #ffffff; font-size: 14px; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">OCR Complete</p>
+                        </div>
+                        <h1 style="color: #2d2a2e; font-size: 28px; font-weight: 600; margin: 0;">Your handwriting is now searchable</h1>
+                    </div>
+
+                    <!-- Content card -->
+                    <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Our AI has finished reading your handwriting and converted it to searchable text. You can now search for any word you've written across all your notebooks.</p>
+
+                        {snippet_html}
+
+                        <!-- Tips callout -->
+                        <div style="background-color: #faf8f5; padding: 16px; border-radius: 8px; border-left: 3px solid #c85a54; margin-bottom: 28px;">
+                            <p style="color: #2d2a2e; font-size: 15px; margin: 0; font-weight: 600;">Try it out:</p>
+                            <p style="color: #8b8680; font-size: 14px; margin: 8px 0 0 0;">Open your dashboard and try searching for a word you wrote. You'll see results from across all your notebooks instantly.</p>
+                        </div>
+
+                        <!-- CTA Button -->
+                        <div style="text-align: center; margin: 32px 0 0 0;">
+                            <a href="https://rmirror.io/dashboard"
+                               style="display: inline-block; padding: 14px 32px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
+                                Search Your Notes
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Footer -->
+                    <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                        <p style="color: #8b8680; font-size: 13px; margin: 0;">
+                            Happy note-taking!
+                        </p>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """
+
+        return self.send_email(
+            to_email=user_email,
+            subject="Your handwriting is now searchable",
+            html_content=html_content,
+            to_name=user_name
+        )
+
+    def send_notion_nudge_email(self, user_email: str, user_name: str) -> bool:
+        """Send nudge email to connect Notion integration (E6)"""
+
+        html_content = f"""
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid #e8e4df;">
+                        <h1 style="color: #2d2a2e; font-size: 28px; font-weight: 600; margin: 0 0 8px 0;">Your notes + Notion = magic</h1>
+                        <p style="color: #8b8680; font-size: 16px; margin: 0;">One-click setup, automatic sync</p>
+                    </div>
+
+                    <!-- Content card -->
+                    <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Your notebooks are syncing and your handwriting is being transcribed. Now take it a step further: connect Notion and your handwritten notes will automatically appear in your workspace.</p>
+
+                        <!-- Feature callout -->
+                        <div style="background-color: #faf8f5; padding: 16px; border-radius: 8px; border-left: 3px solid #c85a54; margin-bottom: 28px;">
+                            <p style="color: #2d2a2e; font-size: 15px; margin: 0; font-weight: 600;">What you get with Notion sync:</p>
+                            <p style="color: #8b8680; font-size: 14px; margin: 8px 0 0 0;">Each notebook becomes a Notion page &bull; OCR text synced automatically &bull; Updates in real-time as you write &bull; Organize with your existing Notion workflow</p>
+                        </div>
+
+                        <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 24px 0;">Setup takes about 30 seconds. Just click the button below, authorize rMirror in Notion, and choose which database to sync to. That's it.</p>
+
+                        <!-- CTA Button -->
+                        <div style="text-align: center; margin: 32px 0 0 0;">
+                            <a href="https://rmirror.io/integrations/notion/setup"
+                               style="display: inline-block; padding: 14px 32px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
+                                Connect Notion
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Footer -->
+                    <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                        <p style="color: #8b8680; font-size: 14px; margin: 0 0 8px 0;">
+                            Questions? Just reply to this email.
+                        </p>
+                        <p style="color: #2d2a2e; font-size: 14px; margin: 0; font-weight: 600;">
+                            The rMirror Team
+                        </p>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """
+
+        return self.send_email(
+            to_email=user_email,
+            subject="Your notes + Notion = magic",
+            html_content=html_content,
+            to_name=user_name
+        )
+
+    def send_feedback_request_email(self, user_email: str, user_name: str) -> bool:
+        """Send feedback request email to gather user insights (E7)"""
+
+        html_content = f"""
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid #e8e4df;">
+                        <h1 style="color: #2d2a2e; font-size: 28px; font-weight: 600; margin: 0 0 8px 0;">Quick question</h1>
+                        <p style="color: #8b8680; font-size: 16px; margin: 0;">How's rMirror working for you?</p>
+                    </div>
+
+                    <!-- Content card -->
+                    <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">You've been using rMirror for a bit now, and we'd love to hear how it's going. Your feedback directly shapes what we build next.</p>
+
+                        <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 16px 0; font-weight: 600;">We have 3 quick questions:</p>
+
+                        <!-- Question 1 -->
+                        <div style="background-color: #faf8f5; padding: 16px; border-radius: 8px; margin-bottom: 12px;">
+                            <p style="color: #2d2a2e; font-size: 15px; margin: 0; font-weight: 600;">1. How accurate is the OCR?</p>
+                            <p style="color: #8b8680; font-size: 14px; margin: 8px 0 0 0;">Rate it 1 (unusable) to 5 (near perfect)</p>
+                        </div>
+
+                        <!-- Question 2 -->
+                        <div style="background-color: #faf8f5; padding: 16px; border-radius: 8px; margin-bottom: 12px;">
+                            <p style="color: #2d2a2e; font-size: 15px; margin: 0; font-weight: 600;">2. What feature should we build next?</p>
+                            <p style="color: #8b8680; font-size: 14px; margin: 8px 0 0 0;">Readwise integration, better search, mobile app, team sharing, or something else?</p>
+                        </div>
+
+                        <!-- Question 3 -->
+                        <div style="background-color: #faf8f5; padding: 16px; border-radius: 8px; margin-bottom: 28px;">
+                            <p style="color: #2d2a2e; font-size: 15px; margin: 0; font-weight: 600;">3. Anything confusing or broken?</p>
+                            <p style="color: #8b8680; font-size: 14px; margin: 8px 0 0 0;">No detail is too small. We want to know.</p>
+                        </div>
+
+                        <!-- Emphasis callout -->
+                        <div style="background-color: #faf8f5; padding: 16px; border-radius: 8px; border-left: 3px solid #c85a54; margin-bottom: 28px;">
+                            <p style="color: #2d2a2e; font-size: 15px; margin: 0;">Your feedback directly shapes what we build next. Even a one-line reply helps.</p>
+                        </div>
+
+                        <!-- CTA Button -->
+                        <div style="text-align: center; margin: 32px 0 0 0;">
+                            <a href="mailto:feedback@rmirror.io"
+                               style="display: inline-block; padding: 14px 32px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
+                                Share Your Feedback
+                            </a>
+                            <p style="color: #8b8680; font-size: 13px; margin: 12px 0 0 0;">
+                                Or just reply to this email
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Footer -->
+                    <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e8e4df;">
+                        <p style="color: #8b8680; font-size: 14px; margin: 0 0 8px 0;">
+                            Thank you for being an early user.
+                        </p>
+                        <p style="color: #2d2a2e; font-size: 14px; margin: 0; font-weight: 600;">
+                            The rMirror Team
+                        </p>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """
+
+        return self.send_email(
+            to_email=user_email,
+            subject="Quick question: how's rMirror working for you?",
+            html_content=html_content,
+            to_name=user_name
+        )
+
 
 # Singleton instance
 _email_service: Optional[EmailService] = None

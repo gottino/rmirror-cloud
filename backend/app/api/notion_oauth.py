@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import time
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -273,6 +274,11 @@ async def oauth_callback(
             logger.info(
                 f"Created Notion OAuth integration for user {current_user.id} in workspace {workspace_name}"
             )
+
+        # Track Notion connected milestone
+        if not current_user.notion_connected_at:
+            current_user.notion_connected_at = datetime.utcnow()
+            db.commit()
 
         return OAuthCallbackResponse(
             success=True,

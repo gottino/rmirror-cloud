@@ -167,6 +167,11 @@ async def process_rm_file(
             db.commit()
             db.refresh(notebook)
             logger.info(f"Created notebook with ID: {notebook.id}")
+
+            # Track first notebook milestone
+            if not current_user.first_notebook_synced_at:
+                current_user.first_notebook_synced_at = datetime.utcnow()
+                db.commit()
         else:
             logger.info(f"Found existing notebook: {notebook.id}")
             # Update last_synced_at when syncing existing notebook
@@ -324,6 +329,11 @@ async def process_rm_file(
 
         db.commit()
         db.refresh(page)
+
+        # Track first OCR milestone
+        if ocr_status == OcrStatus.COMPLETED and not current_user.first_ocr_completed_at:
+            current_user.first_ocr_completed_at = datetime.utcnow()
+            db.commit()
 
         # Regenerate combined notebook PDF
         logger.info(f"Regenerating combined PDF for notebook {notebook.id}")

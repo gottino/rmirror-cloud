@@ -65,6 +65,13 @@ class User(Base):
     agent_downloaded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     agent_first_connected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Onboarding milestones
+    first_notebook_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    first_ocr_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    notion_connected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    onboarding_dismissed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    drip_emails_sent: Mapped[str] = mapped_column(String(255), default="", nullable=False, server_default="")
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
