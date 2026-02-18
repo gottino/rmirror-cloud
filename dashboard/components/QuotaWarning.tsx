@@ -1,10 +1,11 @@
 'use client';
 
 import { useAuth } from '@clerk/nextjs';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getQuotaStatus, type QuotaStatus } from '@/lib/api';
 import { AlertTriangle, X } from 'lucide-react';
 import Link from 'next/link';
+import { trackEvent } from '@/lib/analytics';
 
 interface QuotaWarningProps {
   onUpgradeClick?: () => void;
@@ -14,6 +15,7 @@ export function QuotaWarning({ onUpgradeClick }: QuotaWarningProps) {
   const { getToken, isSignedIn } = useAuth();
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const trackedRef = useRef(false);
 
   // Development mode bypass
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
@@ -47,6 +49,12 @@ export function QuotaWarning({ onUpgradeClick }: QuotaWarningProps) {
   // Also check for NaN percentage values
   if (dismissed || !quota || isNaN(quota.percentage_used) || quota.percentage_used < 80) {
     return null;
+  }
+
+  // Track quota warning display (once per mount)
+  if (!trackedRef.current) {
+    trackEvent({ name: 'quota_warning_shown', data: { percent_used: Math.round(quota.percentage_used) } });
+    trackedRef.current = true;
   }
 
   const remaining = quota.limit - quota.used;

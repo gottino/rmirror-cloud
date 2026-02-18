@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from '@clerk/nextjs'
+import Script from 'next/script'
+import { AnalyticsIdentify } from '@/components/AnalyticsIdentify'
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -58,6 +60,15 @@ export default function RootLayout({
       <html lang="en">
         <body className="antialiased">
           {children}
+          <AnalyticsIdentify />
+          {process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID && (
+            <Script
+              async
+              src={`${process.env.NEXT_PUBLIC_UMAMI_URL}/script.js`}
+              data-website-id={process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID}
+              strategy="afterInteractive"
+            />
+          )}
         </body>
       </html>
     </ClerkProvider>

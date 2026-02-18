@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Check, Circle, Download, X, ExternalLink, ChevronDown } from 'lucide-react';
+import { trackEvent } from '@/lib/analytics';
 
 interface OnboardingStep {
   id: number;
@@ -129,6 +130,18 @@ export function OnboardingChecklist({ steps, onDismiss, onDownloadAgent }: Onboa
   const [expandedStepId, setExpandedStepId] = useState<number | null>(
     () => steps.find((s) => s.active && !s.completed)?.id ?? null
   );
+
+  // Track newly completed steps
+  const prevCompletedRef = useRef<Set<number>>(new Set(steps.filter(s => s.completed).map(s => s.id)));
+  useEffect(() => {
+    const prevCompleted = prevCompletedRef.current;
+    for (const step of steps) {
+      if (step.completed && !prevCompleted.has(step.id)) {
+        trackEvent({ name: 'onboarding_step', data: { step: step.title, completed: true } });
+      }
+    }
+    prevCompletedRef.current = new Set(steps.filter(s => s.completed).map(s => s.id));
+  }, [steps]);
 
   const completedCount = steps.filter((s) => s.completed).length;
   const totalCount = steps.length;

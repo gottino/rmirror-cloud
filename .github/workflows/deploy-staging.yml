@@ -78,6 +78,8 @@ jobs:
           CLERK_SECRET_KEY=${{ secrets.STAGING_CLERK_SECRET_KEY }}
           NEXT_PUBLIC_API_URL=https://staging.rmirror.io/api/v1
           NEXT_PUBLIC_ADMIN_USER_IDS=${{ vars.NEXT_PUBLIC_ADMIN_USER_IDS }}
+          NEXT_PUBLIC_UMAMI_URL=${{ secrets.NEXT_PUBLIC_UMAMI_URL }}
+          NEXT_PUBLIC_UMAMI_WEBSITE_ID=${{ secrets.STAGING_UMAMI_WEBSITE_ID }}
           ENVEOF
 
           echo "=== Backend deployment ==="

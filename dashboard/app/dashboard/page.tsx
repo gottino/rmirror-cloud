@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Shield } from 'lucide-react';
+import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Shield, BarChart3 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
 import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, getOnboardingProgress, dismissOnboarding, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus, type SearchResponse, type OnboardingProgress } from '@/lib/api';
 import { QuotaWarning } from '@/components/QuotaWarning';
@@ -13,6 +13,7 @@ import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
 import { SearchResults } from '@/components/SearchResults';
 import { OnboardingChecklist, getDefaultOnboardingSteps } from '@/components/OnboardingChecklist';
+import { trackEvent } from '@/lib/analytics';
 import { memo } from 'react';
 
 // Group notebooks by date
@@ -335,6 +336,7 @@ function DashboardContent() {
         dateFrom: getDateFromRange(effectiveRange),
       });
       setSearchResults(results);
+      trackEvent({ name: 'search_performed', data: { query_length: query.length, results: results.total_results } });
     } catch (err) {
       console.error('Search error:', err);
       setSearchResults(null);
@@ -609,18 +611,36 @@ function DashboardContent() {
             Feedback
           </a>
           {isAdmin && (
-            <Link
-              href="/admin/waitlist"
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
-              style={{
-                color: 'var(--warm-charcoal)',
-                fontSize: '0.925em',
-                fontWeight: 500
-              }}
-            >
-              <Shield className="w-5 h-5" />
-              Admin
-            </Link>
+            <>
+              <Link
+                href="/admin/waitlist"
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
+                style={{
+                  color: 'var(--warm-charcoal)',
+                  fontSize: '0.925em',
+                  fontWeight: 500
+                }}
+              >
+                <Shield className="w-5 h-5" />
+                Admin
+              </Link>
+              {process.env.NEXT_PUBLIC_UMAMI_URL && (
+                <a
+                  href={process.env.NEXT_PUBLIC_UMAMI_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
+                  style={{
+                    color: 'var(--warm-charcoal)',
+                    fontSize: '0.925em',
+                    fontWeight: 500
+                  }}
+                >
+                  <BarChart3 className="w-5 h-5" />
+                  Analytics
+                </a>
+              )}
+            </>
           )}
         </div>
 
@@ -902,6 +922,7 @@ function DashboardContent() {
                                 cursor: 'pointer',
                                 boxShadow: 'var(--shadow-md)'
                               }}
+                              onClick={() => trackEvent({ name: 'notebook_opened', data: { notebook_id: String(notebook.id) } })}
                               onMouseEnter={(e) => {
                                 e.currentTarget.style.boxShadow = 'var(--shadow-lg)';
                                 e.currentTarget.style.transform = 'translateY(-4px)';
@@ -1009,6 +1030,7 @@ function DashboardContent() {
                                 cursor: 'pointer',
                                 boxShadow: 'var(--shadow-sm)'
                               }}
+                              onClick={() => trackEvent({ name: 'notebook_opened', data: { notebook_id: String(notebook.id) } })}
                               onMouseEnter={(e) => {
                                 e.currentTarget.style.boxShadow = 'var(--shadow-md)';
                                 e.currentTarget.style.transform = 'translateX(6px)';

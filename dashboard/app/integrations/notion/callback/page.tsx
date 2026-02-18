@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { notionOAuthCallback } from '@/lib/api';
+import { trackEvent } from '@/lib/analytics';
 
 function NotionCallbackContent() {
   const { getToken } = useAuth();
@@ -39,6 +40,7 @@ function NotionCallbackContent() {
       }
 
       await notionOAuthCallback(token, code, state);
+      trackEvent({ name: 'integration_connected', data: { service: 'notion' } });
       setStatus('success');
 
       // Redirect to setup page after 2 seconds

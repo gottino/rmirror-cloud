@@ -7,6 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { Check, ArrowRight, Github, Zap, Search as SearchIcon, Cloud, Puzzle, CheckCircle } from 'lucide-react';
 import { MacWindowFrame } from '@/components/MacWindowFrame';
+import { trackEvent } from '@/lib/analytics';
 
 export default function LandingPage() {
   return (
@@ -67,6 +68,7 @@ function LandingPageInner() {
       });
 
       if (response.ok) {
+        trackEvent({ name: 'waitlist_signup', data: { source: 'landing_hero' } });
         setShowSuccess(true);
         setEmail('');
       } else {
