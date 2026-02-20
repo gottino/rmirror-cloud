@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_active_user
+from app.auth.clerk import get_clerk_active_user
 from app.database import get_db
 from app.models.user import User
 from app.schemas.user import User as UserSchema
@@ -29,7 +29,7 @@ class LegalStatusResponse(BaseModel):
 
 @router.get("/me", response_model=UserSchema)
 async def get_current_user_info(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
 ):
     """Get current user information."""
     return current_user
@@ -37,7 +37,7 @@ async def get_current_user_info(
 
 @router.get("/legal-status", response_model=LegalStatusResponse)
 async def get_legal_status(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
 ):
     """Check whether the user has accepted the current ToS and Privacy Policy versions."""
     return LegalStatusResponse(
@@ -52,7 +52,7 @@ async def get_legal_status(
 
 @router.post("/accept-terms", response_model=LegalStatusResponse)
 async def accept_terms(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Record acceptance of the current ToS and Privacy Policy."""
