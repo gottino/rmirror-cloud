@@ -7,12 +7,13 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Shield, BarChart3 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
-import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, getOnboardingProgress, dismissOnboarding, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus, type SearchResponse, type OnboardingProgress } from '@/lib/api';
+import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
 import { QuotaWarning } from '@/components/QuotaWarning';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
 import { SearchResults } from '@/components/SearchResults';
 import { OnboardingChecklist, getDefaultOnboardingSteps } from '@/components/OnboardingChecklist';
+import { TermsAcceptanceModal } from '@/components/TermsAcceptanceModal';
 import { trackEvent } from '@/lib/analytics';
 import { memo } from 'react';
 
@@ -164,6 +165,7 @@ function DashboardContent() {
   const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [onboarding, setOnboarding] = useState<OnboardingProgress | null>(null);
+  const [legalStatus, setLegalStatus] = useState<LegalStatus | null>(null);
 
   // Stable callback for closing sidebar (prevents SidebarLogo re-renders)
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -284,6 +286,32 @@ function DashboardContent() {
     }
   };
 
+  const fetchLegalStatus = async () => {
+    if (!effectiveIsSignedIn) return;
+
+    try {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (!token) return;
+
+      const data = await getLegalStatus(token);
+      setLegalStatus(data);
+    } catch (err) {
+      console.error('Error fetching legal status:', err);
+    }
+  };
+
+  const handleAcceptTerms = async () => {
+    const token = isDevelopmentMode
+      ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+      : await getToken();
+    if (!token) return;
+
+    const data = await acceptTerms(token);
+    setLegalStatus(data);
+  };
+
   const handleDismissOnboarding = async () => {
     setOnboarding(prev => prev ? { ...prev, onboarding_dismissed: true } : null);
     if (effectiveIsSignedIn) {
@@ -394,6 +422,7 @@ function DashboardContent() {
     fetchAgentStatus();
     fetchQuota();
     fetchOnboarding();
+    fetchLegalStatus();
   }, [effectiveIsSignedIn]);
 
   // Restore search state from URL params (for back button navigation)
@@ -1135,6 +1164,11 @@ function DashboardContent() {
           onClose={() => setShowQuotaModal(false)}
           quota={quota}
         />
+
+        {/* Terms Acceptance Modal */}
+        {legalStatus && (!legalStatus.tos_accepted || !legalStatus.privacy_accepted) && (
+          <TermsAcceptanceModal onAccept={handleAcceptTerms} />
+        )}
       </div>
     </div>
   );

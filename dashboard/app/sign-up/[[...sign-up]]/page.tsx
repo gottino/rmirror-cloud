@@ -57,11 +57,22 @@ function SignUpGate() {
   // Valid invite: show Clerk SignUp
   if (inviteToken && valid) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--background)' }}>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ background: 'var(--background)' }}>
         <SignUp
           signInUrl="/sign-in"
           initialValues={invitedEmail ? { emailAddress: invitedEmail } : undefined}
         />
+        <p className="text-center text-sm max-w-sm" style={{ color: 'var(--warm-gray)' }}>
+          By creating an account, you agree to our{' '}
+          <Link href="/legal/terms" style={{ color: 'var(--terracotta)' }}>
+            Terms of Service
+          </Link>{' '}
+          and{' '}
+          <Link href="/legal/privacy" style={{ color: 'var(--terracotta)' }}>
+            Privacy Policy
+          </Link>
+          .
+        </p>
       </div>
     );
   }

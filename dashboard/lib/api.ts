@@ -631,3 +631,42 @@ export async function searchNotebooks(
 
   return handleApiResponse<SearchResponse>(response);
 }
+
+// ==================== Legal ====================
+
+export interface LegalStatus {
+  tos_accepted: boolean;
+  privacy_accepted: boolean;
+  tos_version: string | null;
+  privacy_version: string | null;
+  current_tos_version: string;
+  current_privacy_version: string;
+}
+
+/**
+ * Get the user's legal acceptance status
+ */
+export async function getLegalStatus(token: string): Promise<LegalStatus> {
+  const response = await fetch(`${API_URL}/users/legal-status`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  return handleApiResponse<LegalStatus>(response);
+}
+
+/**
+ * Accept the current ToS and Privacy Policy
+ */
+export async function acceptTerms(token: string): Promise<LegalStatus> {
+  const response = await fetch(`${API_URL}/users/accept-terms`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  return handleApiResponse<LegalStatus>(response);
+}

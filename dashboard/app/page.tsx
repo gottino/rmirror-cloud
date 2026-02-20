@@ -938,6 +938,20 @@ function LandingPageInner() {
                   Dashboard
                 </Link>
               )}
+              <Link
+                href="/legal/terms"
+                className="transition-colors"
+                style={{ color: 'var(--warm-gray)' }}
+              >
+                Terms
+              </Link>
+              <Link
+                href="/legal/privacy"
+                className="transition-colors"
+                style={{ color: 'var(--warm-gray)' }}
+              >
+                Privacy
+              </Link>
             </div>
           </div>
 

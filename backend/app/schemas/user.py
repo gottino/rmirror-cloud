@@ -40,6 +40,10 @@ class User(UserBase):
     onboarding_completed_at: datetime | None = None
     agent_downloaded_at: datetime | None = None
     agent_first_connected_at: datetime | None = None
+    tos_accepted_at: datetime | None = None
+    tos_version: str | None = None
+    privacy_accepted_at: datetime | None = None
+    privacy_version: str | None = None
 
     class Config:
         from_attributes = True

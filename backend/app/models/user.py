@@ -72,6 +72,12 @@ class User(Base):
     onboarding_dismissed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
     drip_emails_sent: Mapped[str] = mapped_column(String(255), default="", nullable=False, server_default="")
 
+    # Legal acceptance tracking
+    tos_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    tos_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    privacy_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    privacy_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
