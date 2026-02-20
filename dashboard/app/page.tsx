@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef, Suspense } from 'react';
+import { flushSync } from 'react-dom';
 import { Check, ArrowRight, Github, Zap, Search as SearchIcon, Cloud, Puzzle, CheckCircle } from 'lucide-react';
 import { MacWindowFrame } from '@/components/MacWindowFrame';
 import { trackEvent } from '@/lib/analytics';
@@ -28,6 +29,7 @@ function LandingPageInner() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [showDeletedBanner, setShowDeletedBanner] = useState(false);
   const heroRef = useRef<HTMLDivElement>(null);
+  const heroContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (searchParams.get('deleted') === 'true') {
@@ -50,6 +52,27 @@ function LandingPageInner() {
     handleScroll(); // Run on mount
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  const scrollToWaitlist = (e: React.MouseEvent) => {
+    e.preventDefault();
+    // The hero container's paddingBottom transitions from 0 to 850px over 1s,
+    // which shifts the waitlist element during animation and breaks scrollIntoView.
+    // Fix: temporarily disable the transition so layout settles instantly.
+    const container = heroContainerRef.current;
+    if (container) {
+      container.style.transition = 'none';
+    }
+    flushSync(() => setIsScrolled(true));
+    // Force reflow so the browser computes layout with final paddingBottom
+    document.getElementById('waitlist')?.offsetTop;
+    document.getElementById('waitlist')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Re-enable transition after a frame
+    requestAnimationFrame(() => {
+      if (container) {
+        container.style.transition = '';
+      }
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,6 +133,7 @@ function LandingPageInner() {
         <div className="max-w-7xl mx-auto px-6">
           {/* Desktop layout */}
           <div
+            ref={heroContainerRef}
             className="hidden lg:block relative transition-all duration-1000 ease-out"
             style={{
               minHeight: '400px',
@@ -193,6 +217,7 @@ function LandingPageInner() {
                   <div className="flex flex-col sm:flex-row gap-4">
                     <a
                       href="#waitlist"
+                      onClick={scrollToWaitlist}
                       className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
                       style={{
                         background: 'var(--terracotta)',
@@ -311,6 +336,7 @@ function LandingPageInner() {
                   <div className="flex flex-col sm:flex-row gap-4">
                     <a
                       href="#waitlist"
+                      onClick={scrollToWaitlist}
                       className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
                       style={{
                         background: 'var(--terracotta)',
@@ -659,6 +685,7 @@ function LandingPageInner() {
               </ul>
               <a
                 href="#waitlist"
+                onClick={scrollToWaitlist}
                 className="block w-full text-center px-6 py-3 rounded-lg font-semibold transition-all"
                 style={{
                   background: 'var(--soft-cream)',
@@ -817,8 +844,8 @@ function LandingPageInner() {
 
       {/* Final CTA / Waitlist Form */}
       {!isSignedIn && (
-        <section id="waitlist" className="py-20 lg:py-28" style={{ scrollMarginTop: '2rem' }}>
-          <div className="max-w-lg mx-auto px-6 text-center">
+        <section className="py-20 lg:py-28">
+          <div id="waitlist" className="max-w-lg mx-auto px-6 text-center" style={{ scrollMarginTop: '2rem' }}>
             <h2
               className="text-4xl lg:text-5xl font-bold mb-6"
               style={{ color: 'var(--warm-charcoal)' }}
