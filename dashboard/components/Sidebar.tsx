@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import Image from 'next/image';
-import { HomeIcon, Puzzle, X, MessageSquare, Shield } from 'lucide-react';
+import { HomeIcon, Puzzle, X, MessageSquare, Mail, Shield } from 'lucide-react';
 import { useAuth } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import { getAgentStatus, type AgentStatus } from '@/lib/api';
@@ -152,7 +152,7 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
             Integrations
           </Link>
           <a
-            href="https://github.com/gottino/rmirror-cloud/issues"
+            href="https://gottino.notion.site/30ea6c5dacd0808a9d6df5656e847b4b"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
@@ -163,7 +163,19 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
             }}
           >
             <MessageSquare className="w-5 h-5" />
-            Feedback
+            Beta Feedback
+          </a>
+          <a
+            href="mailto:support@rmirror.io"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
+            style={{
+              color: 'var(--warm-charcoal)',
+              fontSize: '0.925em',
+              fontWeight: 500
+            }}
+          >
+            <Mail className="w-5 h-5" />
+            Support
           </a>
           {(isDevelopmentMode || (userId && ADMIN_USER_IDS.includes(userId))) && (
             <Link

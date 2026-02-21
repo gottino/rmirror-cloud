@@ -956,6 +956,13 @@ function LandingPageInner() {
               >
                 Docs
               </a>
+              <a
+                href="mailto:support@rmirror.io"
+                className="transition-colors"
+                style={{ color: 'var(--warm-gray)' }}
+              >
+                Support
+              </a>
               {isSignedIn && (
                 <Link
                   href="/dashboard"
