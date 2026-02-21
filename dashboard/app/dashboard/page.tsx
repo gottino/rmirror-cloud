@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Shield, BarChart3 } from 'lucide-react';
+import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Mail, Shield, BarChart3 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
 import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
 import { QuotaWarning } from '@/components/QuotaWarning';
@@ -626,7 +626,7 @@ function DashboardContent() {
             Integrations
           </Link>
           <a
-            href="https://github.com/gottino/rmirror-cloud/issues"
+            href="https://gottino.notion.site/30ea6c5dacd0808a9d6df5656e847b4b"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
@@ -637,7 +637,19 @@ function DashboardContent() {
             }}
           >
             <MessageSquare className="w-5 h-5" />
-            Feedback
+            Beta Feedback
+          </a>
+          <a
+            href="mailto:support@rmirror.io"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-[var(--soft-cream)]"
+            style={{
+              color: 'var(--warm-charcoal)',
+              fontSize: '0.925em',
+              fontWeight: 500
+            }}
+          >
+            <Mail className="w-5 h-5" />
+            Support
           </a>
           {isAdmin && (
             <>
