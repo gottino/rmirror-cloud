@@ -14,6 +14,7 @@ import {
   NotionDatabase,
   NotionPage,
 } from '@/lib/api';
+import { trackEvent } from '@/lib/analytics';
 
 function NotionSetupContent() {
   const { getToken } = useAuth();
@@ -88,6 +89,7 @@ function NotionSetupContent() {
       if (!token) return;
 
       await selectNotionDatabase(token, databaseId, databaseType);
+      trackEvent({ name: 'notion_database_configured', data: { action: 'select' } });
       router.push('/integrations?success=true');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to select database');
@@ -115,6 +117,7 @@ function NotionSetupContent() {
         databaseType,
         selectedParentPage || undefined
       );
+      trackEvent({ name: 'notion_database_configured', data: { action: 'create' } });
       router.push('/integrations?success=true');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create database');

@@ -17,6 +17,15 @@ type AnalyticsEvent =
   | { name: 'onboarding_step'; data: { step: string; completed: boolean } }
   | { name: 'search_performed'; data: { query_length: number; results: number } }
   | { name: 'quota_warning_shown'; data: { percent_used: number } }
+  | { name: 'terms_accepted'; data: { tos_version: string } }
+  | { name: 'agent_downloaded'; data?: Record<string, never> }
+  | { name: 'integration_setup_started'; data: { service: string } }
+  | { name: 'notion_database_configured'; data: { action: string } }
+  | { name: 'data_exported'; data?: Record<string, never> }
+  | { name: 'billing_page_viewed'; data?: Record<string, never> }
+  | { name: 'pro_waitlist_signup'; data: { source: string } }
+  | { name: 'onboarding_dismissed'; data?: Record<string, never> }
+  | { name: 'integration_disconnected'; data: { service: string } }
 
 export function trackEvent(event: AnalyticsEvent) {
   if (typeof window !== 'undefined' && window.umami) {

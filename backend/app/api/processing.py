@@ -32,6 +32,7 @@ from app.services.fingerprinting import fingerprint_page
 from app.services.sync_queue import queue_sync
 from app.storage import StorageService
 from app.utils.files import calculate_file_hash
+from app.utils.umami import track_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["processing"])
@@ -172,6 +173,7 @@ async def process_rm_file(
             if not current_user.first_notebook_synced_at:
                 current_user.first_notebook_synced_at = datetime.utcnow()
                 db.commit()
+                await track_event("first_sync_completed", user_id=current_user.id)
         else:
             logger.info(f"Found existing notebook: {notebook.id}")
             # Update last_synced_at when syncing existing notebook
@@ -264,6 +266,11 @@ async def process_rm_file(
                         }
                     )
 
+                await track_event(
+                    "quota_exceeded",
+                    {"used": quota_status["used"], "limit": quota_status["limit"]},
+                    user_id=current_user.id,
+                )
                 logger.info(
                     f"Quota exhausted ({quota_status['used']}/{quota_status['limit']}) - "
                     f"page uploaded without OCR (will be processed when quota resets)"
@@ -334,6 +341,7 @@ async def process_rm_file(
         if ocr_status == OcrStatus.COMPLETED and not current_user.first_ocr_completed_at:
             current_user.first_ocr_completed_at = datetime.utcnow()
             db.commit()
+            await track_event("ocr_completed", {"is_first": True}, user_id=current_user.id)
 
         # Regenerate combined notebook PDF
         logger.info(f"Regenerating combined PDF for notebook {notebook.id}")

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { ExternalLink } from 'lucide-react';
+import { trackEvent } from '@/lib/analytics';
 
 interface TermsAcceptanceModalProps {
   onAccept: () => Promise<void>;
@@ -16,6 +17,7 @@ export function TermsAcceptanceModal({ onAccept }: TermsAcceptanceModalProps) {
     setSubmitting(true);
     try {
       await onAccept();
+      trackEvent({ name: 'terms_accepted', data: { tos_version: '1.0' } });
     } catch (error) {
       console.error('Failed to accept terms:', error);
       setSubmitting(false);

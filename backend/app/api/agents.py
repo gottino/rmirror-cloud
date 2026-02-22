@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth.clerk import get_clerk_active_user
 from app.database import get_db
 from app.models.user import OnboardingState, User
+from app.utils.umami import track_event
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,11 @@ async def register_agent(
     if not current_user.agent_first_connected_at:
         logger.info(f"First agent connection for user {current_user.email}")
         current_user.agent_first_connected_at = now
+        await track_event(
+            "agent_connected",
+            {"version": request.version, "platform": request.platform},
+            user_id=current_user.id,
+        )
 
         # Update onboarding state
         if current_user.onboarding_state in [

@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
 from app.models.user import User
 from app.utils.email import get_email_service
+from app.utils.umami import track_event
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,8 @@ async def handle_user_created(data: dict, db: Session):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    await track_event("account_created", {"is_beta": new_user.is_beta_user or False}, user_id=new_user.id)
 
     print(f"Created user: {new_user.email} (Clerk ID: {clerk_user_id})")
 

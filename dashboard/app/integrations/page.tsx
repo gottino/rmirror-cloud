@@ -12,6 +12,7 @@ import {
   deleteIntegration,
   IntegrationConfig,
 } from '@/lib/api';
+import { trackEvent } from '@/lib/analytics';
 
 export default function IntegrationsPage() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
@@ -68,6 +69,7 @@ export default function IntegrationsPage() {
       console.log('Getting Notion OAuth URL...');
       const { authorization_url } = await getNotionOAuthUrl(token);
       console.log('Redirecting to:', authorization_url);
+      trackEvent({ name: 'integration_setup_started', data: { service: 'notion' } });
       window.location.href = authorization_url;
     } catch (err) {
       console.error('OAuth error:', err);
@@ -88,6 +90,7 @@ export default function IntegrationsPage() {
       if (!token) return;
 
       await deleteIntegration(token, targetName);
+      trackEvent({ name: 'integration_disconnected', data: { service: targetName } });
       await loadIntegrations();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to disconnect');

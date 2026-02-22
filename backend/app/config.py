@@ -128,6 +128,10 @@ class Settings(BaseSettings):
     # Integration Encryption
     integration_master_key: Optional[str] = None
 
+    # Umami Analytics (optional - backend event tracking)
+    umami_url: Optional[str] = None
+    umami_website_id: Optional[str] = None
+
     # Beta / Admin
     admin_user_ids: str = ""  # comma-separated Clerk user IDs
     invite_token_expiry_days: int = 7

@@ -209,6 +209,7 @@ function DashboardContent() {
         await trackAgentDownload(token);
       }
     }
+    trackEvent({ name: 'agent_downloaded' });
     window.location.href = 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.5.0/rMirror-1.5.0.dmg';
   };
 
@@ -314,6 +315,7 @@ function DashboardContent() {
 
   const handleDismissOnboarding = async () => {
     setOnboarding(prev => prev ? { ...prev, onboarding_dismissed: true } : null);
+    trackEvent({ name: 'onboarding_dismissed' });
     if (effectiveIsSignedIn) {
       const token = isDevelopmentMode
         ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''

@@ -7,6 +7,7 @@ import { CheckCircle, Menu } from 'lucide-react';
 import { getQuotaStatus, type QuotaStatus } from '@/lib/api';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import Sidebar from '@/components/Sidebar';
+import { trackEvent } from '@/lib/analytics';
 
 export default function BillingPage() {
   const { getToken, isSignedIn } = useAuth();
@@ -46,12 +47,14 @@ export default function BillingPage() {
 
   useEffect(() => {
     fetchQuota();
+    trackEvent({ name: 'billing_page_viewed' });
   }, [effectiveIsSignedIn]);
 
   const handleWaitlistSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     // TODO: Send to waitlist API endpoint
     console.log('Waitlist signup:', email);
+    trackEvent({ name: 'pro_waitlist_signup', data: { source: 'billing_page' } });
     setSubmitted(true);
   };
 

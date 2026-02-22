@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Settings, Download, Trash2, AlertTriangle, Menu, Loader2 } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
+import { trackEvent } from '@/lib/analytics';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
 
@@ -82,6 +83,7 @@ export default function SettingsPage() {
         throw new Error('Export failed');
       }
 
+      trackEvent({ name: 'data_exported' });
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
