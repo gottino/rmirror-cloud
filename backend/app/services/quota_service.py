@@ -23,6 +23,18 @@ QUOTA_LIMITS = {
     SubscriptionTier.ENTERPRISE: -1,  # Unlimited
 }
 
+BETA_QUOTA_LIMIT = 200  # Beta users get 200 pages/month on free tier
+
+
+def _get_quota_limit(db: Session, user_id: int, tier: str) -> int:
+    """Determine quota limit based on tier and beta status."""
+    limit = QUOTA_LIMITS.get(tier, QUOTA_LIMITS[SubscriptionTier.FREE])
+    if tier == SubscriptionTier.FREE:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user and user.is_beta_user:
+            limit = BETA_QUOTA_LIMIT
+    return limit
+
 
 class QuotaExceededError(Exception):
     """Raised when user has exhausted their quota."""
@@ -80,9 +92,9 @@ def get_or_create_quota(
     if not subscription:
         raise ValueError(f"No subscription found for user {user_id}")
 
-    # Determine quota limit based on tier
+    # Determine quota limit based on tier and beta status
     tier = subscription.tier
-    limit = QUOTA_LIMITS.get(tier, QUOTA_LIMITS[SubscriptionTier.FREE])
+    limit = _get_quota_limit(db, user_id, tier)
 
     # Calculate reset date (30 days from now)
     now = datetime.utcnow()
@@ -314,6 +326,11 @@ def reset_quota(
     # Reset usage counter
     quota.used = 0
 
+    # Re-apply correct limit based on current tier and beta status
+    subscription = db.query(Subscription).filter(Subscription.user_id == user_id).first()
+    if subscription:
+        quota.limit = _get_quota_limit(db, user_id, subscription.tier)
+
     # Update period dates
     now = datetime.utcnow()
     quota.period_start = now
@@ -377,6 +394,8 @@ def get_quota_status(
     """
     quota = get_or_create_quota(db, user_id, quota_type)
 
+    user = db.query(User).filter(User.id == user_id).first()
+
     return {
         "limit": quota.limit,
         "used": quota.used,
@@ -387,6 +406,7 @@ def get_quota_status(
         "reset_at": quota.reset_at.isoformat(),
         "period_start": quota.period_start.isoformat(),
         "quota_type": quota.quota_type,
+        "is_beta": user.is_beta_user if user else False,
     }
 
 
@@ -417,8 +437,8 @@ def update_quota_limit(
     """
     quota = get_or_create_quota(db, user_id, quota_type)
 
-    # Get new limit based on tier
-    new_limit = QUOTA_LIMITS.get(new_tier, QUOTA_LIMITS[SubscriptionTier.FREE])
+    # Get new limit based on tier and beta status
+    new_limit = _get_quota_limit(db, user_id, new_tier)
 
     # Update limit
     quota.limit = new_limit

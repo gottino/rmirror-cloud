@@ -44,6 +44,8 @@ class User(UserBase):
     tos_version: str | None = None
     privacy_accepted_at: datetime | None = None
     privacy_version: str | None = None
+    is_beta_user: bool = False
+    beta_enrolled_at: datetime | None = None
 
     class Config:
         from_attributes = True

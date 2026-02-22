@@ -392,6 +392,7 @@ export interface QuotaStatus {
   is_exhausted: boolean;
   reset_at: string;
   period_start: string;
+  is_beta?: boolean;
 }
 
 /**

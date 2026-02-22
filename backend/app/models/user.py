@@ -78,6 +78,10 @@ class User(Base):
     privacy_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     privacy_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
+    # Beta program
+    is_beta_user: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
+    beta_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False

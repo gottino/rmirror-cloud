@@ -3,7 +3,7 @@
 import { useAuth } from '@clerk/nextjs';
 import UserMenu from '@/components/UserMenu';
 import { useEffect, useState } from 'react';
-import { CheckCircle, Mail, AlertTriangle, Menu } from 'lucide-react';
+import { CheckCircle, Menu } from 'lucide-react';
 import { getQuotaStatus, type QuotaStatus } from '@/lib/api';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import Sidebar from '@/components/Sidebar';
@@ -126,7 +126,7 @@ export default function BillingPage() {
               <div className="flex items-start justify-between mb-4">
                 <div>
                   <h2 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--warm-charcoal)', marginBottom: '0.25rem' }}>
-                    Free Tier
+                    {quota?.is_beta ? 'Beta Tier' : 'Free Tier'}
                   </h2>
                   <p style={{ fontSize: '0.925em', color: 'var(--warm-gray)' }}>
                     Your current subscription
@@ -150,7 +150,7 @@ export default function BillingPage() {
               {/* Features */}
               <div className="space-y-2 mb-6">
                 {[
-                  '30 pages/month OCR transcription',
+                  quota?.is_beta ? '200 pages/month OCR transcription' : '30 pages/month OCR transcription',
                   'Unlimited notebook syncing',
                   'PDF viewing in dashboard',
                   'Basic integrations (up to quota)'
@@ -277,38 +277,25 @@ export default function BillingPage() {
               )}
             </div>
 
-            {/* Beta tester note */}
-            <div
-              className="p-6 rounded-lg"
-              style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
-            >
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--amber-gold)' }} />
-                <div>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--warm-charcoal)', marginBottom: '0.5rem' }}>
-                    Beta Tester? Need More Pages?
-                  </h3>
-                  <p style={{ fontSize: '0.925em', color: 'var(--warm-gray)', marginBottom: '0.75rem' }}>
-                    If you're actively testing rMirror and need increased quota before Pro tier launches,
-                    we can manually upgrade you.
-                  </p>
-                  <a
-                    href="mailto:support@rmirror.io?subject=Beta%20Tester%20-%20Quota%20Increase%20Request"
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-colors"
-                    style={{
-                      backgroundColor: 'var(--primary)',
-                      color: 'var(--primary-foreground)',
-                      fontSize: '0.875em',
-                      fontWeight: 500,
-                      textDecoration: 'none'
-                    }}
-                  >
-                    <Mail className="w-4 h-4" />
-                    Contact Support
-                  </a>
+            {/* Beta note */}
+            {quota?.is_beta && (
+              <div
+                className="p-6 rounded-lg"
+                style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
+              >
+                <div className="flex items-start gap-3">
+                  <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--sage-green)' }} />
+                  <div>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--warm-charcoal)', marginBottom: '0.5rem' }}>
+                      Beta Program
+                    </h3>
+                    <p style={{ fontSize: '0.925em', color: 'var(--warm-gray)' }}>
+                      You're part of our beta program — enjoy 200 pages/month as a thank you for being an early adopter!
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Quota reset info */}
             {quota && (

@@ -254,7 +254,7 @@ function LandingPageInner() {
                   textAlign: isScrolled ? 'center' : 'left'
                 }}
               >
-                Early beta &bull; Free tier: 30 pages of OCR per month
+                Early beta &bull; Beta special: 200 pages of OCR per month
               </p>
             </div>
 
@@ -367,7 +367,7 @@ function LandingPageInner() {
               </div>
 
               <p className="mt-6 text-sm" style={{ color: 'var(--warm-gray)' }}>
-                Early beta &bull; Free tier: 30 pages of OCR per month
+                Early beta &bull; Beta special: 200 pages of OCR per month
               </p>
             </div>
 
@@ -653,17 +653,23 @@ function LandingPageInner() {
           </div>
 
           <div className="grid md:grid-cols-2 gap-8">
-            {/* Free Tier */}
+            {/* Beta Tier */}
             <div
-              className="p-8 rounded-xl border-2"
+              className="p-8 rounded-xl border-2 relative"
               style={{
                 background: 'white',
                 borderColor: 'var(--border)',
                 boxShadow: 'var(--shadow-sm)'
               }}
             >
+              <div
+                className="absolute -top-4 left-1/2 transform -translate-x-1/2 px-4 py-1 rounded-full text-sm font-semibold text-white"
+                style={{ background: 'var(--amber-gold)' }}
+              >
+                Beta Special
+              </div>
               <h3 className="text-2xl font-bold mb-2" style={{ color: 'var(--warm-charcoal)' }}>
-                Free
+                Beta
               </h3>
               <div className="mb-6">
                 <span className="text-4xl font-bold" style={{ color: 'var(--warm-charcoal)' }}>$0</span>
@@ -671,7 +677,6 @@ function LandingPageInner() {
               </div>
               <ul className="space-y-3 mb-8">
                 {[
-                  '30 pages OCR per month',
                   'Automatic sync',
                   'Web access',
                   'Basic integrations',
@@ -682,6 +687,13 @@ function LandingPageInner() {
                     <span style={{ color: 'var(--warm-charcoal)' }}>{feature}</span>
                   </li>
                 ))}
+                <li className="flex items-center gap-2">
+                  <Check className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--sage-green)' }} />
+                  <span style={{ color: 'var(--warm-charcoal)' }}>
+                    <s style={{ color: 'var(--warm-gray)' }}>30</s>{' '}
+                    <strong style={{ color: 'var(--terracotta)' }}>200</strong> pages OCR per month
+                  </span>
+                </li>
               </ul>
               <a
                 href="#waitlist"
@@ -817,8 +829,8 @@ function LandingPageInner() {
                 answer: 'Yes! You can download all your notebooks and OCR text at any time. Integrations with Notion and Readwise give you additional export options. Plus, being open source means you have full control over your data.'
               },
               {
-                question: 'What happens when I hit the free tier limit?',
-                answer: 'You can still upload notebooks and access everything you\'ve already uploaded. New pages won\'t be OCR\'d until your quota resets (monthly). You can upgrade to Pro for unlimited OCR anytime.'
+                question: 'What happens when I hit my OCR limit?',
+                answer: 'You can still upload notebooks and access everything you\'ve already uploaded. New pages won\'t be OCR\'d until your quota resets (monthly). Beta testers get 200 pages/month — plenty for most users.'
               }
             ].map((faq, index) => (
               <div

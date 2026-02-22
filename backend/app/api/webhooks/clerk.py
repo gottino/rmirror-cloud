@@ -165,6 +165,7 @@ async def handle_user_created(data: dict, db: Session):
     full_name = f"{first_name} {last_name}".strip() or primary_email.split("@")[0]
 
     # Create new user
+    settings = get_settings()
     new_user = User(
         email=primary_email,
         full_name=full_name,
@@ -173,6 +174,11 @@ async def handle_user_created(data: dict, db: Session):
         is_active=True,
         created_at=datetime.utcnow(),
     )
+
+    # Flag as beta user if beta signups are enabled
+    if settings.beta_signup_enabled:
+        new_user.is_beta_user = True
+        new_user.beta_enrolled_at = datetime.utcnow()
 
     db.add(new_user)
     db.commit()

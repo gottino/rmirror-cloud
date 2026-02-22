@@ -28,6 +28,7 @@ class QuotaStatusResponse(BaseModel):
     reset_at: str
     period_start: str
     quota_type: str
+    is_beta: bool = False
 
 
 @router.get("/status", response_model=QuotaStatusResponse)
