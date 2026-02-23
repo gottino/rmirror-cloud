@@ -168,7 +168,7 @@ class CloudSync:
 
         return {"Authorization": f"Bearer {self.config.api.token}"}
 
-    def _parse_metadata_file(self, file_path: Path) -> dict:
+    def _parse_metadata_file(self, file_path: Path) -> Optional[dict]:
         """
         Parse a .metadata file and convert to backend format.
 
@@ -176,10 +176,16 @@ class CloudSync:
             file_path: Path to the .metadata file
 
         Returns:
-            Dictionary with metadata in backend format
+            Dictionary with metadata in backend format, or None if not a syncable type
         """
         with open(file_path) as f:
             metadata = json.load(f)
+
+        # Skip templates - they are not user notebooks
+        doc_type = metadata.get("type", "DocumentType")
+        if doc_type == "TemplateType":
+            logger.debug(f"Skipping template: {metadata.get('visibleName', file_path.stem)}")
+            return None
 
         # Extract notebook UUID from filename
         notebook_uuid = file_path.stem
@@ -207,7 +213,7 @@ class CloudSync:
         metadata_request = {
             "notebook_uuid": notebook_uuid,
             "visible_name": metadata.get("visibleName", "Untitled"),
-            "document_type": doc_type_map.get(metadata.get("type"), "notebook"),
+            "document_type": doc_type_map.get(doc_type, "notebook"),
         }
 
         # Add optional fields
@@ -355,8 +361,10 @@ class CloudSync:
                 logger.info(f"📤 Starting upload of .metadata file: {file_path.name}")
 
                 try:
-                    # Parse metadata file
+                    # Parse metadata file (returns None for templates)
                     metadata_request = self._parse_metadata_file(file_path)
+                    if metadata_request is None:
+                        return {"success": True, "skipped": True, "reason": "template"}
 
                     logger.debug(f"POST {self.config.api.url}/processing/metadata/update")
                     logger.debug(f"Metadata: {metadata_request}")

@@ -168,8 +168,8 @@ class MetadataSync:
             uuid = metadata_file.stem
             doc_type = data.get("type", "DocumentType")
 
-            # Skip folders
-            if doc_type == "CollectionType":
+            # Skip folders and templates
+            if doc_type in ("CollectionType", "TemplateType"):
                 return None
 
             # Skip PDFs and EPUBs

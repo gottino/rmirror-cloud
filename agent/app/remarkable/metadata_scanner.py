@@ -88,8 +88,8 @@ class MetadataScanner:
             uuid = metadata_file.stem
             doc_type = data.get("type", "DocumentType")
 
-            # Skip folders entirely
-            if doc_type == "CollectionType":
+            # Skip folders and templates entirely
+            if doc_type in ("CollectionType", "TemplateType"):
                 return None
 
             # Skip PDFs and EPUBs (they have .pdf or .epub files)
