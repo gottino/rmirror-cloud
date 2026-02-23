@@ -131,6 +131,8 @@ jobs:
                update_env backend/.env NOTION_CLIENT_SECRET \"$NOTION_CLIENT_SECRET\" && \
                update_env backend/.env NOTION_REDIRECT_URI \"$NOTION_REDIRECT_URI\" && \
                update_env backend/.env ADMIN_USER_IDS \"$ADMIN_USER_IDS\" && \
+               update_env backend/.env UMAMI_URL \"$NEXT_PUBLIC_UMAMI_URL\" && \
+               update_env backend/.env UMAMI_WEBSITE_ID \"$NEXT_PUBLIC_UMAMI_WEBSITE_ID\" && \
 
                # Run deploy script
                ./backend/scripts/deploy.sh main"
