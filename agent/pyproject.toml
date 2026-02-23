@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rmirror-agent"
-version = "1.5.0"
+version = "1.5.1"
 description = "Mac background service for syncing reMarkable tablets to rMirror Cloud"
 authors = ["rMirror Cloud <support@rmirror.cloud>"]
 license = "AGPL-3.0"

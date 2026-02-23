@@ -210,7 +210,7 @@ function DashboardContent() {
       }
     }
     trackEvent({ name: 'agent_downloaded' });
-    window.location.href = 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.5.0/rMirror-1.5.0.dmg';
+    window.location.href = 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.5.1/rMirror-1.5.1.dmg';
   };
 
   const fetchNotebooks = async () => {
