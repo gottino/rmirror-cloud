@@ -102,33 +102,49 @@ async def get_clerk_user(
     )
 
     token = credentials.credentials
+    settings = get_settings()
 
     try:
-        # Get JWKS client for signature verification
-        jwks_client = get_jwks_client()
+        # Check if this is an agent token (HS256, signed with our secret key)
+        # by peeking at the header before full verification
+        try:
+            header = jwt.get_unverified_header(token)
+        except jwt.DecodeError:
+            raise credentials_exception
 
-        if jwks_client:
-            # Production mode: Verify JWT signature using Clerk's JWKS
-            try:
-                signing_key = jwks_client.get_signing_key_from_jwt(token)
-                decoded = jwt.decode(
-                    token,
-                    signing_key.key,
-                    algorithms=["RS256"],
-                    options={"verify_aud": False}  # Clerk tokens don't always have audience
-                )
-            except jwt.exceptions.PyJWKClientError as e:
-                logger.error(f"JWKS client error: {e}")
-                raise credentials_exception
-            except jwt.exceptions.InvalidSignatureError:
-                logger.warning("JWT signature verification failed - possible token tampering")
-                raise credentials_exception
-        else:
-            # Development mode only: Decode without signature verification but still check expiration
+        if header.get("alg") == "HS256":
+            # Agent token: verify with our secret key
             decoded = jwt.decode(
                 token,
-                options={"verify_signature": False, "verify_exp": True},
+                settings.secret_key,
+                algorithms=[settings.algorithm],
             )
+        else:
+            # Clerk token: verify with JWKS
+            jwks_client = get_jwks_client()
+
+            if jwks_client:
+                # Production mode: Verify JWT signature using Clerk's JWKS
+                try:
+                    signing_key = jwks_client.get_signing_key_from_jwt(token)
+                    decoded = jwt.decode(
+                        token,
+                        signing_key.key,
+                        algorithms=["RS256"],
+                        options={"verify_aud": False}  # Clerk tokens don't always have audience
+                    )
+                except jwt.exceptions.PyJWKClientError as e:
+                    logger.error(f"JWKS client error: {e}")
+                    raise credentials_exception
+                except jwt.exceptions.InvalidSignatureError:
+                    logger.warning("JWT signature verification failed - possible token tampering")
+                    raise credentials_exception
+            else:
+                # Development mode only: Decode without signature verification but still check expiration
+                decoded = jwt.decode(
+                    token,
+                    options={"verify_signature": False, "verify_exp": True},
+                )
 
         # Extract user ID from the token (could be Clerk ID or regular user ID)
         sub = decoded.get("sub")
