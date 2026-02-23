@@ -32,6 +32,7 @@ for package in packages_to_collect:
 # Collect all Flask templates and web UI files
 web_datas = [
     (str(agent_dir / 'app' / 'web' / 'templates'), 'app/web/templates'),
+    (str(agent_dir / 'app' / 'web' / 'static'), 'app/web/static'),
 ]
 
 # Collect resources (icons)
