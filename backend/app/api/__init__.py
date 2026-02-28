@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api import (
     account,
+    admin,
     agents,
     auth,
     integrations,
@@ -38,5 +39,6 @@ api_router.include_router(notion_oauth.router, prefix="/integrations", tags=["in
 api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
 api_router.include_router(todos.router, prefix="/todos", tags=["todos"])
 api_router.include_router(waitlist.router, tags=["waitlist"])
+api_router.include_router(admin.router, tags=["admin"])
 api_router.include_router(account.router, prefix="/account", tags=["account"])
 api_router.include_router(clerk_webhook.router, prefix="/webhooks/clerk", tags=["webhooks"])

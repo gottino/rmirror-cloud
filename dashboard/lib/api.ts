@@ -604,6 +604,69 @@ export async function approveWaitlistBulk(
   return handleApiResponse<{ approved: number; errors: Array<{ id: number; error: string }> }>(response);
 }
 
+// ==================== Admin Users ====================
+
+export interface AdminUser {
+  id: number;
+  email: string;
+  full_name: string | null;
+  created_at: string;
+  subscription_tier: string;
+  onboarding_state: string;
+  agent_downloaded_at: string | null;
+  agent_first_connected_at: string | null;
+  first_notebook_synced_at: string | null;
+  first_ocr_completed_at: string | null;
+  notion_connected_at: string | null;
+  notebook_count: number;
+  page_count: number;
+  quota_used: number;
+  quota_limit: number;
+  last_active_at: string | null;
+}
+
+export interface AdminUsersStats {
+  total_users: number;
+  agent_downloaded: number;
+  agent_connected: number;
+  first_notebook_synced: number;
+  first_ocr_completed: number;
+  notion_connected: number;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[];
+  total: number;
+  stats: AdminUsersStats;
+}
+
+/**
+ * Get all users with onboarding and usage data (admin only)
+ */
+export async function getAdminUsers(
+  token: string,
+  skip?: number,
+  limit?: number,
+  sortBy?: string,
+  sortDir?: string
+): Promise<AdminUsersResponse> {
+  const params = new URLSearchParams();
+  if (skip) params.set('skip', skip.toString());
+  if (limit) params.set('limit', limit.toString());
+  if (sortBy) params.set('sort_by', sortBy);
+  if (sortDir) params.set('sort_dir', sortDir);
+
+  const response = await fetch(`${API_URL}/admin/users?${params}`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+
+  if (response.status === 403) {
+    throw new Error('Admin access required');
+  }
+
+  return handleApiResponse<AdminUsersResponse>(response);
+}
+
 // ==================== Search ====================
 
 export async function searchNotebooks(
