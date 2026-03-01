@@ -5,10 +5,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef, Suspense } from 'react';
-import { flushSync } from 'react-dom';
 import { Check, ArrowRight, Github, Zap, Search as SearchIcon, Cloud, Puzzle, CheckCircle } from 'lucide-react';
 import { MacWindowFrame } from '@/components/MacWindowFrame';
-import { trackEvent } from '@/lib/analytics';
 
 export default function LandingPage() {
   return (
@@ -21,15 +19,9 @@ export default function LandingPage() {
 function LandingPageInner() {
   const { isSignedIn } = useAuth();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [showError, setShowError] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [showDeletedBanner, setShowDeletedBanner] = useState(false);
   const heroRef = useRef<HTMLDivElement>(null);
-  const heroContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (searchParams.get('deleted') === 'true') {
@@ -52,57 +44,6 @@ function LandingPageInner() {
     handleScroll(); // Run on mount
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
-
-  const scrollToWaitlist = (e: React.MouseEvent) => {
-    e.preventDefault();
-    // The hero container's paddingBottom transitions from 0 to 850px over 1s,
-    // which shifts the waitlist element during animation and breaks scrollIntoView.
-    // Fix: temporarily disable the transition so layout settles instantly.
-    const container = heroContainerRef.current;
-    if (container) {
-      container.style.transition = 'none';
-    }
-    flushSync(() => setIsScrolled(true));
-    // Force reflow so the browser computes layout with final paddingBottom
-    document.getElementById('waitlist')?.offsetTop;
-    document.getElementById('waitlist')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    // Re-enable transition after a frame
-    requestAnimationFrame(() => {
-      if (container) {
-        container.style.transition = '';
-      }
-    });
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setShowSuccess(false);
-    setShowError(false);
-    setIsSubmitting(true);
-
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
-      const response = await fetch(`${apiUrl}/waitlist`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, name: name || undefined }),
-      });
-
-      if (response.ok) {
-        trackEvent({ name: 'waitlist_signup', data: { source: 'landing_hero' } });
-        setShowSuccess(true);
-        setEmail('');
-      } else {
-        setShowError(true);
-      }
-    } catch (error) {
-      setShowError(true);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--background)' }}>
@@ -133,7 +74,6 @@ function LandingPageInner() {
         <div className="max-w-7xl mx-auto px-6">
           {/* Desktop layout */}
           <div
-            ref={heroContainerRef}
             className="hidden lg:block relative transition-all duration-1000 ease-out"
             style={{
               minHeight: '400px',
@@ -215,9 +155,8 @@ function LandingPageInner() {
                   </Link>
                 ) : (
                   <div className="flex flex-col sm:flex-row gap-4">
-                    <a
-                      href="#waitlist"
-                      onClick={scrollToWaitlist}
+                    <Link
+                      href="/sign-up"
                       className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
                       style={{
                         background: 'var(--terracotta)',
@@ -225,9 +164,9 @@ function LandingPageInner() {
                         boxShadow: 'var(--shadow-md)'
                       }}
                     >
-                      Request Early Access
+                      Sign Up Free
                       <ArrowRight className="w-5 h-5" />
-                    </a>
+                    </Link>
                     <a
                       href="https://github.com/gottino/rmirror-cloud"
                       target="_blank"
@@ -334,9 +273,8 @@ function LandingPageInner() {
                   </Link>
                 ) : (
                   <div className="flex flex-col sm:flex-row gap-4">
-                    <a
-                      href="#waitlist"
-                      onClick={scrollToWaitlist}
+                    <Link
+                      href="/sign-up"
                       className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
                       style={{
                         background: 'var(--terracotta)',
@@ -344,9 +282,9 @@ function LandingPageInner() {
                         boxShadow: 'var(--shadow-md)'
                       }}
                     >
-                      Request Early Access
+                      Sign Up Free
                       <ArrowRight className="w-5 h-5" />
-                    </a>
+                    </Link>
                     <a
                       href="https://github.com/gottino/rmirror-cloud"
                       target="_blank"
@@ -695,9 +633,8 @@ function LandingPageInner() {
                   </span>
                 </li>
               </ul>
-              <a
-                href="#waitlist"
-                onClick={scrollToWaitlist}
+              <Link
+                href="/sign-up"
                 className="block w-full text-center px-6 py-3 rounded-lg font-semibold transition-all"
                 style={{
                   background: 'var(--soft-cream)',
@@ -705,8 +642,8 @@ function LandingPageInner() {
                   border: '2px solid var(--border)'
                 }}
               >
-                Request Access
-              </a>
+                Sign Up Free
+              </Link>
             </div>
 
             {/* Pro Tier */}
@@ -854,80 +791,24 @@ function LandingPageInner() {
         </div>
       </section>
 
-      {/* Final CTA / Waitlist Form */}
+      {/* Final CTA */}
       {!isSignedIn && (
         <section className="py-20 lg:py-28">
-          <div id="waitlist" className="max-w-lg mx-auto px-6 text-center" style={{ scrollMarginTop: '2rem' }}>
-            <h2
-              className="text-4xl lg:text-5xl font-bold mb-6"
-              style={{ color: 'var(--warm-charcoal)' }}
-            >
+          <div className="max-w-2xl mx-auto text-center px-4">
+            <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: 'var(--warm-charcoal)', fontFamily: 'var(--font-display)' }}>
               Ready to Unlock Your Notes?
             </h2>
-            <p className="text-xl mb-10" style={{ color: 'var(--warm-gray)' }}>
-              rMirror is in early beta. Request access and we'll send you an invite.
+            <p className="text-lg mb-8" style={{ color: 'var(--warm-gray)' }}>
+              Sign up for free and start syncing your reMarkable notebooks in minutes.
             </p>
-
-            {!showSuccess ? (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <input
-                  type="text"
-                  placeholder="Name (optional)"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full px-5 py-3.5 rounded-lg text-base"
-                  style={{
-                    background: 'white',
-                    border: '2px solid var(--border)',
-                    color: 'var(--warm-charcoal)',
-                  }}
-                />
-                <input
-                  type="email"
-                  placeholder="Email address"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className="w-full px-5 py-3.5 rounded-lg text-base"
-                  style={{
-                    background: 'white',
-                    border: '2px solid var(--border)',
-                    color: 'var(--warm-charcoal)',
-                  }}
-                />
-                <button
-                  type="submit"
-                  disabled={isSubmitting || !email}
-                  className="w-full py-3.5 rounded-lg text-lg font-semibold transition-all hover:scale-105"
-                  style={{
-                    background: 'var(--terracotta)',
-                    color: 'white',
-                    boxShadow: 'var(--shadow-md)',
-                    opacity: isSubmitting || !email ? 0.6 : 1,
-                  }}
-                >
-                  {isSubmitting ? 'Requesting...' : 'Request Early Access'}
-                </button>
-                {showError && (
-                  <p className="text-sm" style={{ color: 'var(--terracotta)' }}>
-                    Something went wrong. Please try again.
-                  </p>
-                )}
-              </form>
-            ) : (
-              <div
-                className="p-6 rounded-xl"
-                style={{ background: 'var(--soft-cream)', border: '1px solid var(--sage-green)' }}
-              >
-                <CheckCircle className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--sage-green)' }} />
-                <p className="text-lg font-semibold mb-1" style={{ color: 'var(--warm-charcoal)' }}>
-                  You're on the list!
-                </p>
-                <p style={{ color: 'var(--warm-gray)' }}>
-                  We'll email you when your invite is ready.
-                </p>
-              </div>
-            )}
+            <Link
+              href="/sign-up"
+              className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-lg text-lg font-semibold transition-all hover:scale-105"
+              style={{ background: 'var(--terracotta)', color: 'white', boxShadow: 'var(--shadow-md)' }}
+            >
+              Sign Up Free
+              <ArrowRight className="w-5 h-5" />
+            </Link>
           </div>
         </section>
       )}
