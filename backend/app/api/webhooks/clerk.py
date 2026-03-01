@@ -9,11 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from svix.webhooks import Webhook, WebhookVerificationError
 
+from app.api.users import CURRENT_PRIVACY_VERSION, CURRENT_TOS_VERSION
 from app.config import get_settings
 from app.database import get_db
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
 from app.models.user import User
-from app.api.users import CURRENT_TOS_VERSION, CURRENT_PRIVACY_VERSION
 from app.utils.email import get_email_service
 from app.utils.umami import track_event
 
