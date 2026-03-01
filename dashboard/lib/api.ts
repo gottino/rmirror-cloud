@@ -185,6 +185,29 @@ export async function getAgentStatus(token: string): Promise<AgentStatus> {
   return response.json();
 }
 
+// ==================== Agent Version ====================
+
+export interface AgentVersionInfo {
+  version: string;
+  platforms: {
+    macos?: {
+      url: string;
+      min_os: string;
+    };
+    windows?: {
+      url: string;
+    };
+  };
+}
+
+/**
+ * Get latest agent version and download URLs (public, no auth needed)
+ */
+export async function getLatestAgentVersion(): Promise<AgentVersionInfo> {
+  const response = await fetch(`${API_URL}/agents/latest-version`);
+  return handleApiResponse<AgentVersionInfo>(response);
+}
+
 // ==================== Integrations ====================
 
 export interface IntegrationConfig {

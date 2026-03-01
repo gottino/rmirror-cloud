@@ -7,7 +7,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Mail, Shield, BarChart3 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
-import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type QuotaStatus, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
+import SetupWizard from './components/SetupWizard';
+import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, getLatestAgentVersion, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type AgentVersionInfo, type QuotaStatus, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
 import { QuotaWarning } from '@/components/QuotaWarning';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
@@ -166,6 +167,8 @@ function DashboardContent() {
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [onboarding, setOnboarding] = useState<OnboardingProgress | null>(null);
   const [legalStatus, setLegalStatus] = useState<LegalStatus | null>(null);
+  const [agentVersionInfo, setAgentVersionInfo] = useState<AgentVersionInfo | null>(null);
+  const [wizardCompleted, setWizardCompleted] = useState(false);
 
   // Stable callback for closing sidebar (prevents SidebarLogo re-renders)
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -210,7 +213,9 @@ function DashboardContent() {
       }
     }
     trackEvent({ name: 'agent_downloaded' });
-    window.location.href = 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.5.2/rMirror-1.5.2.dmg';
+    const downloadUrl = agentVersionInfo?.platforms.macos?.url
+      || 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.5.2/rMirror-1.5.2.dmg';
+    window.open(downloadUrl, '_blank');
   };
 
   const fetchNotebooks = async () => {
@@ -425,6 +430,9 @@ function DashboardContent() {
     fetchQuota();
     fetchOnboarding();
     fetchLegalStatus();
+    getLatestAgentVersion()
+      .then(setAgentVersionInfo)
+      .catch((err) => console.error('Failed to fetch agent version:', err));
   }, [effectiveIsSignedIn]);
 
   // Restore search state from URL params (for back button navigation)
@@ -852,8 +860,8 @@ function DashboardContent() {
           </div>
         </header>
         <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
-          {/* Onboarding Checklist */}
-          {onboarding && !onboarding.onboarding_dismissed && !isSearchMode && (
+          {/* Onboarding Checklist (hidden when wizard is active) */}
+          {onboarding && !onboarding.onboarding_dismissed && !isSearchMode && (notebooks.length > 0 || wizardCompleted) && (
             <div className="mb-6">
               <OnboardingChecklist
                 steps={getDefaultOnboardingSteps({
@@ -876,6 +884,24 @@ function DashboardContent() {
               totalResults={searchResults.total_results}
               hasMore={searchResults.has_more}
             />
+          ) : notebooks.length === 0 && !wizardCompleted && onboarding && !onboarding.onboarding_dismissed ? (
+            <SetupWizard
+              getToken={async () => {
+                if (isDevelopmentMode) {
+                  return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
+                }
+                return await getToken();
+              }}
+              isDevelopmentMode={isDevelopmentMode}
+              onComplete={() => {
+                setWizardCompleted(true);
+                fetchNotebooks();
+              }}
+              onDismiss={() => {
+                setWizardCompleted(true);
+                handleDismissOnboarding();
+              }}
+            />
           ) : notebooks.length === 0 ? (
             <div className="text-center py-12 rounded-lg max-w-2xl mx-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
               <BookOpen className="w-20 h-20 mx-auto mb-4" style={{ color: 'var(--warm-gray)', opacity: 0.3 }} />
@@ -884,8 +910,6 @@ function DashboardContent() {
               </h3>
               <p style={{ color: 'var(--warm-gray)', marginBottom: '1.5rem' }}>
                 Download and install the rMirror Agent to sync your reMarkable notebooks.
-                <br />
-                <span style={{ fontSize: '0.875em' }}>Free tier includes 30 pages of OCR transcription per month</span>
               </p>
               <button
                 onClick={handleDownloadClick}

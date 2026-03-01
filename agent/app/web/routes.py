@@ -8,7 +8,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request
 
 from app.__version__ import __version__
 from app.config import Config
@@ -313,7 +313,11 @@ def register_routes(app: Flask) -> None:
                 except Exception as e:
                     app.logger.error(f"Failed to start file watcher: {e}")
 
-            return render_template("auth_result.html", success=True, message="Successfully authenticated with Clerk!")
+            # Redirect to dashboard - the setup wizard will detect agent connection
+            dashboard_url = config.api.url.replace("/api/v1", "").replace("/api", "")
+            if not dashboard_url or "localhost:8000" in dashboard_url:
+                dashboard_url = "https://rmirror.io"
+            return redirect(f"{dashboard_url}/dashboard")
         except Exception as e:
             return render_template("auth_result.html", success=False, message=str(e))
 

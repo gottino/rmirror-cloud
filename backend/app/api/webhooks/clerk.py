@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
 from app.models.user import User
+from app.api.users import CURRENT_TOS_VERSION, CURRENT_PRIVACY_VERSION
 from app.utils.email import get_email_service
 from app.utils.umami import track_event
 
@@ -174,6 +175,11 @@ async def handle_user_created(data: dict, db: Session):
         hashed_password=None,  # No password for Clerk users
         is_active=True,
         created_at=datetime.utcnow(),
+        # Implicit terms acceptance — signup page shows ToS agreement text
+        tos_version=CURRENT_TOS_VERSION,
+        tos_accepted_at=datetime.utcnow(),
+        privacy_version=CURRENT_PRIVACY_VERSION,
+        privacy_accepted_at=datetime.utcnow(),
     )
 
     # Flag as beta user if beta signups are enabled
