@@ -132,6 +132,10 @@ class Settings(BaseSettings):
     umami_url: Optional[str] = None
     umami_website_id: Optional[str] = None
 
+    # Agent Downloads
+    agent_latest_version: str = "1.5.2"
+    agent_download_url_macos: str = ""
+
     # Beta / Admin
     admin_user_ids: str = ""  # comma-separated Clerk user IDs
     invite_token_expiry_days: int = 7

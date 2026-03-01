@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
+from app.config import get_settings
 from app.database import get_db
 from app.models.user import OnboardingState, User
 from app.utils.umami import track_event
@@ -155,4 +156,24 @@ async def get_agent_status(
         if current_user.agent_first_connected_at
         else None,
         "onboarding_state": current_user.onboarding_state,
+    }
+
+
+@router.get("/latest-version")
+async def get_latest_agent_version():
+    """Return the latest agent version and download URLs. Public endpoint."""
+    settings = get_settings()
+    version = settings.agent_latest_version
+    macos_url = settings.agent_download_url_macos
+    if not macos_url:
+        macos_url = f"https://f000.backblazeb2.com/file/rmirror-downloads/releases/v{version}/rMirror-{version}.dmg"
+
+    return {
+        "version": version,
+        "platforms": {
+            "macos": {
+                "url": macos_url,
+                "min_os": "12.0",
+            },
+        },
     }
