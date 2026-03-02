@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Image from 'next/image';
 import { Download, CheckCircle, Monitor, Loader2, ArrowRight, ArrowLeft, BookOpen, ExternalLink, FolderOpen } from 'lucide-react';
 import { getLatestAgentVersion, type AgentVersionInfo, getAgentStatus } from '@/lib/api';
 
@@ -107,7 +108,7 @@ export default function SetupWizard({
       </div>
 
       {/* Step content */}
-      <div className="max-w-lg w-full">
+      <div className={`w-full ${currentStep === 3 ? 'max-w-2xl' : 'max-w-lg'}`}>
         {currentStep === 1 && (
           <div className="text-center">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6" style={{ background: '#f5e6e5' }}>
@@ -212,6 +213,9 @@ export default function SetupWizard({
                     <div>
                       <p className="font-medium" style={{ color: 'var(--warm-charcoal)' }}>Launch rMirror</p>
                       <p className="text-sm" style={{ color: 'var(--warm-gray)' }}>Open it from Applications — it will appear in your menu bar</p>
+                      <p className="text-xs mt-1.5 italic" style={{ color: 'var(--warm-gray)' }}>
+                        macOS may show a security warning since rMirror was downloaded from the internet. Click &quot;Open&quot; to continue — the app is safe: it&apos;s signed and notarized by Apple.
+                      </p>
                     </div>
                   </li>
                   <li className="flex gap-3">
@@ -261,15 +265,30 @@ export default function SetupWizard({
             <h2 className="text-2xl font-bold mb-3" style={{ color: 'var(--warm-charcoal)', fontFamily: 'var(--font-display)' }}>
               Sync Your Notebooks
             </h2>
-            <p className="text-base mb-8" style={{ color: 'var(--warm-gray)' }}>
-              The agent will sync your reMarkable notebooks to the cloud.
-              Open the agent from your menu bar and click &quot;Initial Sync&quot; to get started.
+            <p className="text-base mb-6" style={{ color: 'var(--warm-gray)' }}>
+              Click the rMirror icon in your menu bar to open the agent.
+              Select a few notebooks, set a page limit, and hit &quot;Initial Sync&quot;.
             </p>
 
-            <div className="rounded-xl p-6 mb-6" style={{ background: 'var(--warm-bg)', border: '1px solid var(--warm-border)' }}>
+            <div className="rounded-xl overflow-hidden mb-6" style={{ border: '1px solid var(--warm-border)' }}>
+              <Image
+                src="/agent-sync-guide.png"
+                alt="rMirror agent showing notebook selection and sync controls"
+                width={884}
+                height={1299}
+                className="w-full h-auto"
+                priority
+              />
+            </div>
+
+            <div className="rounded-xl p-5 mb-6 text-left" style={{ background: 'var(--warm-bg)', border: '1px solid var(--warm-border)' }}>
+              <p className="text-sm font-medium mb-2" style={{ color: 'var(--warm-charcoal)' }}>
+                Tip: start small
+              </p>
               <p className="text-sm" style={{ color: 'var(--warm-gray)' }}>
-                Your free tier includes <strong>30 pages</strong> of OCR transcription per month.
-                The agent will sync notebook structure immediately, and OCR will process your most recent pages first.
+                Your free tier includes <strong>30 pages</strong> of OCR per month.
+                Pick 1–2 small notebooks and set the page limit to <strong>5–10</strong> to
+                stay within your quota. You can always sync more later.
               </p>
             </div>
 
