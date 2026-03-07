@@ -122,7 +122,7 @@ export function QuotaExceededModal({ isOpen, onClose, quota }: QuotaExceededModa
               Pro Tier
             </h3>
             <p style={{ fontSize: '1.125rem', color: 'var(--terracotta)', fontWeight: 500, marginBottom: '1.5rem' }}>
-              Launching February 2026
+              Launching March 2026
             </p>
 
             {/* Features */}
