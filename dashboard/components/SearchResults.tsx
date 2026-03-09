@@ -11,6 +11,7 @@ interface SearchResultsProps {
   hasMore: boolean;
   onLoadMore?: () => void;
   loadingMore?: boolean;
+  onClear?: () => void;
 }
 
 function HighlightedText({ snippet }: { snippet: SearchSnippet }) {
@@ -33,7 +34,7 @@ function HighlightedText({ snippet }: { snippet: SearchSnippet }) {
       <mark
         key={`h-${i}`}
         style={{
-          backgroundColor: 'rgba(200, 90, 84, 0.2)',
+          backgroundColor: 'var(--terracotta-highlight)',
           color: 'var(--terracotta)',
           padding: '0 2px',
           borderRadius: '2px'
@@ -157,7 +158,7 @@ function SearchResultCard({ result }: { result: SearchResult }) {
                 fontSize: '0.7em',
                 fontWeight: 500,
                 color: 'var(--terracotta)',
-                backgroundColor: 'rgba(200, 90, 84, 0.1)',
+                backgroundColor: 'var(--terracotta-light)',
                 padding: '2px 6px',
                 borderRadius: '4px'
               }}
@@ -204,7 +205,8 @@ export function SearchResults({
   totalResults,
   hasMore,
   onLoadMore,
-  loadingMore
+  loadingMore,
+  onClear
 }: SearchResultsProps) {
   if (results.length === 0) {
     return (
@@ -229,9 +231,36 @@ export function SearchResults({
         >
           No results found
         </h3>
-        <p style={{ color: 'var(--warm-gray)' }}>
+        <p style={{ color: 'var(--warm-gray)', marginBottom: '1.5rem' }}>
           No notebooks or pages match &quot;{query}&quot;
         </p>
+
+        {/* Search tips */}
+        <div
+          className="inline-block text-left rounded-lg p-4 mx-auto"
+          style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)', maxWidth: '320px' }}
+        >
+          <p style={{ fontSize: '0.8em', fontWeight: 600, color: 'var(--warm-charcoal)', marginBottom: '0.5rem' }}>
+            Search tips
+          </p>
+          <ul style={{ fontSize: '0.8em', color: 'var(--warm-gray)', paddingLeft: '1.25rem', margin: 0 }}>
+            <li>Search works across notebook names and OCR text</li>
+            <li>Try shorter or more general terms</li>
+            <li>Check spelling of your search query</li>
+          </ul>
+        </div>
+
+        {onClear && (
+          <div className="mt-4">
+            <button
+              onClick={onClear}
+              className="px-4 py-2 rounded-lg text-sm transition-colors"
+              style={{ color: 'var(--terracotta)', border: '1px solid var(--border)', backgroundColor: 'var(--card)' }}
+            >
+              Clear search
+            </button>
+          </div>
+        )}
       </div>
     );
   }

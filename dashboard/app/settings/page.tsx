@@ -303,13 +303,13 @@ export default function SettingsPage() {
               <div
                 className="p-6 rounded-lg"
                 style={{
-                  backgroundColor: '#fef2f2',
-                  border: '2px solid #fca5a5',
+                  backgroundColor: 'var(--destructive-bg)',
+                  border: '2px solid var(--destructive-border-solid)',
                 }}
               >
                 <div className="flex items-center gap-3 mb-4">
-                  <AlertTriangle className="w-5 h-5" style={{ color: '#dc2626' }} />
-                  <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#dc2626' }}>
+                  <AlertTriangle className="w-5 h-5" style={{ color: 'var(--destructive)' }} />
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--destructive)' }}>
                     Danger Zone
                   </h2>
                 </div>
@@ -333,7 +333,7 @@ export default function SettingsPage() {
                   onClick={() => setShowDeleteModal(true)}
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg transition-colors font-medium"
                   style={{
-                    backgroundColor: '#dc2626',
+                    backgroundColor: 'var(--destructive)',
                     color: 'white',
                     fontSize: '0.925em',
                   }}
@@ -355,8 +355,8 @@ export default function SettingsPage() {
             style={{ backgroundColor: 'var(--card)', boxShadow: 'var(--shadow-lg, 0 10px 25px rgba(0,0,0,0.15))' }}
           >
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: '#fef2f2' }}>
-                <AlertTriangle className="w-5 h-5" style={{ color: '#dc2626' }} />
+              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: 'var(--destructive-bg)' }}>
+                <AlertTriangle className="w-5 h-5" style={{ color: 'var(--destructive)' }} />
               </div>
               <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--warm-charcoal)' }}>
                 Delete your account?
@@ -366,11 +366,11 @@ export default function SettingsPage() {
             {/* Download reminder */}
             <div
               className="p-3 rounded-lg mb-4 flex items-start gap-3"
-              style={{ backgroundColor: '#fffbeb', border: '1px solid #fcd34d' }}
+              style={{ backgroundColor: 'var(--warning-light)', border: '1px solid var(--warning-border)' }}
             >
-              <Download className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: '#d97706' }} />
+              <Download className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: 'var(--warning-accent)' }} />
               <div>
-                <p style={{ fontSize: '0.875em', color: '#92400e', fontWeight: 500, margin: 0 }}>
+                <p style={{ fontSize: '0.875em', color: 'var(--warning-text)', fontWeight: 500, margin: 0 }}>
                   Download your data first
                 </p>
                 <button
@@ -380,7 +380,7 @@ export default function SettingsPage() {
                   }}
                   style={{
                     fontSize: '0.8em',
-                    color: '#d97706',
+                    color: 'var(--warning-accent)',
                     textDecoration: 'underline',
                     background: 'none',
                     border: 'none',
@@ -427,7 +427,7 @@ export default function SettingsPage() {
                 checked={deleteUnderstood}
                 onChange={(e) => setDeleteUnderstood(e.target.checked)}
                 className="mt-0.5"
-                style={{ accentColor: '#dc2626' }}
+                style={{ accentColor: 'var(--destructive)' }}
               />
               <span style={{ fontSize: '0.875em', color: 'var(--warm-charcoal)' }}>
                 I understand this action is permanent and cannot be undone
@@ -435,8 +435,8 @@ export default function SettingsPage() {
             </label>
 
             {deleteError && (
-              <div className="mb-4 p-3 rounded-lg" style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5' }}>
-                <p style={{ fontSize: '0.875em', color: '#dc2626', margin: 0 }}>{deleteError}</p>
+              <div className="mb-4 p-3 rounded-lg" style={{ backgroundColor: 'var(--destructive-bg)', border: '1px solid var(--destructive-border-solid)' }}>
+                <p style={{ fontSize: '0.875em', color: 'var(--destructive)', margin: 0 }}>{deleteError}</p>
               </div>
             )}
 
@@ -467,8 +467,8 @@ export default function SettingsPage() {
                 style={{
                   fontSize: '0.925em',
                   fontWeight: 600,
-                  backgroundColor: canDelete && !deleting ? '#dc2626' : '#e5e7eb',
-                  color: canDelete && !deleting ? 'white' : '#9ca3af',
+                  backgroundColor: canDelete && !deleting ? 'var(--destructive)' : 'var(--disabled-bg)',
+                  color: canDelete && !deleting ? 'white' : 'var(--disabled-text)',
                   cursor: canDelete && !deleting ? 'pointer' : 'not-allowed',
                 }}
               >

@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Mail, Shield, BarChart3 } from 'lucide-react';
+import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Mail, Shield, BarChart3, Download, Tablet } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
 import SetupWizard from './components/SetupWizard';
 import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, getLatestAgentVersion, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type AgentVersionInfo, type QuotaStatus, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
@@ -16,6 +16,7 @@ import { SearchResults } from '@/components/SearchResults';
 import { OnboardingChecklist, getDefaultOnboardingSteps } from '@/components/OnboardingChecklist';
 import { TermsAcceptanceModal } from '@/components/TermsAcceptanceModal';
 import { trackEvent } from '@/lib/analytics';
+import { Skeleton } from '@/components/Skeleton';
 import { memo } from 'react';
 
 // Group notebooks by date
@@ -724,10 +725,37 @@ function DashboardContent() {
     return (
       <div className="flex h-screen">
         {Sidebar}
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--terracotta)' }}></div>
-            <p className="mt-4" style={{ color: 'var(--warm-gray)' }}>Loading notebooks...</p>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Skeleton header */}
+          <div className="bg-white px-6 lg:px-8 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between gap-4">
+              <Skeleton style={{ width: '320px', height: '40px' }} />
+              <div className="flex gap-2">
+                <Skeleton style={{ width: '70px', height: '36px' }} />
+                <Skeleton style={{ width: '70px', height: '36px' }} />
+              </div>
+            </div>
+          </div>
+          {/* Skeleton content */}
+          <div className="flex-1 px-6 lg:px-8 py-6" style={{ backgroundColor: 'var(--soft-cream)' }}>
+            {/* Date group header */}
+            <Skeleton className="mb-4" style={{ width: '120px', height: '16px' }} />
+            {/* Grid of skeleton cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="rounded-lg overflow-hidden"
+                  style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
+                >
+                  <Skeleton style={{ width: '100%', aspectRatio: '3/4', borderRadius: 0 }} />
+                  <div className="p-3">
+                    <Skeleton className="mb-2" style={{ width: '70%', height: '14px' }} />
+                    <Skeleton style={{ width: '40%', height: '12px' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -903,24 +931,57 @@ function DashboardContent() {
               }}
             />
           ) : notebooks.length === 0 ? (
-            <div className="text-center py-12 rounded-lg max-w-2xl mx-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-              <BookOpen className="w-20 h-20 mx-auto mb-4" style={{ color: 'var(--warm-gray)', opacity: 0.3 }} />
-              <h3 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                No notebooks yet
-              </h3>
-              <p style={{ color: 'var(--warm-gray)', marginBottom: '1.5rem' }}>
-                Download and install the rMirror Agent to sync your reMarkable notebooks.
-              </p>
-              <button
-                onClick={handleDownloadClick}
-                className="px-6 py-3 rounded-lg transition-colors font-semibold cursor-pointer"
-                style={{
-                  backgroundColor: 'var(--primary)',
-                  color: 'var(--primary-foreground)'
-                }}
-              >
-                Download rMirror Agent for macOS
-              </button>
+            <div className="py-12 rounded-lg max-w-2xl mx-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
+              <div className="text-center mb-8 px-6">
+                <BookOpen className="w-16 h-16 mx-auto mb-4" style={{ color: 'var(--warm-gray)', opacity: 0.3 }} />
+                <h3 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+                  No notebooks yet
+                </h3>
+                <p style={{ color: 'var(--warm-gray)' }}>
+                  Get started in three simple steps
+                </p>
+              </div>
+
+              {/* Three-step guide */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 px-6 mb-8">
+                {[
+                  { icon: Download, label: 'Download Agent', desc: 'Install the rMirror Agent on your Mac' },
+                  { icon: Tablet, label: 'Connect reMarkable', desc: 'Sign in and link your reMarkable folder' },
+                  { icon: BookOpen, label: 'See Notebooks', desc: 'Your handwritten notes appear here' },
+                ].map((step, i) => (
+                  <div key={i} className="text-center">
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-3"
+                      style={{ backgroundColor: 'var(--terracotta-light)', color: 'var(--terracotta)', fontWeight: 600, fontSize: '0.875em' }}
+                    >
+                      {i + 1}
+                    </div>
+                    <step.icon className="w-8 h-8 mx-auto mb-2" style={{ color: 'var(--warm-gray)' }} />
+                    <p style={{ fontWeight: 600, fontSize: '0.925em', color: 'var(--warm-charcoal)', marginBottom: '0.25rem' }}>
+                      {step.label}
+                    </p>
+                    <p style={{ fontSize: '0.8em', color: 'var(--warm-gray)' }}>
+                      {step.desc}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="text-center px-6">
+                <button
+                  onClick={handleDownloadClick}
+                  className="px-6 py-3 rounded-lg transition-colors font-semibold cursor-pointer"
+                  style={{
+                    backgroundColor: 'var(--primary)',
+                    color: 'var(--primary-foreground)'
+                  }}
+                >
+                  Download rMirror Agent for macOS
+                </button>
+                <p className="mt-3" style={{ fontSize: '0.8em', color: 'var(--warm-gray)' }}>
+                  <a href="mailto:support@rmirror.io" style={{ color: 'var(--terracotta)', textDecoration: 'underline' }}>Need help?</a>
+                </p>
+              </div>
             </div>
           ) : (
             <>

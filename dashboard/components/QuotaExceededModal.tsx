@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { X, CheckCircle, Mail } from 'lucide-react';
+import { useEffect } from 'react';
+import { X } from 'lucide-react';
 import type { QuotaStatus } from '@/lib/api';
+import { ProTierInfoCard } from '@/components/ProTierInfoCard';
 
 interface QuotaExceededModalProps {
   isOpen: boolean;
@@ -11,9 +12,6 @@ interface QuotaExceededModalProps {
 }
 
 export function QuotaExceededModal({ isOpen, onClose, quota }: QuotaExceededModalProps) {
-  const [email, setEmail] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-
   // Close on Escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -30,13 +28,6 @@ export function QuotaExceededModal({ isOpen, onClose, quota }: QuotaExceededModa
   }, [isOpen, onClose]);
 
   if (!isOpen || !quota) return null;
-
-  const handleWaitlistSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    // TODO: Send to waitlist API endpoint
-    console.log('Waitlist signup:', email);
-    setSubmitted(true);
-  };
 
   const formatResetDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -57,7 +48,7 @@ export function QuotaExceededModal({ isOpen, onClose, quota }: QuotaExceededModa
         {/* Close button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-2 rounded-lg hover:bg-black/5 transition-colors"
+          className="absolute top-4 right-4 p-2 rounded-lg hover:bg-black/5 transition-colors z-10"
           style={{ color: 'var(--warm-gray)' }}
         >
           <X className="w-5 h-5" />
@@ -67,7 +58,7 @@ export function QuotaExceededModal({ isOpen, onClose, quota }: QuotaExceededModa
         <div className="p-8 border-b" style={{ borderColor: 'var(--border)' }}>
           <div
             className="w-12 h-12 rounded-full flex items-center justify-center mb-4"
-            style={{ backgroundColor: 'rgba(200, 90, 84, 0.1)' }}
+            style={{ backgroundColor: 'var(--terracotta-light)' }}
           >
             <div style={{ color: 'var(--terracotta)', fontSize: '1.5rem' }}>📊</div>
           </div>
@@ -75,7 +66,7 @@ export function QuotaExceededModal({ isOpen, onClose, quota }: QuotaExceededModa
             Free Tier Limit Reached
           </h2>
           <p style={{ fontSize: '1rem', color: 'var(--warm-gray)' }}>
-            You've used all {quota.limit} free pages this month
+            You&apos;ve used all {quota.limit} free pages this month
           </p>
         </div>
 
@@ -101,104 +92,7 @@ export function QuotaExceededModal({ isOpen, onClose, quota }: QuotaExceededModa
           </div>
 
           {/* Pro tier preview */}
-          <div
-            className="p-6 rounded-lg relative overflow-hidden"
-            style={{ backgroundColor: 'var(--card)', border: '2px solid var(--terracotta)' }}
-          >
-            {/* Coming soon badge */}
-            <div
-              className="absolute top-4 right-4 px-3 py-1 rounded-full text-xs font-semibold"
-              style={{
-                backgroundColor: 'var(--amber-gold)',
-                color: 'white',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}
-            >
-              Coming Soon
-            </div>
-
-            <h3 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--warm-charcoal)', marginBottom: '0.25rem' }}>
-              Pro Tier
-            </h3>
-            <p style={{ fontSize: '1.125rem', color: 'var(--terracotta)', fontWeight: 500, marginBottom: '1.5rem' }}>
-              Launching March 2026
-            </p>
-
-            {/* Features */}
-            <div className="space-y-3 mb-6">
-              {[
-                '500 pages/month OCR transcription',
-                'All integrations enabled',
-                'Priority processing',
-                'Email support'
-              ].map((feature, index) => (
-                <div key={index} className="flex items-start gap-3">
-                  <CheckCircle className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--sage-green)' }} />
-                  <span style={{ fontSize: '0.925em', color: 'var(--warm-charcoal)' }}>{feature}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Pricing preview */}
-            <div
-              className="p-4 rounded-lg mb-4"
-              style={{ backgroundColor: 'var(--soft-cream)' }}
-            >
-              <div style={{ fontSize: '0.75em', color: 'var(--warm-gray)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem' }}>
-                Expected Pricing
-              </div>
-              <div style={{ fontSize: '2rem', fontWeight: 600, color: 'var(--warm-charcoal)' }}>
-                $9<span style={{ fontSize: '1rem', fontWeight: 400, color: 'var(--warm-gray)' }}>/month</span>
-              </div>
-            </div>
-
-            {/* Waitlist form */}
-            {!submitted ? (
-              <form onSubmit={handleWaitlistSubmit}>
-                <label style={{ fontSize: '0.875em', fontWeight: 500, color: 'var(--warm-charcoal)', display: 'block', marginBottom: '0.5rem' }}>
-                  Join the Pro Waitlist
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="your@email.com"
-                    required
-                    className="flex-1 px-4 py-2 rounded-lg"
-                    style={{
-                      border: '1px solid var(--border)',
-                      fontSize: '0.925em',
-                      backgroundColor: 'var(--card)',
-                      color: 'var(--foreground)'
-                    }}
-                  />
-                  <button
-                    type="submit"
-                    className="px-6 py-2 rounded-lg transition-colors font-semibold"
-                    style={{
-                      backgroundColor: 'var(--primary)',
-                      color: 'var(--primary-foreground)',
-                      fontSize: '0.925em'
-                    }}
-                  >
-                    Join Waitlist
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <div
-                className="p-4 rounded-lg flex items-center gap-3"
-                style={{ backgroundColor: 'rgba(155, 183, 162, 0.1)', border: '1px solid var(--sage-green)' }}
-              >
-                <CheckCircle className="w-5 h-5" style={{ color: 'var(--sage-green)' }} />
-                <span style={{ fontSize: '0.925em', color: 'var(--warm-charcoal)', fontWeight: 500 }}>
-                  You're on the waitlist! We'll email you when Pro tier launches.
-                </span>
-              </div>
-            )}
-          </div>
+          <ProTierInfoCard analyticsSource="quota_modal" />
 
           {/* Beta tester note */}
           <div

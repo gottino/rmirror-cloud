@@ -1,8 +1,8 @@
 'use client';
 
-import { useAuth } from '@clerk/nextjs';
-import { useEffect, useRef, useState } from 'react';
-import { getQuotaStatus, type QuotaStatus } from '@/lib/api';
+import { useRef, useState } from 'react';
+import { useQuota } from '@/lib/quota-context';
+import { QUOTA_THRESHOLDS } from '@/lib/constants';
 import { AlertTriangle, X } from 'lucide-react';
 import Link from 'next/link';
 import { trackEvent } from '@/lib/analytics';
@@ -12,42 +12,12 @@ interface QuotaWarningProps {
 }
 
 export function QuotaWarning({ onUpgradeClick }: QuotaWarningProps) {
-  const { getToken, isSignedIn } = useAuth();
-  const [quota, setQuota] = useState<QuotaStatus | null>(null);
+  const { quota } = useQuota();
   const [dismissed, setDismissed] = useState(false);
   const trackedRef = useRef(false);
 
-  // Development mode bypass
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
-  const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
-
-  const fetchQuota = async () => {
-    if (!effectiveIsSignedIn) return;
-
-    try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
-
-      if (!token) return;
-
-      const data = await getQuotaStatus(token);
-      setQuota(data);
-    } catch (err) {
-      console.error('Error fetching quota:', err);
-    }
-  };
-
-  useEffect(() => {
-    fetchQuota();
-    // Poll every 60 seconds
-    const interval = setInterval(fetchQuota, 60000);
-    return () => clearInterval(interval);
-  }, [effectiveIsSignedIn]);
-
   // Don't show if dismissed or quota not near limit
-  // Also check for NaN percentage values
-  if (dismissed || !quota || isNaN(quota.percentage_used) || quota.percentage_used < 80) {
+  if (dismissed || !quota || isNaN(quota.percentage_used) || quota.percentage_used < QUOTA_THRESHOLDS.WARNING_VISIBLE) {
     return null;
   }
 
@@ -64,7 +34,7 @@ export function QuotaWarning({ onUpgradeClick }: QuotaWarningProps) {
     <div
       className="px-6 lg:px-8 py-4"
       style={{
-        backgroundColor: isExhausted ? 'rgba(200, 90, 84, 0.1)' : 'rgba(232, 182, 91, 0.1)',
+        backgroundColor: isExhausted ? 'var(--terracotta-light)' : 'var(--amber-gold-light)',
         borderBottom: '1px solid',
         borderColor: isExhausted ? 'var(--destructive)' : 'var(--amber-gold)'
       }}
@@ -80,13 +50,13 @@ export function QuotaWarning({ onUpgradeClick }: QuotaWarningProps) {
           <p style={{ fontSize: '0.875em', color: 'var(--warm-gray)', marginBottom: '0.5rem' }}>
             {isExhausted ? (
               <>
-                You've used all {quota.limit} free pages this month. Your notebooks will continue syncing,
+                You&apos;ve used all {quota.limit} free pages this month. Your notebooks will continue syncing,
                 but OCR transcription and integrations are paused until your quota resets on{' '}
                 <strong>{new Date(quota.reset_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>.
               </>
             ) : (
               <>
-                You've used {quota.used} of {quota.limit} free pages ({Math.round(quota.percentage_used)}%).
+                You&apos;ve used {quota.used} of {quota.limit} free pages ({Math.round(quota.percentage_used)}%).
                 Only {remaining} page{remaining !== 1 ? 's' : ''} remaining this month.
               </>
             )}

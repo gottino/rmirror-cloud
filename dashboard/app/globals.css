@@ -36,6 +36,26 @@ html {
   --input: #e8e4df;
   --ring: #c85a54;
 
+  /* Opacity variants */
+  --terracotta-light: rgba(200, 90, 84, 0.1);
+  --terracotta-highlight: rgba(200, 90, 84, 0.2);
+  --sage-green-light: rgba(122, 156, 137, 0.1);
+  --sage-green-lighter: rgba(122, 156, 137, 0.15);
+  --amber-gold-light: rgba(212, 165, 116, 0.1);
+  --amber-gold-lighter: rgba(212, 165, 116, 0.15);
+  --destructive-light: rgba(220, 38, 38, 0.1);
+  --destructive-lighter: rgba(220, 38, 38, 0.15);
+  --destructive-bg: #fef2f2;
+  --destructive-border-solid: #fca5a5;
+  --warning-light: #fffbeb;
+  --warning-border: #fcd34d;
+  --warning-text: #92400e;
+  --warning-accent: #d97706;
+  --neutral-light: rgba(156, 163, 175, 0.1);
+  --neutral-lighter: rgba(156, 163, 175, 0.15);
+  --disabled-bg: #e5e7eb;
+  --disabled-text: #9ca3af;
+
   /* Border Radius */
   --radius-sm: 6px;
   --radius: 8px;

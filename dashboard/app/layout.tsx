@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ClerkProvider } from '@clerk/nextjs'
 import Script from 'next/script'
 import { AnalyticsIdentify } from '@/components/AnalyticsIdentify'
+import { QuotaProvider } from '@/lib/quota-context'
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -59,7 +60,9 @@ export default function RootLayout({
     <ClerkProvider appearance={clerkAppearance}>
       <html lang="en">
         <body className="antialiased">
-          {children}
+          <QuotaProvider>
+            {children}
+          </QuotaProvider>
           <AnalyticsIdentify />
           {process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID && (
             <Script

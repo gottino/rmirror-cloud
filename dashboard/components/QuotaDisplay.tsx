@@ -1,8 +1,7 @@
 'use client';
 
-import { useAuth } from '@clerk/nextjs';
-import { useEffect, useState } from 'react';
-import { getQuotaStatus, type QuotaStatus } from '@/lib/api';
+import { useQuota } from '@/lib/quota-context';
+import { QUOTA_THRESHOLDS } from '@/lib/constants';
 import { AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 
 interface QuotaDisplayProps {
@@ -11,74 +10,29 @@ interface QuotaDisplayProps {
 }
 
 export function QuotaDisplay({ variant = 'compact', onQuotaExceeded }: QuotaDisplayProps) {
-  const { getToken, isSignedIn } = useAuth();
-  const [quota, setQuota] = useState<QuotaStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Development mode bypass
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
-  const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
-
-  const fetchQuota = async () => {
-    if (!effectiveIsSignedIn) {
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setError(null);
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
-
-      if (!token) {
-        throw new Error('Failed to get authentication token');
-      }
-
-      const data = await getQuotaStatus(token);
-      setQuota(data);
-
-      // Call callback if quota exceeded
-      if (data.is_exhausted && onQuotaExceeded) {
-        onQuotaExceeded();
-      }
-    } catch (err) {
-      console.error('Error fetching quota:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch quota');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchQuota();
-    // Poll every 60 seconds to update quota
-    const interval = setInterval(fetchQuota, 60000);
-    return () => clearInterval(interval);
-  }, [effectiveIsSignedIn]);
+  const { quota, loading } = useQuota();
 
   if (loading || !quota) {
     return null;
   }
 
-  if (error) {
-    return null;
+  // Call callback if quota exceeded
+  if (quota.is_exhausted && onQuotaExceeded) {
+    onQuotaExceeded();
   }
 
   const percentage = isNaN(quota.percentage_used) ? 0 : quota.percentage_used;
   const remaining = quota.limit - quota.used;
 
-  // Color coding based on percentage
   const getColor = () => {
-    if (percentage >= 91) return 'var(--destructive)'; // Red
-    if (percentage >= 67) return 'var(--amber-gold)'; // Yellow/Amber
-    return 'var(--sage-green)'; // Green
+    if (percentage >= QUOTA_THRESHOLDS.CRITICAL) return 'var(--destructive)';
+    if (percentage >= QUOTA_THRESHOLDS.WARNING) return 'var(--amber-gold)';
+    return 'var(--sage-green)';
   };
 
   const getIcon = () => {
-    if (percentage >= 91) return <XCircle className="w-4 h-4" />;
-    if (percentage >= 67) return <AlertTriangle className="w-4 h-4" />;
+    if (percentage >= QUOTA_THRESHOLDS.CRITICAL) return <XCircle className="w-4 h-4" />;
+    if (percentage >= QUOTA_THRESHOLDS.WARNING) return <AlertTriangle className="w-4 h-4" />;
     return <CheckCircle className="w-4 h-4" />;
   };
 
@@ -88,7 +42,6 @@ export function QuotaDisplay({ variant = 'compact', onQuotaExceeded }: QuotaDisp
     return 'Available';
   };
 
-  // Format reset date
   const formatResetDate = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });

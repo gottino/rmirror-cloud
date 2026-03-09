@@ -10,9 +10,12 @@ import {
   getIntegrations,
   getNotionOAuthUrl,
   deleteIntegration,
+  testIntegrationConnection,
   IntegrationConfig,
+  type IntegrationTestResult,
 } from '@/lib/api';
 import { trackEvent } from '@/lib/analytics';
+import { timeAgo } from '@/lib/utils';
 
 export default function IntegrationsPage() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
@@ -21,6 +24,8 @@ export default function IntegrationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<IntegrationTestResult | null>(null);
 
   // Development mode bypass
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
@@ -97,6 +102,29 @@ export default function IntegrationsPage() {
     }
   }
 
+  async function handleTestConnection(targetName: string) {
+    setTesting(targetName);
+    setTestResult(null);
+
+    try {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (!token) return;
+
+      const result = await testIntegrationConnection(token, targetName);
+      setTestResult(result);
+    } catch (err) {
+      setTestResult({
+        success: false,
+        target_name: targetName,
+        message: err instanceof Error ? err.message : 'Connection test failed',
+      });
+    } finally {
+      setTesting(null);
+    }
+  }
+
   const notionIntegration = integrations.find((i) => i.target_name === 'notion');
   const notionTodosIntegration = integrations.find((i) => i.target_name === 'notion-todos');
 
@@ -150,7 +178,14 @@ export default function IntegrationsPage() {
 >
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
+          <div
+            className="px-4 py-3 rounded mb-6"
+            style={{
+              backgroundColor: 'var(--destructive-bg)',
+              border: '1px solid var(--destructive-border-solid)',
+              color: 'var(--destructive)',
+            }}
+          >
             {error}
           </div>
         )}
@@ -160,39 +195,58 @@ export default function IntegrationsPage() {
           <h2 className="text-xl font-semibold mb-4">Notebooks</h2>
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-start gap-4">
-              <div className="w-12 h-12 bg-black rounded-lg flex items-center justify-center flex-shrink-0">
+              <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'var(--warm-charcoal)' }}>
                 <span className="text-white font-bold">N</span>
               </div>
               <div className="flex-1">
                 <h3 className="font-semibold text-lg">Notion</h3>
                 {notionIntegration ? (
                   <>
-                    <p className="text-sm text-gray-600 mb-3">
-                      Status: <span className="text-green-600 font-medium">Connected</span>
+                    <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
+                      Status: <span style={{ color: 'var(--sage-green)', fontWeight: 500 }}>Connected</span>
+                      {notionIntegration.last_synced_at && (
+                        <> &middot; Last synced {timeAgo(notionIntegration.last_synced_at)}</>
+                      )}
                     </p>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       <button
                         onClick={() => router.push('/integrations/notion/setup?type=notebooks')}
-                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-sm font-medium"
+                        className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
                       >
                         Configure
                       </button>
                       <button
+                        onClick={() => handleTestConnection('notion')}
+                        disabled={testing === 'notion'}
+                        className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
+                      >
+                        {testing === 'notion' ? 'Testing...' : 'Test Connection'}
+                      </button>
+                      <button
                         onClick={() => handleDisconnect('notion')}
-                        className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-sm font-medium"
+                        className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        style={{ backgroundColor: 'var(--destructive-light)', color: 'var(--destructive)' }}
                       >
                         Disconnect
                       </button>
                     </div>
+                    {testResult && testResult.target_name === 'notion' && (
+                      <p className="text-sm mt-2" style={{ color: testResult.success ? 'var(--sage-green)' : 'var(--destructive)' }}>
+                        {testResult.message}
+                      </p>
+                    )}
                   </>
                 ) : (
                   <>
-                    <p className="text-sm text-gray-600 mb-3">
+                    <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
                       Sync your notebooks to Notion for easy access and collaboration
                     </p>
                     <button
                       onClick={handleConnectNotion}
-                      className="px-4 py-2 bg-black hover:bg-gray-800 text-white rounded-md text-sm font-medium"
+                      className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                      style={{ backgroundColor: 'var(--warm-charcoal)', color: 'white' }}
                     >
                       Connect Notion
                     </button>
@@ -210,45 +264,64 @@ export default function IntegrationsPage() {
           {/* Notion Todos */}
           <div className="bg-white rounded-lg shadow p-6 mb-4">
             <div className="flex items-start gap-4">
-              <div className="w-12 h-12 bg-black rounded-lg flex items-center justify-center flex-shrink-0">
+              <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'var(--warm-charcoal)' }}>
                 <span className="text-white font-bold">N</span>
               </div>
               <div className="flex-1">
                 <h3 className="font-semibold text-lg">Notion Todos</h3>
                 {notionTodosIntegration ? (
                   <>
-                    <p className="text-sm text-gray-600 mb-3">
-                      Status: <span className="text-green-600 font-medium">Connected</span>
+                    <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
+                      Status: <span style={{ color: 'var(--sage-green)', fontWeight: 500 }}>Connected</span>
+                      {notionTodosIntegration.last_synced_at && (
+                        <> &middot; Last synced {timeAgo(notionTodosIntegration.last_synced_at)}</>
+                      )}
                     </p>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       <button
                         onClick={() => router.push('/integrations/notion/setup?type=todos')}
-                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-sm font-medium"
+                        className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
                       >
                         Configure
                       </button>
                       <button
+                        onClick={() => handleTestConnection('notion-todos')}
+                        disabled={testing === 'notion-todos'}
+                        className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
+                      >
+                        {testing === 'notion-todos' ? 'Testing...' : 'Test Connection'}
+                      </button>
+                      <button
                         onClick={() => handleDisconnect('notion-todos')}
-                        className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-sm font-medium"
+                        className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        style={{ backgroundColor: 'var(--destructive-light)', color: 'var(--destructive)' }}
                       >
                         Disconnect
                       </button>
                     </div>
+                    {testResult && testResult.target_name === 'notion-todos' && (
+                      <p className="text-sm mt-2" style={{ color: testResult.success ? 'var(--sage-green)' : 'var(--destructive)' }}>
+                        {testResult.message}
+                      </p>
+                    )}
                   </>
                 ) : (
                   <>
-                    <p className="text-sm text-gray-600 mb-3">
+                    <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
                       Sync extracted todos to a dedicated Notion database for task management
                     </p>
                     {notionIntegration ? (
                       <button
                         onClick={() => router.push('/integrations/notion/setup?type=todos')}
-                        className="px-4 py-2 bg-black hover:bg-gray-800 text-white rounded-md text-sm font-medium"
+                        className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        style={{ backgroundColor: 'var(--warm-charcoal)', color: 'white' }}
                       >
                         Connect Notion Todos
                       </button>
                     ) : (
-                      <p className="text-sm text-gray-500 italic">
+                      <p className="text-sm italic" style={{ color: 'var(--warm-gray)' }}>
                         Connect Notion for notebooks first to enable todo sync
                       </p>
                     )}
@@ -259,22 +332,25 @@ export default function IntegrationsPage() {
           </div>
 
           {/* Todoist (Coming Soon) */}
-          <div className="bg-white rounded-lg shadow p-6 mb-4 opacity-60">
+          <div
+            className="rounded-lg p-6 mb-4"
+            style={{ backgroundColor: 'var(--soft-cream)', border: '1px dashed var(--border)' }}
+          >
             <div className="flex items-start gap-4">
-              <div className="w-12 h-12 bg-red-500 rounded-lg flex items-center justify-center flex-shrink-0">
+              <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'var(--terracotta)' }}>
                 <span className="text-white font-bold">T</span>
               </div>
               <div className="flex-1">
                 <h3 className="font-semibold text-lg">Todoist</h3>
-                <p className="text-sm text-gray-600 mb-3">
-                  Coming soon - Sync todos to Todoist for powerful task management
+                <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
+                  Sync todos to Todoist for powerful task management
                 </p>
-                <button
-                  disabled
-                  className="px-4 py-2 bg-gray-200 text-gray-400 rounded-md text-sm font-medium cursor-not-allowed"
+                <span
+                  className="inline-block px-3 py-1 rounded-full text-xs font-medium"
+                  style={{ backgroundColor: 'var(--amber-gold-light)', color: 'var(--amber-gold)' }}
                 >
                   Coming Soon
-                </button>
+                </span>
               </div>
             </div>
           </div>
@@ -282,23 +358,26 @@ export default function IntegrationsPage() {
 
         {/* Highlights Section (Coming Soon) */}
         <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4">Highlights (Coming Soon)</h2>
-          <div className="bg-white rounded-lg shadow p-6 opacity-60">
+          <h2 className="text-xl font-semibold mb-4">Highlights</h2>
+          <div
+            className="rounded-lg p-6"
+            style={{ backgroundColor: 'var(--soft-cream)', border: '1px dashed var(--border)' }}
+          >
             <div className="flex items-start gap-4">
-              <div className="w-12 h-12 bg-yellow-500 rounded-lg flex items-center justify-center flex-shrink-0">
+              <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'var(--amber-gold)' }}>
                 <span className="text-white font-bold">R</span>
               </div>
               <div className="flex-1">
                 <h3 className="font-semibold text-lg">Readwise</h3>
-                <p className="text-sm text-gray-600 mb-3">
-                  Coming soon - Sync highlights to Readwise for spaced repetition
+                <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
+                  Sync highlights to Readwise for spaced repetition
                 </p>
-                <button
-                  disabled
-                  className="px-4 py-2 bg-gray-200 text-gray-400 rounded-md text-sm font-medium cursor-not-allowed"
+                <span
+                  className="inline-block px-3 py-1 rounded-full text-xs font-medium"
+                  style={{ backgroundColor: 'var(--amber-gold-light)', color: 'var(--amber-gold)' }}
                 >
                   Coming Soon
-                </button>
+                </span>
               </div>
             </div>
           </div>

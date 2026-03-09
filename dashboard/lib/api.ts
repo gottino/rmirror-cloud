@@ -386,6 +386,31 @@ export async function selectNotionDatabase(
 }
 
 /**
+ * Test an integration connection
+ */
+export interface IntegrationTestResult {
+  success: boolean;
+  target_name: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export async function testIntegrationConnection(token: string, targetName: string): Promise<IntegrationTestResult> {
+  const response = await fetch(`${API_URL}/integrations/${targetName}/test`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to test integration connection');
+  }
+
+  return response.json();
+}
+
+/**
  * Delete an integration
  */
 export async function deleteIntegration(token: string, targetName: string): Promise<any> {

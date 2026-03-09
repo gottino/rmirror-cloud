@@ -7,10 +7,12 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu, Search, X, Loader2 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
-import { getNotebook, getQuotaStatus, searchNotebooks, QuotaExceededError, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
+import { getNotebook, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
+import { useQuota } from '@/lib/quota-context';
+import { Skeleton } from '@/components/Skeleton';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
 
@@ -172,15 +174,15 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId, quota, isTargetP
                   fontSize: '0.875em',
                   fontWeight: 500,
                   backgroundColor: page.ocr_status === 'completed'
-                    ? 'rgba(122, 156, 137, 0.15)'
+                    ? 'var(--sage-green-lighter)'
                     : page.ocr_status === 'processing'
-                    ? 'rgba(212, 165, 116, 0.15)'
+                    ? 'var(--amber-gold-lighter)'
                     : page.ocr_status === 'failed'
-                    ? 'rgba(220, 38, 38, 0.15)'
+                    ? 'var(--destructive-lighter)'
                     : page.ocr_status === 'pending_quota'
-                    ? 'rgba(212, 165, 116, 0.15)'
+                    ? 'var(--amber-gold-lighter)'
                     : page.ocr_status === 'not_synced'
-                    ? 'rgba(156, 163, 175, 0.15)'
+                    ? 'var(--neutral-lighter)'
                     : 'var(--soft-cream)',
                   color: page.ocr_status === 'completed'
                     ? 'var(--sage-green)'
@@ -359,7 +361,7 @@ function NotebookPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [copiedPageId, setCopiedPageId] = useState<number | null>(null);
   const [authToken, setAuthToken] = useState<string>('');
-  const [quota, setQuota] = useState<QuotaStatus | null>(null);
+  const { quota } = useQuota();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -409,14 +411,6 @@ function NotebookPageContent() {
 
         const data = await getNotebook(id, token);
         setNotebook(data);
-
-        // Fetch quota data
-        try {
-          const quotaData = await getQuotaStatus(token);
-          setQuota(quotaData);
-        } catch (quotaErr) {
-          console.error('Error fetching quota:', quotaErr);
-        }
       } catch (err) {
         console.error('Error fetching notebook:', err);
         setError(err instanceof Error ? err.message : 'Failed to fetch notebook');
@@ -607,10 +601,42 @@ function NotebookPageContent() {
             onClick={() => setSidebarOpen(false)}
           />
         )}
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--terracotta)' }}></div>
-            <p className="mt-4" style={{ color: 'var(--warm-gray)' }}>Loading notebook...</p>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Skeleton header */}
+          <div className="bg-white px-6 lg:px-8 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-2">
+              <Skeleton style={{ width: '100px', height: '16px' }} />
+              <ChevronRight className="w-4 h-4" style={{ color: 'var(--border)' }} />
+              <Skeleton style={{ width: '180px', height: '16px' }} />
+            </div>
+          </div>
+          {/* Skeleton content */}
+          <div className="flex-1 px-6 lg:px-8 py-8">
+            <div className="max-w-4xl mx-auto">
+              <Skeleton className="mb-3" style={{ width: '300px', height: '32px' }} />
+              <Skeleton className="mb-8" style={{ width: '200px', height: '14px' }} />
+              {/* Skeleton page cards */}
+              <div className="space-y-6">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="rounded-lg p-6"
+                    style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <Skeleton style={{ width: '80px', height: '20px' }} />
+                      <Skeleton style={{ width: '90px', height: '24px', borderRadius: '9999px' }} />
+                    </div>
+                    <div className="space-y-3">
+                      <Skeleton style={{ width: '100%', height: '14px' }} />
+                      <Skeleton style={{ width: '95%', height: '14px' }} />
+                      <Skeleton style={{ width: '85%', height: '14px' }} />
+                      <Skeleton style={{ width: '70%', height: '14px' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
