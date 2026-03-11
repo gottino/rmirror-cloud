@@ -147,15 +147,13 @@ export function OnboardingChecklist({ steps, onDismiss, onDownloadAgent }: Onboa
   const totalCount = steps.length;
   const progressPercent = (completedCount / totalCount) * 100;
 
-  // Determine which steps are "waiting" -- not active, not completed, and come after an incomplete step
+  // Determine which steps are "waiting" -- not active, not completed
   const getWaitingMessage = (step: OnboardingStep): string | null => {
     if (step.completed || step.active) return null;
 
     switch (step.id) {
-      case 3:
-        return 'Waiting for agent...';
-      case 4:
-        return 'Waiting for sync...';
+      case 2:
+        return 'Complete OCR first';
       default:
         return null;
     }
@@ -189,7 +187,7 @@ export function OnboardingChecklist({ steps, onDismiss, onDownloadAgent }: Onboa
               lineHeight: 1.3,
             }}
           >
-            Getting Started
+            Next Steps
           </h3>
           <p
             style={{
@@ -198,7 +196,7 @@ export function OnboardingChecklist({ steps, onDismiss, onDownloadAgent }: Onboa
               margin: '0.25rem 0 0 0',
             }}
           >
-            Set up rMirror in a few simple steps
+            Get the most out of your notebooks
           </p>
         </div>
         <button
@@ -407,60 +405,24 @@ export function OnboardingChecklist({ steps, onDismiss, onDownloadAgent }: Onboa
  * Use this helper to generate the steps array based on the user's current state.
  */
 export function getDefaultOnboardingSteps({
-  hasAgent,
-  hasNotebook,
   hasOcr,
   hasNotion,
-  onDownloadAgent,
 }: {
-  hasAgent: boolean;
-  hasNotebook: boolean;
   hasOcr: boolean;
   hasNotion: boolean;
-  onDownloadAgent: () => void;
 }): OnboardingStep[] {
   return [
     {
       id: 1,
-      title: 'Account created',
-      description: 'Your rMirror account is ready to go.',
-      completed: true,
-      active: false,
-      completedMessage: "You're in!",
-    },
-    {
-      id: 2,
-      title: 'Set up sync',
-      description:
-        'Install the reMarkable desktop app and download the rMirror agent to start syncing your notebooks.',
-      completed: hasAgent,
-      active: !hasAgent,
-      completedMessage: 'Agent connected',
-      action: {
-        label: 'Download Agent',
-        onClick: onDownloadAgent,
-      },
-    },
-    {
-      id: 3,
-      title: 'Sync your first notebook',
-      description:
-        "Write on your reMarkable -- it'll show up here automatically once the agent is running.",
-      completed: hasNotebook,
-      active: hasAgent && !hasNotebook,
-      completedMessage: 'Notebook synced',
-    },
-    {
-      id: 4,
       title: 'See your handwriting as text',
       description:
         "We'll OCR your pages so you can search your notes and copy text from your handwriting.",
       completed: hasOcr,
-      active: hasNotebook && !hasOcr,
+      active: !hasOcr,
       completedMessage: 'OCR complete',
     },
     {
-      id: 5,
+      id: 2,
       title: 'Connect Notion (optional)',
       description:
         'Push your notes to Notion with one click. Keep your digital notebook in sync with your favorite tools.',

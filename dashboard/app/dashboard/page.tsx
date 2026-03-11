@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Mail, Shield, BarChart3, Download, Tablet } from 'lucide-react';
+import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Mail, Shield, BarChart3 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
 import SetupWizard from './components/SetupWizard';
 import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, getLatestAgentVersion, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type AgentVersionInfo, type QuotaStatus, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
@@ -169,7 +169,6 @@ function DashboardContent() {
   const [onboarding, setOnboarding] = useState<OnboardingProgress | null>(null);
   const [legalStatus, setLegalStatus] = useState<LegalStatus | null>(null);
   const [agentVersionInfo, setAgentVersionInfo] = useState<AgentVersionInfo | null>(null);
-  const [wizardCompleted, setWizardCompleted] = useState(false);
 
   // Stable callback for closing sidebar (prevents SidebarLogo re-renders)
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -888,16 +887,13 @@ function DashboardContent() {
           </div>
         </header>
         <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
-          {/* Onboarding Checklist (hidden when wizard is active) */}
-          {onboarding && !onboarding.onboarding_dismissed && !isSearchMode && (notebooks.length > 0 || wizardCompleted) && (
+          {/* Onboarding Checklist (only after first sync, trimmed to post-sync steps) */}
+          {onboarding && !onboarding.onboarding_dismissed && !isSearchMode && notebooks.length > 0 && (
             <div className="mb-6">
               <OnboardingChecklist
                 steps={getDefaultOnboardingSteps({
-                  hasAgent: agentStatus?.has_agent_connected ?? false,
-                  hasNotebook: onboarding.has_notebooks,
                   hasOcr: onboarding.has_ocr,
                   hasNotion: onboarding.has_notion,
-                  onDownloadAgent: handleDownloadClick,
                 })}
                 onDismiss={handleDismissOnboarding}
                 onDownloadAgent={handleDownloadClick}
@@ -912,7 +908,7 @@ function DashboardContent() {
               totalResults={searchResults.total_results}
               hasMore={searchResults.has_more}
             />
-          ) : notebooks.length === 0 && !wizardCompleted && onboarding && !onboarding.onboarding_dismissed ? (
+          ) : notebooks.length === 0 ? (
             <SetupWizard
               getToken={async () => {
                 if (isDevelopmentMode) {
@@ -922,67 +918,14 @@ function DashboardContent() {
               }}
               isDevelopmentMode={isDevelopmentMode}
               onComplete={() => {
-                setWizardCompleted(true);
                 fetchNotebooks();
               }}
-              onDismiss={() => {
-                setWizardCompleted(true);
-                handleDismissOnboarding();
-              }}
+              onboardingProgress={onboarding ? {
+                agent_downloaded_at: onboarding.agent_downloaded_at,
+                agent_first_connected_at: onboarding.agent_first_connected_at,
+                first_notebook_synced_at: onboarding.first_notebook_synced_at,
+              } : undefined}
             />
-          ) : notebooks.length === 0 ? (
-            <div className="py-12 rounded-lg max-w-2xl mx-auto" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
-              <div className="text-center mb-8 px-6">
-                <BookOpen className="w-16 h-16 mx-auto mb-4" style={{ color: 'var(--warm-gray)', opacity: 0.3 }} />
-                <h3 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                  No notebooks yet
-                </h3>
-                <p style={{ color: 'var(--warm-gray)' }}>
-                  Get started in three simple steps
-                </p>
-              </div>
-
-              {/* Three-step guide */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 px-6 mb-8">
-                {[
-                  { icon: Download, label: 'Download Agent', desc: 'Install the rMirror Agent on your Mac' },
-                  { icon: Tablet, label: 'Connect reMarkable', desc: 'Sign in and link your reMarkable folder' },
-                  { icon: BookOpen, label: 'See Notebooks', desc: 'Your handwritten notes appear here' },
-                ].map((step, i) => (
-                  <div key={i} className="text-center">
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-3"
-                      style={{ backgroundColor: 'var(--terracotta-light)', color: 'var(--terracotta)', fontWeight: 600, fontSize: '0.875em' }}
-                    >
-                      {i + 1}
-                    </div>
-                    <step.icon className="w-8 h-8 mx-auto mb-2" style={{ color: 'var(--warm-gray)' }} />
-                    <p style={{ fontWeight: 600, fontSize: '0.925em', color: 'var(--warm-charcoal)', marginBottom: '0.25rem' }}>
-                      {step.label}
-                    </p>
-                    <p style={{ fontSize: '0.8em', color: 'var(--warm-gray)' }}>
-                      {step.desc}
-                    </p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="text-center px-6">
-                <button
-                  onClick={handleDownloadClick}
-                  className="px-6 py-3 rounded-lg transition-colors font-semibold cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--primary)',
-                    color: 'var(--primary-foreground)'
-                  }}
-                >
-                  Download rMirror Agent for macOS
-                </button>
-                <p className="mt-3" style={{ fontSize: '0.8em', color: 'var(--warm-gray)' }}>
-                  <a href="mailto:support@rmirror.io" style={{ color: 'var(--terracotta)', textDecoration: 'underline' }}>Need help?</a>
-                </p>
-              </div>
-            </div>
           ) : (
             <>
               {/* View toggle */}

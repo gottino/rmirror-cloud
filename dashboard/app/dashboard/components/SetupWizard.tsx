@@ -9,7 +9,11 @@ interface SetupWizardProps {
   getToken: () => Promise<string | null>;
   isDevelopmentMode: boolean;
   onComplete: () => void;
-  onDismiss: () => void;
+  onboardingProgress?: {
+    agent_downloaded_at: string | null;
+    agent_first_connected_at: string | null;
+    first_notebook_synced_at: string | null;
+  };
 }
 
 type WizardStep = 1 | 2 | 3 | 4;
@@ -18,9 +22,14 @@ export default function SetupWizard({
   getToken,
   isDevelopmentMode,
   onComplete,
-  onDismiss,
+  onboardingProgress,
 }: SetupWizardProps) {
-  const [currentStep, setCurrentStep] = useState<WizardStep>(1);
+  // Derive initial step from backend state for smart resume on refresh
+  const [currentStep, setCurrentStep] = useState<WizardStep>(() => {
+    if (onboardingProgress?.agent_first_connected_at) return 3;
+    if (onboardingProgress?.agent_downloaded_at) return 2;
+    return 1;
+  });
   const [agentVersion, setAgentVersion] = useState<AgentVersionInfo | null>(null);
   const [agentConnected, setAgentConnected] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -151,13 +160,6 @@ export default function SetupWizard({
               </p>
             </div>
 
-            <button
-              onClick={onDismiss}
-              className="text-sm underline hover:opacity-80"
-              style={{ color: 'var(--warm-gray)' }}
-            >
-              Skip setup
-            </button>
           </div>
         )}
 
