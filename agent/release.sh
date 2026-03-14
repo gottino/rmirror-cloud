@@ -26,7 +26,7 @@ VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
 DMG_PATH="dist/rMirror-${VERSION}.dmg"
 BUCKET_NAME="rmirror-downloads"
 B2_PATH="releases/v${VERSION}/rMirror-${VERSION}.dmg"
-DASHBOARD_FILE="../dashboard/app/dashboard/page.tsx"
+BACKEND_CONFIG="../backend/app/config.py"
 
 echo -e "${GREEN}================================================${NC}"
 echo -e "${GREEN}  Releasing rMirror Agent v${VERSION}${NC}"
@@ -109,26 +109,24 @@ fi
 rm /tmp/version.json
 echo ""
 
-# Step 3: Update dashboard download link
-echo -e "${YELLOW}→${NC} Updating dashboard download link..."
+# Step 3: Update backend agent version config
+echo -e "${YELLOW}→${NC} Updating backend agent version..."
 
-if [ ! -f "$DASHBOARD_FILE" ]; then
-    echo -e "${RED}✗${NC} Dashboard file not found: $DASHBOARD_FILE"
+if [ ! -f "$BACKEND_CONFIG" ]; then
+    echo -e "${RED}✗${NC} Backend config not found: $BACKEND_CONFIG"
     exit 1
 fi
 
-# Update the download URL in dashboard
-sed -i '' "s|releases/v[0-9.]*\/rMirror-[0-9.]*.dmg|releases/v${VERSION}/rMirror-${VERSION}.dmg|g" "$DASHBOARD_FILE"
+# Update agent_latest_version in backend config
+sed -i '' "s|agent_latest_version: str = \"[0-9.]*\"|agent_latest_version: str = \"${VERSION}\"|" "$BACKEND_CONFIG"
 
-echo -e "${GREEN}✓${NC} Dashboard updated to v${VERSION}"
+echo -e "${GREEN}✓${NC} Backend config updated to v${VERSION}"
 echo ""
 
 # Step 4: Show diff and ask for confirmation
 echo -e "${YELLOW}→${NC} Changes to commit:"
 cd ..
-git diff --stat dashboard/
-echo ""
-git diff dashboard/app/dashboard/page.tsx | head -20
+git diff backend/app/config.py
 echo ""
 
 read -p "Commit and push these changes? [y/N] " -n 1 -r
@@ -136,18 +134,18 @@ echo ""
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo -e "${YELLOW}→${NC} Committing changes..."
-    git add dashboard/app/dashboard/page.tsx
-    git commit -m "chore(dashboard): update agent download link to v${VERSION}
+    git add backend/app/config.py
+    git commit -m "chore(backend): update agent_latest_version to v${VERSION}
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 
     echo -e "${YELLOW}→${NC} Pushing to GitHub..."
     git push
 
-    echo -e "${GREEN}✓${NC} Changes pushed"
+    echo -e "${GREEN}✓${NC} Changes pushed (will trigger deploy to staging)"
 else
     echo -e "${YELLOW}⚠${NC}  Skipped commit/push"
-    echo -e "   Don't forget to commit the dashboard changes manually!"
+    echo -e "   Don't forget to commit the backend config change manually!"
 fi
 echo ""
 
