@@ -107,7 +107,7 @@ class Agent:
             if self.remarkable_folder_missing:
                 if self.tray_app:
                     self.tray_app.update_status("Folder not found")
-                print(f"⚠️  reMarkable folder not found. Waiting for folder or custom path...")
+                print("⚠️  reMarkable folder not found. Waiting for folder or custom path...")
             elif self.tray_app and self.cloud_sync and self.cloud_sync.authenticated:
                 self.tray_app.update_status("Watching")
 
