@@ -35,6 +35,7 @@ class Agent:
         self.file_watcher = None
         self.cloud_sync = None
         self.web_app = None
+        self.remarkable_folder_missing = False
 
     async def start(self) -> None:
         """Start the agent and all components."""
@@ -103,17 +104,31 @@ class Agent:
                 print()
 
             # Update tray status
-            if self.tray_app and self.cloud_sync and self.cloud_sync.authenticated:
+            if self.remarkable_folder_missing:
+                if self.tray_app:
+                    self.tray_app.update_status("Folder not found")
+                print(f"⚠️  reMarkable folder not found. Waiting for folder or custom path...")
+            elif self.tray_app and self.cloud_sync and self.cloud_sync.authenticated:
                 self.tray_app.update_status("Watching")
 
-            # Start file watcher (this will block) - only if authenticated
-            if self.config.remarkable.watch_enabled and self.cloud_sync and self.cloud_sync.authenticated:
+            # Start file watcher (this will block) - only if authenticated and folder exists
+            if not self.remarkable_folder_missing and self.config.remarkable.watch_enabled and self.cloud_sync and self.cloud_sync.authenticated:
                 await self._run_file_watcher()
             else:
                 # Keep agent running even without file watcher
-                # Just wait for interrupt signal
+                # Poll for folder appearance if missing
                 while self.running:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(5)
+                    if self.remarkable_folder_missing:
+                        if Path(self.config.remarkable.source_directory).exists():
+                            self.remarkable_folder_missing = False
+                            logger.info("reMarkable folder detected!")
+                            print("✓ reMarkable folder detected!")
+                            if self.tray_app:
+                                self.tray_app.update_status("Watching" if self.cloud_sync and self.cloud_sync.authenticated else "Connected")
+                            if self.config.remarkable.watch_enabled and self.cloud_sync and self.cloud_sync.authenticated:
+                                await self._run_file_watcher()
+                                break  # _run_file_watcher blocks
 
         except KeyboardInterrupt:
             print("\nReceived interrupt signal, shutting down...")
@@ -144,6 +159,12 @@ class Agent:
         if self.file_watcher is not None:
             logger.info("File watcher already running")
             return
+
+        if not Path(self.config.remarkable.source_directory).exists():
+            logger.warning("Cannot start file watcher: reMarkable folder not found")
+            return
+
+        self.remarkable_folder_missing = False
 
         if not self.cloud_sync or not self.cloud_sync.authenticated:
             logger.warning("Cannot start file watcher: not authenticated")
@@ -264,13 +285,14 @@ def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> Non
 
     # Check if reMarkable folder exists
     remarkable_path = Path(config.remarkable.source_directory)
-    if not remarkable_path.exists():
-        click.echo(f"Error: reMarkable folder not found: {remarkable_path}", err=True)
-        click.echo("\nPlease ensure the reMarkable Desktop app is installed and has synced at least once.", err=True)
-        sys.exit(1)
+    remarkable_folder_missing = not remarkable_path.exists()
+    if remarkable_folder_missing:
+        click.echo(f"⚠️  reMarkable folder not found: {remarkable_path}", err=True)
+        click.echo("The agent will start anyway. Use the web UI to configure the folder path.", err=True)
 
     # Create and run agent
     agent = Agent(config, foreground=foreground)
+    agent.remarkable_folder_missing = remarkable_folder_missing
     setup_signal_handlers(agent)
 
     # Run the agent

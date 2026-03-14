@@ -85,6 +85,8 @@ def register_routes(app: Flask) -> None:
         """Main dashboard page."""
         config: Config = app.config["AGENT_CONFIG"]
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+        agent = app.config.get("AGENT")
+        remarkable_folder_missing = agent.remarkable_folder_missing if agent else not Path(config.remarkable.source_directory).exists()
         return render_template(
             "index.html",
             config=config,
@@ -95,6 +97,7 @@ def register_routes(app: Flask) -> None:
             max_pages_per_notebook=config.sync.max_pages_per_notebook,
             use_clerk_auth=config.api.use_clerk_auth,
             authenticated=cloud_sync.authenticated if cloud_sync else False,
+            remarkable_folder_missing=remarkable_folder_missing,
         )
 
     @app.route("/api/status")
@@ -182,6 +185,16 @@ def register_routes(app: Flask) -> None:
 
         # Save configuration
         config.save()
+
+        # Re-check folder state and update agent
+        agent = app.config.get("AGENT")
+        if agent:
+            new_path = Path(config.remarkable.source_directory)
+            agent.remarkable_folder_missing = not new_path.exists()
+            if new_path.exists() and not agent.file_watcher and config.remarkable.watch_enabled:
+                cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+                if cloud_sync and cloud_sync.authenticated:
+                    agent.start_file_watcher_sync()
 
         return jsonify({"success": True, "message": "Configuration updated"})
 
@@ -366,6 +379,13 @@ def register_routes(app: Flask) -> None:
         from app.remarkable.metadata_scanner import MetadataScanner
 
         config: Config = app.config["AGENT_CONFIG"]
+
+        if not Path(config.remarkable.source_directory).exists():
+            return jsonify({
+                "tree": [],
+                "stats": {"total_documents": 0, "total_pages": 0, "selected_pages": 0},
+                "folder_missing": True,
+            })
 
         try:
             scanner = MetadataScanner(Path(config.remarkable.source_directory))

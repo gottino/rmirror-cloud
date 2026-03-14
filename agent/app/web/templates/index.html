@@ -558,6 +558,118 @@
             display: none;
         }
 
+        /* Folder Missing Banner */
+        .folder-missing-card {
+            background: var(--card);
+            border-radius: var(--radius-lg);
+            padding: 28px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--amber-gold);
+        }
+
+        .folder-missing-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .folder-missing-header svg {
+            flex-shrink: 0;
+            color: var(--amber-gold);
+        }
+
+        .folder-missing-header h3 {
+            margin: 0;
+            font-size: 1.1em;
+        }
+
+        .folder-missing-path {
+            background: var(--soft-cream);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 8px 12px;
+            font-family: 'SF Mono', SFMono-Regular, Menlo, monospace;
+            font-size: 0.85em;
+            color: var(--warm-gray);
+            margin-bottom: 16px;
+            word-break: break-all;
+        }
+
+        .folder-missing-steps {
+            margin: 16px 0;
+            padding-left: 0;
+            list-style: none;
+            counter-reset: step-counter;
+        }
+
+        .folder-missing-steps li {
+            counter-increment: step-counter;
+            padding: 8px 0 8px 36px;
+            position: relative;
+            font-size: 0.925em;
+            color: var(--foreground);
+        }
+
+        .folder-missing-steps li::before {
+            content: counter(step-counter);
+            position: absolute;
+            left: 0;
+            top: 8px;
+            width: 24px;
+            height: 24px;
+            background: var(--soft-cream);
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8em;
+            font-weight: 600;
+            color: var(--warm-gray);
+        }
+
+        .folder-missing-custom {
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .folder-missing-custom label {
+            font-size: 0.85em;
+            color: var(--warm-gray);
+            margin-bottom: 8px;
+        }
+
+        .folder-missing-custom-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .folder-missing-custom-row input {
+            flex: 1;
+        }
+
+        .folder-missing-waiting {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 16px;
+            font-size: 0.85em;
+            color: var(--warm-gray);
+        }
+
+        @keyframes pulse-opacity {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .folder-missing-waiting .spinner {
+            animation: spinner-rotate 0.8s linear infinite;
+        }
+
         .checkbox-group {
             display: flex;
             align-items: center;
@@ -1058,6 +1170,38 @@
 
         <div id="message" class="alert"></div>
 
+        <!-- Folder Missing Banner -->
+        {% if remarkable_folder_missing %}
+        <div class="folder-missing-card" id="folder-missing-banner">
+            <div class="folder-missing-header">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <h3>reMarkable Folder Not Found</h3>
+            </div>
+            <div class="folder-missing-path" id="folder-missing-path">{{ remarkable_dir }}</div>
+            <p style="font-size: 0.925em; color: var(--warm-gray); margin-bottom: 4px;">To get started, set up the reMarkable Desktop app:</p>
+            <ol class="folder-missing-steps">
+                <li>Download and install the <strong>reMarkable Desktop App</strong> from reMarkable's website</li>
+                <li>Sign in with your reMarkable account</li>
+                <li>Wait for your notebooks to sync at least once</li>
+            </ol>
+            <div class="folder-missing-custom">
+                <label>Or set a custom folder path:</label>
+                <div class="folder-missing-custom-row">
+                    <input type="text" id="custom-remarkable-dir" value="{{ remarkable_dir }}" placeholder="/path/to/remarkable/folder">
+                    <button class="secondary" onclick="setCustomRemarkableDir()">Set Path</button>
+                </div>
+            </div>
+            <div class="folder-missing-waiting">
+                <span class="spinner"></span>
+                Waiting for folder to appear...
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Status Card -->
         <div class="card">
             <div class="card-header">
@@ -1112,8 +1256,13 @@
                 <div class="status-item">
                     <div class="status-label">File Watching</div>
                     <div class="status-value" id="watch-status">
+                        {% if remarkable_folder_missing %}
+                        <span class="status-indicator yellow"></span>
+                        Folder not found
+                        {% else %}
                         <span class="status-indicator green"></span>
                         {{ 'Enabled' if config.remarkable.watch_enabled else 'Disabled' }}
+                        {% endif %}
                     </div>
                 </div>
                 <div class="status-item">
@@ -2049,6 +2198,16 @@
                 const response = await fetch('/api/notebooks/tree');
                 const data = await response.json();
 
+                if (data.folder_missing) {
+                    const container = document.getElementById('notebook-tree');
+                    container.textContent = '';
+                    const msg = document.createElement('p');
+                    msg.style.cssText = 'color: var(--warm-gray); text-align: center; padding: 24px; font-size: 0.925em;';
+                    msg.textContent = 'Notebooks will appear here once the reMarkable folder is available.';
+                    container.appendChild(msg);
+                    return;
+                }
+
                 if (data.error) {
                     showMessage('Failed to load notebooks: ' + data.error, 'error');
                     return;
@@ -2458,6 +2617,84 @@
             updateTreeCheckboxes();
             updateSelectedPagesCount();
         });
+
+        // Folder missing polling
+        function updateWatchStatusToEnabled() {
+            const watchStatus = document.getElementById('watch-status');
+            if (watchStatus) {
+                watchStatus.textContent = '';
+                const dot = document.createElement('span');
+                dot.className = 'status-indicator green';
+                watchStatus.appendChild(dot);
+                watchStatus.appendChild(document.createTextNode(' Enabled'));
+            }
+        }
+
+        function startFolderMissingPolling() {
+            const banner = document.getElementById('folder-missing-banner');
+            if (!banner) return;
+
+            setInterval(async () => {
+                try {
+                    const response = await fetch('/api/status');
+                    const data = await response.json();
+                    if (data.watching && data.watching.exists) {
+                        // Folder appeared - hide banner and refresh UI
+                        banner.style.display = 'none';
+                        updateWatchStatusToEnabled();
+                        refreshStatus();
+                        loadNotebookTree();
+                    }
+                } catch (error) {
+                    console.error('Folder polling error:', error);
+                }
+            }, 5000);
+        }
+
+        async function setCustomRemarkableDir() {
+            const input = document.getElementById('custom-remarkable-dir');
+            const newPath = input.value.trim();
+            if (!newPath) return;
+
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        remarkable: { source_directory: newPath }
+                    }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    // Update displayed path
+                    const pathEl = document.getElementById('folder-missing-path');
+                    if (pathEl) pathEl.textContent = newPath;
+
+                    // Also update settings form if it exists
+                    const settingsInput = document.getElementById('remarkable-dir');
+                    if (settingsInput) settingsInput.value = newPath;
+
+                    showMessage('Folder path updated. Checking if it exists...', 'info');
+
+                    // Check immediately if the new path resolved the issue
+                    const statusResponse = await fetch('/api/status');
+                    const statusData = await statusResponse.json();
+                    if (statusData.watching && statusData.watching.exists) {
+                        const banner = document.getElementById('folder-missing-banner');
+                        if (banner) banner.style.display = 'none';
+                        updateWatchStatusToEnabled();
+                        showMessage('reMarkable folder found! Notebooks loading...', 'success');
+                        refreshStatus();
+                        loadNotebookTree();
+                    }
+                }
+            } catch (error) {
+                showMessage('Failed to update path: ' + error.message, 'error');
+            }
+        }
+
+        // Start folder polling if banner is visible
+        startFolderMissingPolling();
 
         // Refresh status on load
         refreshStatus();
