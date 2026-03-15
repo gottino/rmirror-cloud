@@ -109,6 +109,9 @@ security/
 # Claude Code development context (private repo)
 dev-context/
 
+# Legal documents (private, not for public repo)
+legal-docs/
+
 # Claude Code workflow documentation (should be in dev-context/, not main repo)
 README-CLAUDE-SETUP.md
 CLAUDE_CODE_SETUP.md
@@ -139,3 +142,6 @@ dashboard/dev-context/
 
 # Literal ~ directories (should never exist)
 ~
+
+# Obsidian plugin (separate repo, developed here temporarily)
+obsidian-plugin/
