@@ -782,3 +782,73 @@ export async function acceptTerms(token: string): Promise<LegalStatus> {
 
   return handleApiResponse<LegalStatus>(response);
 }
+
+// ==================== Obsidian Integration ====================
+
+export interface ObsidianEnableResponse {
+  api_key: string;
+  enabled: boolean;
+}
+
+export interface ObsidianStatusResponse {
+  enabled: boolean;
+  last_sync: string | null;
+  total_notebooks_synced: number;
+  total_pages_synced: number;
+  pending_notebooks: number;
+}
+
+export async function enableObsidian(token: string): Promise<ObsidianEnableResponse> {
+  const response = await fetch(`${API_URL}/integrations/obsidian/enable`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to enable Obsidian');
+  }
+  return response.json();
+}
+
+export async function regenerateObsidianKey(token: string): Promise<ObsidianEnableResponse> {
+  const response = await fetch(`${API_URL}/integrations/obsidian/regenerate-key`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to regenerate key');
+  }
+  return response.json();
+}
+
+export async function disableObsidian(token: string): Promise<void> {
+  const response = await fetch(`${API_URL}/integrations/obsidian/disable`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to disable Obsidian');
+  }
+}
+
+export async function getObsidianStatus(token: string): Promise<ObsidianStatusResponse> {
+  const response = await fetch(`${API_URL}/integrations/obsidian/status`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to get Obsidian status');
+  }
+  return response.json();
+}

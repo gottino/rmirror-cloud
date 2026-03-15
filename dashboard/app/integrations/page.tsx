@@ -13,7 +13,13 @@ import {
   testIntegrationConnection,
   IntegrationConfig,
   type IntegrationTestResult,
+  enableObsidian,
+  regenerateObsidianKey,
+  disableObsidian,
+  getObsidianStatus,
+  type ObsidianStatusResponse,
 } from '@/lib/api';
+import { Copy, Check } from 'lucide-react';
 import { trackEvent } from '@/lib/analytics';
 import { timeAgo } from '@/lib/utils';
 
@@ -26,6 +32,10 @@ export default function IntegrationsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<IntegrationTestResult | null>(null);
+  const [obsidianStatus, setObsidianStatus] = useState<ObsidianStatusResponse | null>(null);
+  const [obsidianApiKey, setObsidianApiKey] = useState<string | null>(null);
+  const [obsidianCopied, setObsidianCopied] = useState(false);
+  const [obsidianLoading, setObsidianLoading] = useState(false);
 
   // Development mode bypass
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
@@ -52,6 +62,14 @@ export default function IntegrationsPage() {
       const data = await getIntegrations(token);
       console.log('Integrations loaded:', data);
       setIntegrations(data);
+
+      // Also load Obsidian status
+      try {
+        const obsStatus = await getObsidianStatus(token);
+        setObsidianStatus(obsStatus);
+      } catch {
+        // Obsidian not enabled yet, ignore
+      }
     } catch (err) {
       console.error('Failed to load integrations:', err);
       setError(err instanceof Error ? err.message : 'Failed to load integrations');
@@ -122,6 +140,69 @@ export default function IntegrationsPage() {
       });
     } finally {
       setTesting(null);
+    }
+  }
+
+  async function handleEnableObsidian() {
+    setObsidianLoading(true);
+    try {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (!token) return;
+
+      const result = await enableObsidian(token);
+      setObsidianApiKey(result.api_key);
+      setObsidianStatus({ enabled: true, last_sync: null, total_notebooks_synced: 0, total_pages_synced: 0, pending_notebooks: 0 });
+      trackEvent({ name: 'integration_setup_started', data: { service: 'obsidian' } });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to enable Obsidian');
+    } finally {
+      setObsidianLoading(false);
+    }
+  }
+
+  async function handleRegenerateObsidianKey() {
+    if (!confirm('This will invalidate your current API key. Any connected Obsidian plugin will need the new key. Continue?')) return;
+    setObsidianLoading(true);
+    try {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (!token) return;
+
+      const result = await regenerateObsidianKey(token);
+      setObsidianApiKey(result.api_key);
+      setObsidianCopied(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to regenerate key');
+    } finally {
+      setObsidianLoading(false);
+    }
+  }
+
+  async function handleDisableObsidian() {
+    if (!confirm('Are you sure you want to disconnect Obsidian? Your synced files will remain in your vault.')) return;
+    try {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (!token) return;
+
+      await disableObsidian(token);
+      setObsidianStatus(null);
+      setObsidianApiKey(null);
+      trackEvent({ name: 'integration_disconnected', data: { service: 'obsidian' } });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to disable Obsidian');
+    }
+  }
+
+  function handleCopyApiKey() {
+    if (obsidianApiKey) {
+      navigator.clipboard.writeText(obsidianApiKey);
+      setObsidianCopied(true);
+      setTimeout(() => setObsidianCopied(false), 2000);
     }
   }
 
@@ -249,6 +330,97 @@ export default function IntegrationsPage() {
                       style={{ backgroundColor: 'var(--warm-charcoal)', color: 'white' }}
                     >
                       Connect Notion
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Knowledge Base Section */}
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold mb-4">Knowledge Base</h2>
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#7c3aed' }}>
+                <span className="text-white font-bold">O</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-lg">Obsidian</h3>
+                {obsidianStatus?.enabled && obsidianApiKey ? (
+                  <>
+                    <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
+                      Copy your API key and paste it into the rMirror Obsidian plugin settings.
+                    </p>
+                    <div className="flex items-center gap-2 mb-3">
+                      <code
+                        className="flex-1 px-3 py-2 rounded text-sm font-mono break-all"
+                        style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
+                      >
+                        {obsidianApiKey}
+                      </code>
+                      <button
+                        onClick={handleCopyApiKey}
+                        className="p-2 rounded-md transition-colors flex-shrink-0"
+                        style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
+                        title="Copy API key"
+                      >
+                        {obsidianCopied ? <Check className="w-4 h-4" style={{ color: 'var(--sage-green)' }} /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => { setObsidianApiKey(null); }}
+                      className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                      style={{ backgroundColor: 'var(--warm-charcoal)', color: 'white' }}
+                    >
+                      Done
+                    </button>
+                  </>
+                ) : obsidianStatus?.enabled ? (
+                  <>
+                    <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
+                      Status: <span style={{ color: 'var(--sage-green)', fontWeight: 500 }}>Connected</span>
+                      {obsidianStatus.last_sync && (
+                        <> &middot; Last synced {timeAgo(obsidianStatus.last_sync)}</>
+                      )}
+                      {obsidianStatus.total_notebooks_synced > 0 && (
+                        <> &middot; {obsidianStatus.total_notebooks_synced} notebook{obsidianStatus.total_notebooks_synced !== 1 ? 's' : ''} synced</>
+                      )}
+                      {obsidianStatus.pending_notebooks > 0 && (
+                        <> &middot; {obsidianStatus.pending_notebooks} pending</>
+                      )}
+                    </p>
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        onClick={handleRegenerateObsidianKey}
+                        disabled={obsidianLoading}
+                        className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
+                      >
+                        {obsidianLoading ? 'Regenerating...' : 'Regenerate Key'}
+                      </button>
+                      <button
+                        onClick={handleDisableObsidian}
+                        className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        style={{ backgroundColor: 'var(--destructive-light)', color: 'var(--destructive)' }}
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
+                      Sync your notebooks to Obsidian as Markdown files for local-first knowledge management
+                    </p>
+                    <button
+                      onClick={handleEnableObsidian}
+                      disabled={obsidianLoading}
+                      className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                      style={{ backgroundColor: 'var(--warm-charcoal)', color: 'white' }}
+                    >
+                      {obsidianLoading ? 'Connecting...' : 'Connect Obsidian'}
                     </button>
                   </>
                 )}
