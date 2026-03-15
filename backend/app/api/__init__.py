@@ -10,6 +10,7 @@ from app.api import (
     integrations,
     notebooks,
     notion_oauth,
+    obsidian,
     onboarding,
     pages,
     processing,
@@ -35,6 +36,7 @@ api_router.include_router(processing.router, prefix="/processing", tags=["proces
 api_router.include_router(quota.router, prefix="/quota", tags=["quota"])
 api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
+api_router.include_router(obsidian.router, prefix="/integrations", tags=["obsidian"])
 api_router.include_router(notion_oauth.router, prefix="/integrations", tags=["integrations", "notion-oauth"])
 api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
 api_router.include_router(todos.router, prefix="/todos", tags=["todos"])
