@@ -1,4 +1,4 @@
-name: Build Agent (Intel)
+name: Build Agent (Apple Silicon)
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15-intel
+    runs-on: macos-15
     timeout-minutes: 30
 
     steps:
@@ -28,8 +28,8 @@ jobs:
           echo "Python: $(python3 --version)"
           python3 -c "import platform; print(f'Architecture: {platform.machine()}')"
           python3 -c "import struct; print(f'Pointer size: {struct.calcsize(\"P\") * 8}-bit')"
-          # Fail if not x86_64
-          python3 -c "import platform; assert platform.machine() == 'x86_64', f'Expected x86_64, got {platform.machine()}'"
+          # Fail if not arm64
+          python3 -c "import platform; assert platform.machine() == 'arm64', f'Expected arm64, got {platform.machine()}'"
 
       - name: Install Poetry
         run: pip install poetry
@@ -129,7 +129,7 @@ jobs:
         env:
           AGENT_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          DMG_NAME="rMirror-${AGENT_VERSION}-intel.dmg"
+          DMG_NAME="rMirror-${AGENT_VERSION}.dmg"
 
           create-dmg \
             --volname "rMirror Installer" \
@@ -160,7 +160,7 @@ jobs:
           NOTARIZE_PASSWORD: ${{ secrets.NOTARIZE_PASSWORD }}
           AGENT_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          DMG_PATH="dist/rMirror-${AGENT_VERSION}-intel.dmg"
+          DMG_PATH="dist/rMirror-${AGENT_VERSION}.dmg"
 
           echo "Submitting for notarization..."
           xcrun notarytool submit "$DMG_PATH" \
@@ -179,8 +179,8 @@ jobs:
       - name: Upload DMG as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rMirror-${{ steps.version.outputs.version }}-intel
-          path: agent/dist/rMirror-${{ steps.version.outputs.version }}-intel.dmg
+          name: rMirror-${{ steps.version.outputs.version }}
+          path: agent/dist/rMirror-${{ steps.version.outputs.version }}.dmg
 
       - name: Upload to Backblaze B2
         if: ${{ inputs.upload_to_b2 }}
@@ -191,8 +191,8 @@ jobs:
           AGENT_VERSION: ${{ steps.version.outputs.version }}
         run: |
           pip install b2
-          DMG_PATH="dist/rMirror-${AGENT_VERSION}-intel.dmg"
-          B2_PATH="releases/v${AGENT_VERSION}/rMirror-${AGENT_VERSION}-intel.dmg"
+          DMG_PATH="dist/rMirror-${AGENT_VERSION}.dmg"
+          B2_PATH="releases/v${AGENT_VERSION}/rMirror-${AGENT_VERSION}.dmg"
 
           b2 account authorize "$B2_APPLICATION_KEY_ID" "$B2_APPLICATION_KEY"
           b2 file upload rmirror-downloads "$DMG_PATH" "$B2_PATH"
@@ -204,14 +204,14 @@ jobs:
         env:
           AGENT_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          DMG_PATH="dist/rMirror-${AGENT_VERSION}-intel.dmg"
+          DMG_PATH="dist/rMirror-${AGENT_VERSION}.dmg"
           DMG_SIZE=$(du -h "$DMG_PATH" | cut -f1)
           DMG_SHA256=$(shasum -a 256 "$DMG_PATH" | cut -d' ' -f1)
 
           echo "## Build Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Version:** ${AGENT_VERSION}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Architecture:** x86_64 (Intel)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Architecture:** arm64 (Apple Silicon)" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Size:** ${DMG_SIZE}" >> "$GITHUB_STEP_SUMMARY"
           echo "- **SHA256:** \`${DMG_SHA256}\`" >> "$GITHUB_STEP_SUMMARY"
 
