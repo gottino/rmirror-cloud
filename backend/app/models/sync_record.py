@@ -166,6 +166,9 @@ class IntegrationConfig(Base):
     # Configuration (encrypted JSON containing API keys, database IDs, etc.)
     config_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
 
+    # API key hash for Obsidian plugin auth (stored outside encrypted config for O(1) lookup)
+    api_key_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False

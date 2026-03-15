@@ -47,6 +47,10 @@ class Notebook(Base):
     s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Original file
     notebook_pdf_s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Combined PDF
     file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Cached composite hash of all OCR'd pages (for Obsidian sync change detection)
+    obsidian_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Metadata
