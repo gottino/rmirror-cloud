@@ -337,6 +337,30 @@ async def process_rm_file(
         db.commit()
         db.refresh(page)
 
+        # Update notebook's Obsidian content hash for pull-based sync
+        try:
+            from app.services.obsidian_service import compute_notebook_content_hash
+
+            ocr_pages = (
+                db.query(NotebookPage.page_number, Page.ocr_text)
+                .join(Page, NotebookPage.page_id == Page.id)
+                .filter(
+                    NotebookPage.notebook_id == notebook.id,
+                    Page.ocr_status == OcrStatus.COMPLETED.value,
+                    Page.ocr_text.isnot(None),
+                )
+                .order_by(NotebookPage.page_number)
+                .all()
+            )
+
+            notebook.obsidian_content_hash = compute_notebook_content_hash(
+                [(pn, text) for pn, text in ocr_pages]
+            )
+            db.commit()
+        except Exception as e:
+            logger.error(f"Failed to update obsidian content hash: {e}")
+            # Non-fatal — don't block the upload
+
         # Track first OCR milestone
         if ocr_status == OcrStatus.COMPLETED and not current_user.first_ocr_completed_at:
             current_user.first_ocr_completed_at = datetime.utcnow()
@@ -435,6 +459,10 @@ async def process_rm_file(
 
                 # Queue sync for each active integration
                 for integration in active_integrations:
+                    # Skip pull-based integrations (they sync via their own polling endpoints)
+                    if integration.target_name == 'obsidian':
+                        continue
+
                     try:
                         # Generate content hash for this page
                         content_hash = fingerprint_page(

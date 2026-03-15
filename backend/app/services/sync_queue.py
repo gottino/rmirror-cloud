@@ -238,9 +238,10 @@ def queue_page_sync(
     # Generate content hash
     content_hash = fingerprint_page(notebook_uuid, page_number, ocr_text, page_uuid)
 
-    # Define integration types that should NOT receive page syncs
-    # These are todo-only integrations
-    TODO_ONLY_INTEGRATIONS = ['notion-todos', 'todoist', 'ticktick']
+    # Integrations excluded from push-based page sync queue.
+    # - Todo-only integrations only receive todo items
+    # - Pull-based integrations (obsidian) handle their own sync via polling endpoints
+    EXCLUDED_FROM_PAGE_SYNC = ['notion-todos', 'todoist', 'ticktick', 'obsidian']
 
     # Get all enabled integrations that support page syncs
     integrations = (
@@ -248,7 +249,7 @@ def queue_page_sync(
         .filter(
             IntegrationConfig.user_id == user_id,
             IntegrationConfig.is_enabled == True,
-            ~IntegrationConfig.target_name.in_(TODO_ONLY_INTEGRATIONS),
+            ~IntegrationConfig.target_name.in_(EXCLUDED_FROM_PAGE_SYNC),
         )
         .all()
     )
