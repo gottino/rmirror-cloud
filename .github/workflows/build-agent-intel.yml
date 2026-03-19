@@ -115,6 +115,7 @@ jobs:
           echo "Signing with: $CODESIGN_IDENTITY"
           codesign --force --deep --sign "$CODESIGN_IDENTITY" \
             --options runtime \
+            --entitlements entitlements-intel.plist \
             --timestamp \
             dist/rMirror.app
 

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Required on Intel Macs: libffi (used by pyobjc) creates unsigned
+         temporary files for FFI closures. Without this entitlement, macOS
+         blocks loading them into the hardened-runtime-signed process,
+         causing an infinite retry loop and ~34 GB of disk writes.
+         Apple Silicon uses MAP_JIT instead and does not need this. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>
