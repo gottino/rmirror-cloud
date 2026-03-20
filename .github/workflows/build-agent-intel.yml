@@ -108,12 +108,18 @@ jobs:
       - name: Codesign app bundle
         working-directory: agent
         run: |
+          # Inside-out signing (Apple-recommended): sign inner binaries first,
+          # then the main app. Only the main executable gets entitlements.
           echo "Stripping existing signatures..."
           find dist/rMirror.app -type f \( -name "*.so" -o -name "*.dylib" \) \
             -exec codesign --remove-signature {} \; 2>/dev/null || true
 
-          echo "Signing with: $CODESIGN_IDENTITY"
-          codesign --force --deep --sign "$CODESIGN_IDENTITY" \
+          echo "Signing inner binaries (no entitlements)..."
+          find dist/rMirror.app -type f \( -name "*.so" -o -name "*.dylib" \) \
+            -exec codesign --force --sign "$CODESIGN_IDENTITY" --options runtime --timestamp {} \;
+
+          echo "Signing main app with entitlements..."
+          codesign --force --sign "$CODESIGN_IDENTITY" \
             --options runtime \
             --entitlements entitlements-intel.plist \
             --timestamp \

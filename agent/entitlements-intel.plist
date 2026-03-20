@@ -5,9 +5,16 @@
     <!-- Required on Intel Macs: libffi (used by pyobjc) creates unsigned
          temporary files for FFI closures. Without this entitlement, macOS
          blocks loading them into the hardened-runtime-signed process,
-         causing an infinite retry loop and ~34 GB of disk writes.
+         causing an infinite retry loop and excessive disk writes.
          Apple Silicon uses MAP_JIT instead and does not need this. -->
     <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Required on Intel Macs: libffi needs to map memory as write+execute
+         (W^X) to create FFI closures at runtime. The hardened runtime blocks
+         this by default, causing "vm_map_enter: curprot cannot be write+execute"
+         errors. Apple Silicon uses MAP_JIT which doesn't require this. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
 </dict>
 </plist>
