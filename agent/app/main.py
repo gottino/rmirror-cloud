@@ -35,6 +35,7 @@ class Agent:
         self.file_watcher = None
         self.cloud_sync = None
         self.web_app = None
+        self._web_server = None
         self.remarkable_folder_missing = False
 
     async def start(self) -> None:
@@ -184,12 +185,21 @@ class Agent:
         from app.web.app import create_app
 
         app = create_app(self.config, self.cloud_sync, agent=self)
-        app.run(
-            host=self.config.web.host,
-            port=self.config.web.port,
-            debug=False,
-            use_reloader=False,
+
+        # Use SO_REUSEADDR to avoid "Address already in use" on restart
+        from werkzeug.serving import make_server
+        server = make_server(
+            self.config.web.host,
+            self.config.web.port,
+            app,
         )
+        server.socket.setsockopt(
+            __import__('socket').SOL_SOCKET,
+            __import__('socket').SO_REUSEADDR,
+            1,
+        )
+        self._web_server = server
+        server.serve_forever()
 
     async def stop(self) -> None:
         """Stop the agent and all components."""
@@ -198,6 +208,9 @@ class Agent:
 
         if self.file_watcher:
             await self.file_watcher.stop()
+
+        if self._web_server:
+            self._web_server.shutdown()
 
         print("Agent stopped.")
 

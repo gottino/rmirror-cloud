@@ -1784,7 +1784,8 @@
                     const port = window.location.port || '5555';
                     const callback = encodeURIComponent(`http://localhost:${port}/auth/callback`);
                     const authUrl = `${data.clerk_frontend_api}/agent?callback=${callback}`;
-                    window.open(authUrl, '_blank', 'width=500,height=700');
+                    // Navigate directly instead of window.open to avoid pop-up blockers
+                    window.location.href = authUrl;
                 })
                 .catch(error => {
                     showMessage('Failed to open authentication page', 'error');
@@ -2175,8 +2176,9 @@
 
                 if (data.success) {
                     showMessage(data.message, 'success');
-                    // Clear password field
-                    document.getElementById('password').value = '';
+                    // Clear password field (only exists in legacy auth mode)
+                    const passwordField = document.getElementById('password');
+                    if (passwordField) passwordField.value = '';
                     // Close settings modal
                     closeSettings();
                 } else {

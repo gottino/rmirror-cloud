@@ -70,6 +70,8 @@ class TrayApp(rumps.App):
 
     def quit_app(self, sender: rumps.MenuItem) -> None:
         """Quit the application."""
+        import os
+
         # Stop the agent if it exists
         if self.agent:
             # Create a new event loop for cleanup
@@ -82,6 +84,9 @@ class TrayApp(rumps.App):
 
         # Quit the rumps application
         rumps.quit_application()
+
+        # Force exit to ensure daemon threads (Flask, asyncio) don't keep the process alive
+        os._exit(0)
 
 
 def run_tray_app(config: Config, agent: Optional[object] = None) -> None:
