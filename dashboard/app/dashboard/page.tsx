@@ -214,7 +214,7 @@ function DashboardContent() {
     }
     trackEvent({ name: 'agent_downloaded' });
     const downloadUrl = agentVersionInfo?.platforms.macos?.url
-      || 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.5.4/rMirror-1.5.4.dmg';
+      || 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.5.6/rMirror-1.5.6.dmg';
     window.open(downloadUrl, '_blank');
   };
 
