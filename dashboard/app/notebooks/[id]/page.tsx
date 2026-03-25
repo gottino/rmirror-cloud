@@ -7,7 +7,7 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu, Search, X, Loader2, Trash2 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
-import { getNotebook, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
+import { getNotebook, getIntegrations, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
@@ -369,6 +369,7 @@ function NotebookPageContent() {
   const [quotaModalOpen, setQuotaModalOpen] = useState(false);
   const [quotaModalData, setQuotaModalData] = useState<QuotaStatus | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [hasNotion, setHasNotion] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
   // Target page from URL query param (for search result navigation)
@@ -413,6 +414,14 @@ function NotebookPageContent() {
 
         const data = await getNotebook(id, token);
         setNotebook(data);
+
+        // Check Notion integration status for delete modal
+        try {
+          const integrations = await getIntegrations(token);
+          setHasNotion(integrations.some(i => i.target_name === 'notion' && i.is_enabled));
+        } catch {
+          // Non-critical — just leave hasNotion as false
+        }
       } catch (err) {
         console.error('Error fetching notebook:', err);
         setError(err instanceof Error ? err.message : 'Failed to fetch notebook');
@@ -1055,7 +1064,7 @@ function NotebookPageContent() {
           visible_name: notebook.visible_name || notebook.title || 'Untitled',
           page_count: notebook.pages.length,
         } : null}
-        hasNotion={false}
+        hasNotion={hasNotion}
         getToken={async () => {
           const isDev = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
           if (isDev) return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
