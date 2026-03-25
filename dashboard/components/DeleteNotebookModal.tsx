@@ -13,7 +13,7 @@ interface DeleteNotebookModalProps {
     page_count: number;
   } | null;
   hasNotion: boolean;
-  token: string;
+  getToken: () => Promise<string | null>;
   onDeleted: () => void;
 }
 
@@ -22,7 +22,7 @@ export function DeleteNotebookModal({
   onClose,
   notebook,
   hasNotion,
-  token,
+  getToken,
   onDeleted,
 }: DeleteNotebookModalProps) {
   const [cleanupNotion, setCleanupNotion] = useState(false);
@@ -61,6 +61,12 @@ export function DeleteNotebookModal({
     setDeleting(true);
     setError(null);
     try {
+      const token = await getToken();
+      if (!token) {
+        setError('Authentication expired. Please refresh the page.');
+        setDeleting(false);
+        return;
+      }
       const res = await deleteNotebook(token, notebook.id, cleanupNotion);
       setResult(res);
       // Auto-close after showing success
@@ -79,6 +85,9 @@ export function DeleteNotebookModal({
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
       onClick={!deleting ? onClose : undefined}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-modal-title"
     >
       <div
         className="relative max-w-md w-full rounded-lg shadow-2xl overflow-hidden"
@@ -91,6 +100,7 @@ export function DeleteNotebookModal({
             onClick={onClose}
             className="absolute top-4 right-4 p-2 rounded-lg hover:bg-black/5 transition-colors z-10"
             style={{ color: 'var(--warm-gray)' }}
+            aria-label="Close dialog"
           >
             <X className="w-5 h-5" />
           </button>
@@ -104,6 +114,7 @@ export function DeleteNotebookModal({
               style={{ color: 'var(--sage-green)' }}
             />
             <h2
+              id="delete-modal-title"
               style={{
                 fontSize: '1.25rem',
                 fontWeight: 600,
@@ -129,6 +140,7 @@ export function DeleteNotebookModal({
                 <Trash2 className="w-6 h-6" style={{ color: 'var(--terracotta)' }} />
               </div>
               <h2
+                id="delete-modal-title"
                 style={{
                   fontSize: '1.25rem',
                   fontWeight: 600,

@@ -457,11 +457,7 @@ export async function deleteNotebook(
     }
   );
 
-  if (!response.ok) {
-    throw new Error('Failed to delete notebook');
-  }
-
-  return response.json();
+  return handleApiResponse<DeleteNotebookResponse>(response);
 }
 
 // ==================== Quota ====================

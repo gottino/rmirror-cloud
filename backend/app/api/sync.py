@@ -3,7 +3,7 @@
 import json
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -707,7 +707,7 @@ class DeletedNotebooksResponse(BaseModel):
 
 
 class AcknowledgeRequest(BaseModel):
-    action: str = Field(..., description="'resync' or 'dismiss'")
+    action: Literal["resync", "dismiss"] = Field(..., description="'resync' or 'dismiss'")
 
 
 @router.get("/deleted-notebooks", response_model=DeletedNotebooksResponse)
@@ -748,9 +748,6 @@ async def acknowledge_deleted_notebook(
     - 'resync': Agent will re-sync the notebook from scratch. Tombstone is removed.
     - 'dismiss': Agent will keep the notebook excluded. Tombstone is removed.
     """
-    if body.action not in ("resync", "dismiss"):
-        raise HTTPException(status_code=400, detail="action must be 'resync' or 'dismiss'")
-
     deleted = (
         db.query(DeletedNotebook)
         .filter(

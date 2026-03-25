@@ -8,6 +8,7 @@ from datetime import datetime
 from io import BytesIO
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -671,14 +672,12 @@ async def delete_notebook(
                     db.query(IntegrationConfig)
                     .filter(
                         IntegrationConfig.user_id == current_user.id,
-                        IntegrationConfig.service_name == "notion",
-                        IntegrationConfig.enabled == True,
+                        IntegrationConfig.target_name == "notion",
+                        IntegrationConfig.is_enabled == True,
                     )
                     .first()
                 )
                 if integration:
-                    import httpx
-
                     config = integration.get_config()
                     notion_token = config.get("notion_token") or config.get("access_token")
                     if notion_token:
@@ -695,6 +694,10 @@ async def delete_notebook(
                             if resp.status_code == 200:
                                 notion_cleanup = "success"
                                 logger.info(f"Archived Notion page {notebook_sync.external_id}")
+                            elif resp.status_code == 400 and "archived" in resp.text.lower():
+                                # Page already archived — goal achieved
+                                notion_cleanup = "success"
+                                logger.info(f"Notion page {notebook_sync.external_id} already archived")
                             else:
                                 notion_cleanup = "failed"
                                 logger.warning(

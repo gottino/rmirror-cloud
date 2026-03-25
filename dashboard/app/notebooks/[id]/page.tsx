@@ -1056,7 +1056,11 @@ function NotebookPageContent() {
           page_count: notebook.pages.length,
         } : null}
         hasNotion={false}
-        token={authToken}
+        getToken={async () => {
+          const isDev = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+          if (isDev) return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
+          return await getToken();
+        }}
         onDeleted={() => router.push('/dashboard')}
       />
     </div>

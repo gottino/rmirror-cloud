@@ -174,7 +174,6 @@ function DashboardContent() {
   // Delete notebook modal state
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; visible_name: string; page_count: number } | null>(null);
-  const [authToken, setAuthToken] = useState('');
 
   // Stable callback for closing sidebar (prevents SidebarLogo re-renders)
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -250,18 +249,20 @@ function DashboardContent() {
     }
   };
 
-  const openDeleteModal = async (notebook: NotebookTreeNode) => {
-    const token = isDevelopmentMode
-      ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-      : await getToken();
-    if (!token) return;
-    setAuthToken(token);
+  const openDeleteModal = (notebook: NotebookTreeNode) => {
     setDeleteTarget({
       id: notebook.id,
       visible_name: notebook.visible_name,
       page_count: notebook.sync_progress?.total_pages || 0,
     });
     setDeleteModalOpen(true);
+  };
+
+  const getAuthToken = async (): Promise<string | null> => {
+    if (isDevelopmentMode) {
+      return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
+    }
+    return await getToken();
   };
 
   const fetchAgentStatus = async () => {
@@ -1208,6 +1209,24 @@ function DashboardContent() {
                                   </p>
                                 </div>
                               </div>
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  openDeleteModal(notebook);
+                                }}
+                                className="p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mr-2"
+                                style={{
+                                  color: 'var(--warm-gray)',
+                                  border: '1px solid var(--border)',
+                                  backgroundColor: 'rgba(255,255,255,0.9)',
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--terracotta)'; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--warm-gray)'; }}
+                                title="Delete notebook"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                               <ChevronRight className="w-5 h-5" style={{ color: 'var(--warm-gray)' }} />
                             </Link>
                           ))}
@@ -1256,8 +1275,8 @@ function DashboardContent() {
           isOpen={deleteModalOpen}
           onClose={() => setDeleteModalOpen(false)}
           notebook={deleteTarget}
-          hasNotion={false}
-          token={authToken}
+          hasNotion={onboarding?.has_notion ?? false}
+          getToken={getAuthToken}
           onDeleted={() => fetchNotebooks()}
         />
       </div>

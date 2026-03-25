@@ -1,7 +1,7 @@
 """Tests for per-notebook deletion feature."""
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -16,7 +16,7 @@ from app.dependencies import get_storage_service
 from app.models.deleted_notebook import DeletedNotebook
 from app.models.notebook import Notebook
 from app.models.page import Page
-from app.models.sync_record import SyncQueue, SyncRecord
+from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.user import User
 
 
@@ -274,6 +274,120 @@ class TestDeleteNotebook:
         response = client.delete(f"/notebooks/{notebook.id}")
         assert response.status_code == 404
 
+    @patch("app.api.notebooks.httpx.AsyncClient")
+    def test_notion_cleanup_success(self, mock_httpx_cls, db: Session):
+        """cleanup_notion=true archives the Notion page."""
+        user = _create_user(db)
+        notebook = _create_notebook_with_pages(db, user, num_pages=1)
+        _create_sync_records(db, user, notebook)
+
+        # Create a Notion integration config with mocked get_config
+        integration = IntegrationConfig(
+            user_id=user.id,
+            target_name="notion",
+            is_enabled=True,
+            config_encrypted="fake",
+        )
+        db.add(integration)
+        db.commit()
+
+        # Mock the httpx response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.patch = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_httpx_cls.return_value = mock_client
+
+        client = _create_app(db, user)
+
+        with patch.object(IntegrationConfig, "get_config", return_value={"notion_token": "fake-token"}):
+            response = client.delete(f"/notebooks/{notebook.id}?cleanup_notion=true")
+
+        assert response.status_code == 200
+        assert response.json()["notion_cleanup"] == "success"
+
+    @patch("app.api.notebooks.httpx.AsyncClient")
+    def test_notion_cleanup_already_archived(self, mock_httpx_cls, db: Session):
+        """Already-archived Notion page reports success."""
+        user = _create_user(db)
+        notebook = _create_notebook_with_pages(db, user, num_pages=1)
+        _create_sync_records(db, user, notebook)
+
+        integration = IntegrationConfig(
+            user_id=user.id,
+            target_name="notion",
+            is_enabled=True,
+            config_encrypted="fake",
+        )
+        db.add(integration)
+        db.commit()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = '{"message": "Can\'t edit block that is archived"}'
+        mock_client = AsyncMock()
+        mock_client.patch = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_httpx_cls.return_value = mock_client
+
+        client = _create_app(db, user)
+
+        with patch.object(IntegrationConfig, "get_config", return_value={"notion_token": "fake-token"}):
+            response = client.delete(f"/notebooks/{notebook.id}?cleanup_notion=true")
+
+        assert response.status_code == 200
+        assert response.json()["notion_cleanup"] == "success"
+
+    @patch("app.api.notebooks.httpx.AsyncClient")
+    def test_notion_cleanup_failure_doesnt_block(self, mock_httpx_cls, db: Session):
+        """Notion API failure doesn't block notebook deletion."""
+        user = _create_user(db)
+        notebook = _create_notebook_with_pages(db, user, num_pages=1)
+        _create_sync_records(db, user, notebook)
+
+        integration = IntegrationConfig(
+            user_id=user.id,
+            target_name="notion",
+            is_enabled=True,
+            config_encrypted="fake",
+        )
+        db.add(integration)
+        db.commit()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+        mock_client = AsyncMock()
+        mock_client.patch = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_httpx_cls.return_value = mock_client
+
+        client = _create_app(db, user)
+
+        with patch.object(IntegrationConfig, "get_config", return_value={"notion_token": "fake-token"}):
+            response = client.delete(f"/notebooks/{notebook.id}?cleanup_notion=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["notion_cleanup"] == "failed"
+        # Notebook should still be deleted
+        assert db.query(Notebook).filter(Notebook.id == notebook.id).first() is None
+
+    def test_notion_cleanup_no_integration(self, db: Session):
+        """cleanup_notion=true with no Notion integration skips cleanup."""
+        user = _create_user(db)
+        notebook = _create_notebook_with_pages(db, user, num_pages=1)
+
+        client = _create_app(db, user)
+        response = client.delete(f"/notebooks/{notebook.id}?cleanup_notion=true")
+
+        assert response.status_code == 200
+        assert response.json()["notion_cleanup"] == "skipped"
+
 
 # --- Deleted notebooks agent endpoints tests ---
 
@@ -365,7 +479,7 @@ class TestDeletedNotebooksEndpoints:
         assert response.status_code == 404
 
     def test_acknowledge_invalid_action(self, db: Session):
-        """POST acknowledge rejects invalid action."""
+        """POST acknowledge rejects invalid action via Pydantic validation."""
         user = _create_user(db)
         db.add(DeletedNotebook(
             user_id=user.id,
@@ -379,4 +493,4 @@ class TestDeletedNotebooksEndpoints:
             "/sync/deleted-notebooks/test-uuid/acknowledge",
             json={"action": "invalid"},
         )
-        assert response.status_code == 400
+        assert response.status_code == 422
