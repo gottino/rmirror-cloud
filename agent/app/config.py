@@ -121,6 +121,10 @@ class SyncConfig(BaseSettings):
         default=None,
         description="Maximum pages to sync per notebook (None = unlimited, syncs newest pages first)"
     )
+    excluded_notebooks: list[str] = Field(
+        default_factory=list,
+        description="List of notebook UUIDs excluded from sync (e.g., deleted on server)"
+    )
 
     model_config = SettingsConfigDict(env_prefix="RMIRROR_SYNC_", extra="ignore")
 

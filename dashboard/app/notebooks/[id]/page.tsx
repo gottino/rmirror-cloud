@@ -5,12 +5,13 @@ import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
-import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu, Search, X, Loader2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu, Search, X, Loader2, Trash2 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
 import { getNotebook, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
+import { DeleteNotebookModal } from '@/components/DeleteNotebookModal';
 import { useQuota } from '@/lib/quota-context';
 import { Skeleton } from '@/components/Skeleton';
 
@@ -367,6 +368,7 @@ function NotebookPageContent() {
   const [exporting, setExporting] = useState(false);
   const [quotaModalOpen, setQuotaModalOpen] = useState(false);
   const [quotaModalData, setQuotaModalData] = useState<QuotaStatus | null>(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
   // Target page from URL query param (for search result navigation)
@@ -878,6 +880,31 @@ function NotebookPageContent() {
                     </div>
                   )}
                 </div>
+
+                {/* Delete button */}
+                <button
+                  onClick={() => setDeleteModalOpen(true)}
+                  className="px-4 py-2 rounded-lg transition-all flex items-center gap-2"
+                  style={{
+                    backgroundColor: 'transparent',
+                    color: 'var(--warm-gray)',
+                    fontSize: '0.875em',
+                    fontWeight: 500,
+                    border: '1px solid var(--border)',
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = 'var(--terracotta)';
+                    e.currentTarget.style.borderColor = 'var(--terracotta)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = 'var(--warm-gray)';
+                    e.currentTarget.style.borderColor = 'var(--border)';
+                  }}
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete
+                </button>
               </div>
             </div>
 
@@ -1018,6 +1045,20 @@ function NotebookPageContent() {
           </div>
         </div>
       )}
+
+      {/* Delete Notebook Modal */}
+      <DeleteNotebookModal
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        notebook={notebook ? {
+          id: notebook.id,
+          visible_name: notebook.visible_name || notebook.title || 'Untitled',
+          page_count: notebook.pages.length,
+        } : null}
+        hasNotion={false}
+        token={authToken}
+        onDeleted={() => router.push('/dashboard')}
+      />
     </div>
   );
 }

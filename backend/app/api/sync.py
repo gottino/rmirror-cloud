@@ -16,6 +16,7 @@ from app.core.sync_engine import SyncItem
 from app.core.unified_sync_manager import UnifiedSyncManager
 from app.database import get_db
 from app.integrations.notion_sync import NotionSyncTarget
+from app.models.deleted_notebook import DeletedNotebook
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
@@ -690,3 +691,83 @@ async def process_sync_queue(
     except Exception as e:
         logger.error(f"Error processing sync queue: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An internal error occurred")
+
+
+# --- Deleted notebook endpoints (agent-facing) ---
+
+
+class DeletedNotebookItem(BaseModel):
+    notebook_uuid: str
+    visible_name: str
+    deleted_at: str
+
+
+class DeletedNotebooksResponse(BaseModel):
+    deleted_notebooks: list[DeletedNotebookItem]
+
+
+class AcknowledgeRequest(BaseModel):
+    action: str = Field(..., description="'resync' or 'dismiss'")
+
+
+@router.get("/deleted-notebooks", response_model=DeletedNotebooksResponse)
+async def get_deleted_notebooks(
+    current_user: User = Depends(get_clerk_active_user),
+    db: Session = Depends(get_db),
+):
+    """Return notebooks deleted on the server that the agent hasn't acknowledged yet."""
+    tombstones = (
+        db.query(DeletedNotebook)
+        .filter(DeletedNotebook.user_id == current_user.id)
+        .all()
+    )
+
+    return DeletedNotebooksResponse(
+        deleted_notebooks=[
+            DeletedNotebookItem(
+                notebook_uuid=t.notebook_uuid,
+                visible_name=t.visible_name,
+                deleted_at=t.deleted_at.isoformat(),
+            )
+            for t in tombstones
+        ]
+    )
+
+
+@router.post("/deleted-notebooks/{notebook_uuid}/acknowledge")
+async def acknowledge_deleted_notebook(
+    notebook_uuid: str,
+    body: AcknowledgeRequest,
+    current_user: User = Depends(get_clerk_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Acknowledge a deleted notebook tombstone.
+
+    Actions:
+    - 'resync': Agent will re-sync the notebook from scratch. Tombstone is removed.
+    - 'dismiss': Agent will keep the notebook excluded. Tombstone is removed.
+    """
+    if body.action not in ("resync", "dismiss"):
+        raise HTTPException(status_code=400, detail="action must be 'resync' or 'dismiss'")
+
+    deleted = (
+        db.query(DeletedNotebook)
+        .filter(
+            DeletedNotebook.user_id == current_user.id,
+            DeletedNotebook.notebook_uuid == notebook_uuid,
+        )
+        .delete()
+    )
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Tombstone not found")
+
+    db.commit()
+
+    logger.info(
+        f"User {current_user.id} acknowledged deleted notebook {notebook_uuid} "
+        f"with action={body.action}"
+    )
+
+    return {"status": "ok", "action": body.action}

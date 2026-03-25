@@ -883,6 +883,61 @@
             z-index: 1;
         }
 
+        /* Deleted notebook warning banners */
+        .deleted-notebook-banner {
+            background-color: #fef9f0;
+            border: 1px solid #f0d9a8;
+            border-left: 4px solid #e8b65b;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .deleted-notebook-banner .banner-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 0.925em;
+            color: #8b6914;
+            margin-bottom: 8px;
+        }
+        .deleted-notebook-banner .banner-text {
+            font-size: 0.875em;
+            color: #6b5a2e;
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+        .deleted-notebook-banner .banner-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .deleted-notebook-banner .btn-resync {
+            background-color: var(--terracotta);
+            color: white;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 0.85em;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .deleted-notebook-banner .btn-resync:hover {
+            opacity: 0.9;
+        }
+        .deleted-notebook-banner .btn-dismiss {
+            background: none;
+            border: 1px solid #d4c5a0;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 0.85em;
+            font-weight: 500;
+            color: #6b5a2e;
+            cursor: pointer;
+        }
+        .deleted-notebook-banner .btn-dismiss:hover {
+            background-color: #f5eed8;
+        }
+
         /* Notebook selection enhancements */
         .notebook-selection-description {
             color: var(--warm-gray);
@@ -1303,6 +1358,9 @@
         <div class="card">
             <h2>Notebook Selection</h2>
             <p class="notebook-selection-description">Choose which notebooks to sync to stay within your plan limits.</p>
+
+            <!-- Deleted notebook warnings (populated by JS) -->
+            <div id="deleted-notebooks-container"></div>
 
             <!-- Selection Stats -->
             <div class="selection-stats">
@@ -2230,6 +2288,9 @@
 
                 // Load current selection
                 await loadNotebookSelection();
+
+                // Load deleted notebook warnings
+                await loadDeletedNotebooks();
             } catch (error) {
                 showMessage('Failed to load notebooks: ' + error.message, 'error');
             }
@@ -2251,6 +2312,90 @@
                 updateTreeCheckboxes();
             } catch (error) {
                 console.error('Failed to load selection:', error);
+            }
+        }
+
+        // Load and display deleted notebook warnings
+        async function loadDeletedNotebooks() {
+            try {
+                const response = await fetch('/api/deleted-notebooks');
+                const data = await response.json();
+                const container = document.getElementById('deleted-notebooks-container');
+                container.textContent = '';
+
+                if (!data.deleted_notebooks || data.deleted_notebooks.length === 0) return;
+
+                data.deleted_notebooks.forEach(nb => {
+                    const deletedDate = new Date(nb.deleted_at).toLocaleDateString('en-US', {
+                        month: 'short', day: 'numeric'
+                    });
+
+                    const banner = document.createElement('div');
+                    banner.className = 'deleted-notebook-banner';
+
+                    const header = document.createElement('div');
+                    header.className = 'banner-header';
+                    header.textContent = '\u26A0 Notebook deleted on server';
+                    banner.appendChild(header);
+
+                    const text = document.createElement('div');
+                    text.className = 'banner-text';
+                    const nameEl = document.createElement('strong');
+                    nameEl.textContent = nb.visible_name;
+                    text.appendChild(document.createTextNode('\u201C'));
+                    text.appendChild(nameEl);
+                    text.appendChild(document.createTextNode('\u201D was deleted from rMirror Cloud on ' + deletedDate + '. It\u2019s been excluded from sync. Re-syncing will upload it as a new notebook and consume OCR quota.'));
+                    banner.appendChild(text);
+
+                    const actions = document.createElement('div');
+                    actions.className = 'banner-actions';
+
+                    const resyncBtn = document.createElement('button');
+                    resyncBtn.className = 'btn-resync';
+                    resyncBtn.textContent = 'Re-sync from scratch';
+                    resyncBtn.addEventListener('click', () => handleDeletedNotebook(nb.notebook_uuid, 'resync', resyncBtn));
+                    actions.appendChild(resyncBtn);
+
+                    const dismissBtn = document.createElement('button');
+                    dismissBtn.className = 'btn-dismiss';
+                    dismissBtn.textContent = 'Keep excluded';
+                    dismissBtn.addEventListener('click', () => handleDeletedNotebook(nb.notebook_uuid, 'dismiss', dismissBtn));
+                    actions.appendChild(dismissBtn);
+
+                    banner.appendChild(actions);
+                    container.appendChild(banner);
+                });
+            } catch (error) {
+                console.error('Failed to load deleted notebooks:', error);
+            }
+        }
+
+        async function handleDeletedNotebook(uuid, action, btn) {
+            const banner = btn.closest('.deleted-notebook-banner');
+            try {
+                btn.disabled = true;
+                btn.textContent = action === 'resync' ? 'Re-syncing...' : 'Dismissing...';
+                const response = await fetch('/api/deleted-notebooks/' + encodeURIComponent(uuid) + '/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: action }),
+                });
+                if (response.ok) {
+                    banner.style.transition = 'opacity 0.3s';
+                    banner.style.opacity = '0';
+                    setTimeout(() => banner.remove(), 300);
+                    if (action === 'resync') {
+                        showMessage('Notebook will re-sync on next sync cycle', 'success');
+                    }
+                } else {
+                    showMessage('Failed to process action', 'error');
+                    btn.disabled = false;
+                    btn.textContent = action === 'resync' ? 'Re-sync from scratch' : 'Keep excluded';
+                }
+            } catch (error) {
+                showMessage('Error: ' + error.message, 'error');
+                btn.disabled = false;
+                btn.textContent = action === 'resync' ? 'Re-sync from scratch' : 'Keep excluded';
             }
         }
 

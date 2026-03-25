@@ -433,6 +433,56 @@ def register_routes(app: Flask) -> None:
 
         return jsonify({"success": True, "message": "Notebook selection updated"})
 
+    @app.route("/api/deleted-notebooks")
+    def api_deleted_notebooks():
+        """Get notebooks that were deleted on the server."""
+        config: Config = app.config["AGENT_CONFIG"]
+        cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+
+        if not cloud_sync or not cloud_sync.authenticated:
+            return jsonify({"deleted_notebooks": []})
+
+        try:
+            with run_async_safely(cloud_sync) as loop:
+                deleted = loop.run_until_complete(cloud_sync.get_deleted_notebooks())
+                # Only return items that are in our excluded list (server-side tombstones)
+                return jsonify({"deleted_notebooks": deleted})
+        except Exception as e:
+            print(f"Deleted notebooks request error: {e}")
+            return jsonify({"deleted_notebooks": []})
+
+    @app.route("/api/deleted-notebooks/<uuid>/action", methods=["POST"])
+    def api_deleted_notebook_action(uuid):
+        """Handle re-sync or dismiss for a deleted notebook."""
+        config: Config = app.config["AGENT_CONFIG"]
+        cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+
+        if not cloud_sync or not cloud_sync.authenticated:
+            return jsonify({"error": "Not authenticated"}), 401
+
+        data = request.json
+        action = data.get("action", "dismiss")
+
+        if action not in ("resync", "dismiss"):
+            return jsonify({"error": "action must be 'resync' or 'dismiss'"}), 400
+
+        try:
+            # If re-syncing, remove from excluded list
+            if action == "resync" and uuid in config.sync.excluded_notebooks:
+                config.sync.excluded_notebooks.remove(uuid)
+                config.save()
+
+            # Acknowledge on server (removes tombstone)
+            with run_async_safely(cloud_sync) as loop:
+                loop.run_until_complete(
+                    cloud_sync.acknowledge_deleted_notebook(uuid, action)
+                )
+
+            return jsonify({"success": True, "action": action})
+        except Exception as e:
+            print(f"Deleted notebook action error: {e}")
+            return jsonify({"error": str(e)}), 500
+
     @app.route("/api/quota")
     def api_quota():
         """Get quota status from backend."""

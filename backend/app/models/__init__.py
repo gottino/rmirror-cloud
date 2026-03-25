@@ -1,6 +1,7 @@
 """SQLAlchemy database models."""
 
 from app.models.connector import Connector
+from app.models.deleted_notebook import DeletedNotebook
 from app.models.highlight import Highlight
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
@@ -26,4 +27,5 @@ __all__ = [
     "IntegrationConfig",
     "ProcessingJob",
     "Connector",
+    "DeletedNotebook",
 ]

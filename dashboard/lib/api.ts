@@ -428,6 +428,42 @@ export async function deleteIntegration(token: string, targetName: string): Prom
   return response.json();
 }
 
+// ==================== Notebook Deletion ====================
+
+export interface DeleteNotebookResponse {
+  notebook_uuid: string;
+  visible_name: string;
+  pages_deleted: number;
+  s3_files_deleted: number;
+  sync_records_deleted: number;
+  notion_cleanup: string;
+}
+
+export async function deleteNotebook(
+  token: string,
+  notebookId: number,
+  cleanupNotion: boolean = false
+): Promise<DeleteNotebookResponse> {
+  const params = new URLSearchParams();
+  if (cleanupNotion) params.set('cleanup_notion', 'true');
+
+  const response = await fetch(
+    `${API_URL}/notebooks/${notebookId}?${params.toString()}`,
+    {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to delete notebook');
+  }
+
+  return response.json();
+}
+
 // ==================== Quota ====================
 
 export interface QuotaStatus {
