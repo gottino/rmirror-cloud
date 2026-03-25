@@ -732,6 +732,39 @@ class CloudSync:
             f"   Resets: {reset_at}"
         )
 
+    async def get_deleted_notebooks(self) -> list[dict]:
+        """Fetch notebooks deleted on the server that need agent acknowledgement."""
+        await self.ensure_authenticated()
+        try:
+            response = await self.client.get(
+                f"{self.config.api.url}/sync/deleted-notebooks",
+                headers={"Authorization": f"Bearer {self.config.api.token}"},
+            )
+            response.raise_for_status()
+            return response.json().get("deleted_notebooks", [])
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Failed to fetch deleted notebooks: {e.response.status_code}")
+            return []
+        except Exception as e:
+            logger.warning(f"Failed to fetch deleted notebooks: {e}")
+            return []
+
+    async def acknowledge_deleted_notebook(self, notebook_uuid: str, action: str) -> dict:
+        """Acknowledge a deleted notebook tombstone.
+
+        Args:
+            notebook_uuid: UUID of the deleted notebook
+            action: 'resync' to allow re-sync, 'dismiss' to keep excluded
+        """
+        await self.ensure_authenticated()
+        response = await self.client.post(
+            f"{self.config.api.url}/sync/deleted-notebooks/{notebook_uuid}/acknowledge",
+            json={"action": action},
+            headers={"Authorization": f"Bearer {self.config.api.token}"},
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def close(self) -> None:
         """Close the HTTP client."""
         if self.client:

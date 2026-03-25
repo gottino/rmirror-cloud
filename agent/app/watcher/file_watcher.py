@@ -57,7 +57,7 @@ class ReMarkableEventHandler(FileSystemEventHandler):
 
     def _should_sync_notebook(self, notebook_uuid: str) -> bool:
         """
-        Check if a notebook should be synced based on user selection.
+        Check if a notebook should be synced based on user selection and exclusions.
 
         Args:
             notebook_uuid: UUID of the notebook
@@ -65,6 +65,10 @@ class ReMarkableEventHandler(FileSystemEventHandler):
         Returns:
             True if notebook should be synced, False otherwise
         """
+        # Always skip excluded notebooks (e.g., deleted on server)
+        if notebook_uuid in self.config.sync.excluded_notebooks:
+            return False
+
         # If sync_all_notebooks is True, sync everything
         if self.config.sync.sync_all_notebooks:
             return True

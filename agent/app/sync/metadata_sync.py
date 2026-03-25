@@ -42,6 +42,35 @@ class MetadataSync:
         self.cloud_sync = cloud_sync
         self.remarkable_folder = Path(config.remarkable.source_directory)
 
+    async def check_deleted_notebooks(self) -> list[dict]:
+        """Check for notebooks deleted on the server and auto-exclude them.
+
+        Returns:
+            List of deleted notebook dicts from the server.
+        """
+        try:
+            deleted = await self.cloud_sync.get_deleted_notebooks()
+            if not deleted:
+                return []
+
+            updated = False
+            for entry in deleted:
+                uuid = entry.get("notebook_uuid")
+                name = entry.get("visible_name", "Unknown")
+                if uuid and uuid not in self.config.sync.excluded_notebooks:
+                    self.config.sync.excluded_notebooks.append(uuid)
+                    updated = True
+                    logger.info(f"Auto-excluded deleted notebook: {name} ({uuid})")
+                    print(f"  ⚠️  '{name}' was deleted on server — excluded from sync")
+
+            if updated:
+                self.config.save()
+
+            return deleted
+        except Exception as e:
+            logger.warning(f"Failed to check for deleted notebooks: {e}")
+            return []
+
     async def run(self, selected_uuids: Optional[list[str]] = None) -> dict:
         """
         Sync notebook metadata and page structure to the backend.
@@ -65,6 +94,9 @@ class MetadataSync:
         """
         logger.info("Starting metadata sync...")
         print("\n  📋 Phase 1: Syncing notebook metadata...")
+
+        # Check for notebooks deleted on server and auto-exclude them
+        await self.check_deleted_notebooks()
 
         # Scan for notebooks
         notebooks_data = self._scan_notebooks(selected_uuids)
@@ -142,6 +174,10 @@ class MetadataSync:
 
                 # Filter by selection if provided
                 if selected_uuids is not None and notebook_data["uuid"] not in selected_uuids:
+                    continue
+
+                # Skip excluded notebooks (e.g., deleted on server)
+                if notebook_data["uuid"] in self.config.sync.excluded_notebooks:
                     continue
 
                 notebooks_data.append(notebook_data)

@@ -8,17 +8,21 @@ from datetime import datetime
 from io import BytesIO
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from sqlalchemy.orm import Session, joinedload
 
 from app.auth.clerk import get_clerk_active_user
 from app.core.pdf_service import PDFService
 from app.database import get_db
 from app.dependencies import get_storage_service
+from app.models.deleted_notebook import DeletedNotebook
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import Page
+from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.user import User
 from app.schemas.notebook import Notebook as NotebookSchema
 from app.schemas.notebook import NotebookUploadResponse, NotebookWithPages
@@ -591,24 +595,33 @@ async def _export_pdf(
     )
 
 
-@router.delete("/{notebook_id}", status_code=status.HTTP_204_NO_CONTENT)
+class DeleteNotebookResponse(BaseModel):
+    notebook_uuid: str
+    visible_name: str
+    pages_deleted: int
+    s3_files_deleted: int
+    sync_records_deleted: int
+    notion_cleanup: str  # "skipped" | "success" | "failed"
+
+
+@router.delete("/{notebook_id}", status_code=status.HTTP_200_OK, response_model=DeleteNotebookResponse)
 async def delete_notebook(
     notebook_id: int,
     current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageService, Depends(get_storage_service)],
+    cleanup_notion: bool = Query(default=False, description="Also archive the Notion page"),
 ):
     """
-    Delete a notebook and its associated file.
+    Delete a notebook and all associated data.
 
-    Args:
-        notebook_id: Notebook ID
-        current_user: Current authenticated user
-        db: Database session
-        storage: Storage service
+    Performs complete cleanup: database records, S3 files, sync records,
+    queue entries, and optionally Notion pages. Creates a tombstone so
+    the agent can detect the deletion and exclude the notebook from sync.
     """
     notebook = (
         db.query(Notebook)
+        .options(joinedload(Notebook.pages))
         .filter(
             Notebook.id == notebook_id,
             Notebook.user_id == current_user.id,
@@ -622,15 +635,140 @@ async def delete_notebook(
             detail="Notebook not found",
         )
 
-    # Delete file from storage
-    if notebook.s3_key:
-        await storage.delete_file(notebook.s3_key)
+    notebook_uuid = notebook.notebook_uuid
+    visible_name = notebook.visible_name
+    pages_deleted = len(notebook.pages)
 
-    # Delete from database
+    # 1. Collect S3 keys to delete (after commit)
+    s3_keys = []
+    if notebook.s3_key:
+        s3_keys.append(notebook.s3_key)
+    if notebook.notebook_pdf_s3_key:
+        s3_keys.append(notebook.notebook_pdf_s3_key)
+    for page in notebook.pages:
+        if page.s3_key:
+            s3_keys.append(page.s3_key)
+        if page.pdf_s3_key:
+            s3_keys.append(page.pdf_s3_key)
+
+    # 2. Optional Notion cleanup (best-effort)
+    notion_cleanup = "skipped"
+    if cleanup_notion:
+        try:
+            # Find notebook-level sync record with Notion external_id
+            notebook_sync = (
+                db.query(SyncRecord)
+                .filter(
+                    SyncRecord.user_id == current_user.id,
+                    SyncRecord.notebook_uuid == notebook_uuid,
+                    SyncRecord.target_name == "notion",
+                    SyncRecord.item_type == "notebook",
+                )
+                .first()
+            )
+            if notebook_sync and notebook_sync.external_id:
+                # Get Notion access token from integration config
+                integration = (
+                    db.query(IntegrationConfig)
+                    .filter(
+                        IntegrationConfig.user_id == current_user.id,
+                        IntegrationConfig.target_name == "notion",
+                        IntegrationConfig.is_enabled == True,
+                    )
+                    .first()
+                )
+                if integration:
+                    config = integration.get_config()
+                    notion_token = config.get("notion_token") or config.get("access_token")
+                    if notion_token:
+                        async with httpx.AsyncClient() as client:
+                            resp = await client.patch(
+                                f"https://api.notion.com/v1/pages/{notebook_sync.external_id}",
+                                headers={
+                                    "Authorization": f"Bearer {notion_token}",
+                                    "Notion-Version": "2022-06-28",
+                                    "Content-Type": "application/json",
+                                },
+                                json={"archived": True},
+                            )
+                            if resp.status_code == 200:
+                                notion_cleanup = "success"
+                                logger.info(f"Archived Notion page {notebook_sync.external_id}")
+                            elif resp.status_code == 400 and "archived" in resp.text.lower():
+                                # Page already archived — goal achieved
+                                notion_cleanup = "success"
+                                logger.info(f"Notion page {notebook_sync.external_id} already archived")
+                            else:
+                                notion_cleanup = "failed"
+                                logger.warning(
+                                    f"Failed to archive Notion page: {resp.status_code} {resp.text}"
+                                )
+        except Exception as e:
+            notion_cleanup = "failed"
+            logger.warning(f"Notion cleanup failed for notebook {notebook_uuid}: {e}")
+
+    # 3. Delete sync records for this notebook
+    sync_records_deleted = (
+        db.query(SyncRecord)
+        .filter(
+            SyncRecord.user_id == current_user.id,
+            SyncRecord.notebook_uuid == notebook_uuid,
+        )
+        .delete()
+    )
+
+    # 4. Delete sync queue entries for this notebook
+    db.query(SyncQueue).filter(
+        SyncQueue.user_id == current_user.id,
+        SyncQueue.notebook_uuid == notebook_uuid,
+    ).delete()
+
+    # 5. Upsert tombstone for agent discovery
+    existing_tombstone = (
+        db.query(DeletedNotebook)
+        .filter(
+            DeletedNotebook.user_id == current_user.id,
+            DeletedNotebook.notebook_uuid == notebook_uuid,
+        )
+        .first()
+    )
+    if existing_tombstone:
+        existing_tombstone.visible_name = visible_name
+        existing_tombstone.deleted_at = datetime.utcnow()
+    else:
+        db.add(DeletedNotebook(
+            user_id=current_user.id,
+            notebook_uuid=notebook_uuid,
+            visible_name=visible_name,
+        ))
+
+    # 6. Delete the notebook (cascades to pages, notebook_pages, highlights, todos)
     db.delete(notebook)
     db.commit()
 
-    return None
+    # 7. Fire-and-forget S3 cleanup (after commit so DB is consistent)
+    s3_deleted = 0
+    for key in s3_keys:
+        try:
+            await storage.delete_file(key)
+            s3_deleted += 1
+        except Exception as e:
+            logger.warning(f"Failed to delete S3 file {key}: {e}")
+
+    logger.info(
+        f"Deleted notebook {notebook_uuid} for user {current_user.id}: "
+        f"{pages_deleted} pages, {s3_deleted}/{len(s3_keys)} S3 files, "
+        f"{sync_records_deleted} sync records"
+    )
+
+    return DeleteNotebookResponse(
+        notebook_uuid=notebook_uuid,
+        visible_name=visible_name,
+        pages_deleted=pages_deleted,
+        s3_files_deleted=s3_deleted,
+        sync_records_deleted=sync_records_deleted,
+        notion_cleanup=notion_cleanup,
+    )
 
 
 @router.post("/{notebook_uuid}/content", status_code=status.HTTP_200_OK)
