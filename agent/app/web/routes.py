@@ -436,7 +436,6 @@ def register_routes(app: Flask) -> None:
     @app.route("/api/deleted-notebooks")
     def api_deleted_notebooks():
         """Get notebooks that were deleted on the server."""
-        config: Config = app.config["AGENT_CONFIG"]
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
 
         if not cloud_sync or not cloud_sync.authenticated:
