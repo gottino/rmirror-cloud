@@ -177,3 +177,13 @@ async def get_latest_agent_version():
             },
         },
     }
+
+
+@router.get("/clerk-config")
+async def get_clerk_config():
+    """Return Clerk publishable key for agent auth bridge. Public endpoint."""
+    settings = get_settings()
+    if not settings.clerk_publishable_key:
+        return {"clerk_publishable_key": None}
+
+    return {"clerk_publishable_key": settings.clerk_publishable_key}

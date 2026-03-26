@@ -1501,6 +1501,15 @@
                 <h3 style="margin-bottom: 15px; font-size: 1.2em;">API Settings</h3>
 
                 <div class="form-group">
+                    <label for="environment-select">Environment</label>
+                    <select id="environment-select" onchange="switchEnvironment(this.value)" style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 0.925em; background: white;">
+                        <option value="production">Production</option>
+                        <option value="staging">Staging</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
                     <label for="api-url">API URL</label>
                     <input type="text" id="api-url" name="api_url" value="{{ api_url }}" required>
                 </div>
@@ -1821,6 +1830,55 @@
             }
         }
 
+        // Environment switching
+        async function loadEnvironment() {
+            try {
+                const response = await fetch('/api/auth/environment');
+                const data = await response.json();
+                var select = document.getElementById('environment-select');
+                if (select) {
+                    select.value = data.environment;
+                }
+            } catch (e) {
+                console.error('Failed to load environment:', e);
+            }
+        }
+
+        async function switchEnvironment(env) {
+            var body = { environment: env };
+            if (env === 'custom') {
+                var apiUrl = document.getElementById('api-url');
+                body.api_url = apiUrl ? apiUrl.value : '';
+            }
+            try {
+                var response = await fetch('/api/auth/environment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                var data = await response.json();
+                if (data.success) {
+                    // Update the API URL field to match
+                    var apiUrlInput = document.getElementById('api-url');
+                    if (apiUrlInput) apiUrlInput.value = data.api_url;
+
+                    if (data.needs_auth) {
+                        showMessage('Switched to ' + env + '. Sign-in required.', 'info');
+                        closeSettings();
+                        // Redirect to bridge for auth
+                        window.location.href = '/auth/bridge';
+                    } else {
+                        showMessage('Switched to ' + env + '. Token found — reloading.', 'success');
+                        setTimeout(function() { window.location.reload(); }, 1000);
+                    }
+                } else {
+                    showMessage('Failed to switch environment: ' + (data.error || 'unknown error'), 'error');
+                }
+            } catch (e) {
+                showMessage('Failed to switch environment: ' + e.message, 'error');
+            }
+        }
+
         // Show message
         function showMessage(text, type = 'info') {
             const messageEl = document.getElementById('message');
@@ -1838,12 +1896,8 @@
             fetch('/api/auth/status')
                 .then(res => res.json())
                 .then(data => {
-                    // Build callback URL with dynamic port
-                    const port = window.location.port || '5555';
-                    const callback = encodeURIComponent(`http://localhost:${port}/auth/callback`);
-                    const authUrl = `${data.clerk_frontend_api}/agent?callback=${callback}`;
-                    // Navigate directly instead of window.open to avoid pop-up blockers
-                    window.location.href = authUrl;
+                    // Navigate to local auth bridge (fetches Clerk key from backend dynamically)
+                    window.location.href = '/auth/bridge';
                 })
                 .catch(error => {
                     showMessage('Failed to open authentication page', 'error');
@@ -2846,6 +2900,7 @@
         // Refresh status on load
         refreshStatus();
         loadNotebookTree();
+        loadEnvironment();
 
         // Load agent version in footer
         (async () => {

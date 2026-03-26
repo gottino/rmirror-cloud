@@ -270,6 +270,47 @@ def register_routes(app: Flask) -> None:
         except CloudSyncError as e:
             return jsonify({"success": False, "message": str(e)}), 401
 
+    @app.route("/auth/bridge")
+    def auth_bridge():
+        """Serve the Clerk auth bridge page with dynamically injected config.
+
+        Fetches the Clerk publishable key from the backend so the agent
+        doesn't need any hardcoded keys. Works with any Clerk environment
+        (production, staging, dev) based on the configured API URL.
+        """
+        config: Config = app.config["AGENT_CONFIG"]
+
+        # Derive base URL from API URL (strip /api/v1 suffix)
+        api_base = config.api.url
+        for suffix in ("/api/v1", "/api/v1/", "/v1", "/v1/"):
+            if api_base.endswith(suffix):
+                api_base = api_base[: -len(suffix)]
+                break
+
+        # Fetch Clerk publishable key from backend
+        clerk_key = None
+        try:
+            import httpx
+
+            resp = httpx.get(f"{api_base}/v1/agents/clerk-config", timeout=10)
+            if resp.status_code == 200:
+                clerk_key = resp.json().get("clerk_publishable_key")
+        except Exception as e:
+            print(f"Failed to fetch Clerk config from backend: {e}")
+
+        if not clerk_key:
+            return (
+                "<h2>Could not fetch Clerk config from backend</h2>"
+                f"<p>Is the API URL correct? Currently: <code>{config.api.url}</code></p>"
+                "<p><a href='/'>Back to agent</a></p>"
+            ), 502
+
+        return render_template(
+            "auth_bridge.html",
+            clerk_publishable_key=clerk_key,
+            api_url=f"{api_base}/v1",
+        )
+
     @app.route("/auth/callback")
     def auth_callback():
         """
@@ -372,6 +413,61 @@ def register_routes(app: Flask) -> None:
             cloud_sync.logout()
 
         return jsonify({"success": True, "message": "Signed out successfully"})
+
+    environment_presets = {
+        "production": "https://rmirror.io/api/v1",
+        "staging": "https://staging.rmirror.io/api/v1",
+    }
+
+    @app.route("/api/auth/environment", methods=["GET", "POST"])
+    def api_auth_environment():
+        """Get or switch the backend environment."""
+        config: Config = app.config["AGENT_CONFIG"]
+        cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+
+        if request.method == "GET":
+            # Determine current environment from URL
+            current_env = "custom"
+            for env_name, env_url in environment_presets.items():
+                if config.api.url == env_url:
+                    current_env = env_name
+                    break
+
+            return jsonify({
+                "environment": current_env,
+                "api_url": config.api.url,
+                "presets": environment_presets,
+            })
+
+        # POST — switch environment
+        data = request.json
+        env = data.get("environment")
+        custom_url = data.get("api_url")
+
+        if env in environment_presets:
+            new_url = environment_presets[env]
+        elif env == "custom" and custom_url:
+            new_url = custom_url
+        else:
+            return jsonify({"error": "Invalid environment or missing api_url"}), 400
+
+        # Update config
+        config.api.url = new_url
+        config.api._token = None  # Clear in-memory token (keychain token may exist for new env)
+        if cloud_sync:
+            cloud_sync.authenticated = False
+            cloud_sync.client = None
+        config.save()
+
+        # Check if we already have a token for the new environment
+        has_token = bool(config.api.token)
+
+        return jsonify({
+            "success": True,
+            "environment": env,
+            "api_url": new_url,
+            "needs_auth": not has_token,
+        })
 
     @app.route("/api/notebooks/tree")
     def api_notebooks_tree():

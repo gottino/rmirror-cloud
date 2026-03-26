@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import yaml
 from pydantic import Field, field_validator
@@ -32,29 +33,39 @@ class APIConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="RMIRROR_API_", extra="ignore")
 
     @property
+    def _keychain_user_id(self) -> str:
+        """Derive a unique keychain identifier from the API URL domain.
+
+        This ensures tokens from different environments (production, staging)
+        are stored separately and don't overwrite each other.
+        """
+        hostname = urlparse(self.url).hostname or "default"
+        return hostname
+
+    @property
     def token(self) -> Optional[str]:
         """Get token from keychain if available, otherwise return in-memory token."""
         if self._token:
             return self._token
 
-        # Try to get from keychain
+        # Try to get from keychain (namespaced by environment)
         keychain = get_keychain_manager()
-        return keychain.get_token()
+        return keychain.get_token(self._keychain_user_id)
 
     @token.setter
     def token(self, value: Optional[str]) -> None:
         """Set token and store in keychain for persistence."""
         self._token = value
         if value:
-            # Store in keychain for persistence
+            # Store in keychain for persistence (namespaced by environment)
             keychain = get_keychain_manager()
-            keychain.store_token(value)
+            keychain.store_token(value, self._keychain_user_id)
 
     def clear_token(self) -> None:
         """Clear token from both memory and keychain."""
         self._token = None
         keychain = get_keychain_manager()
-        keychain.delete_token()
+        keychain.delete_token(self._keychain_user_id)
 
 
 class ReMarkableConfig(BaseSettings):
