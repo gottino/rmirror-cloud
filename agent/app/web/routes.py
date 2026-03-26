@@ -98,6 +98,7 @@ def register_routes(app: Flask) -> None:
             use_clerk_auth=config.api.use_clerk_auth,
             authenticated=cloud_sync.authenticated if cloud_sync else False,
             remarkable_folder_missing=remarkable_folder_missing,
+            dev_mode=config.dev.dev_mode,
         )
 
     @app.route("/api/status")

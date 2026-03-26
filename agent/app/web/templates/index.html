@@ -1500,6 +1500,7 @@
             <form id="config-form">
                 <h3 style="margin-bottom: 15px; font-size: 1.2em;">API Settings</h3>
 
+                {% if dev_mode %}
                 <div class="form-group">
                     <label for="environment-select">Environment</label>
                     <select id="environment-select" onchange="switchEnvironment(this.value)" style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 0.925em; background: white;">
@@ -1508,6 +1509,7 @@
                         <option value="custom">Custom</option>
                     </select>
                 </div>
+                {% endif %}
 
                 <div class="form-group">
                     <label for="api-url">API URL</label>
