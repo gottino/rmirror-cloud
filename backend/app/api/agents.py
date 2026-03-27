@@ -182,8 +182,9 @@ async def get_latest_agent_version():
 @router.get("/clerk-config")
 async def get_clerk_config():
     """Return Clerk publishable key for agent auth bridge. Public endpoint."""
-    settings = get_settings()
-    if not settings.clerk_publishable_key:
-        return {"clerk_publishable_key": None}
+    import os
 
-    return {"clerk_publishable_key": settings.clerk_publishable_key}
+    settings = get_settings()
+    # Check backend config first, then fall back to dashboard's env var name
+    key = settings.clerk_publishable_key or os.environ.get("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
+    return {"clerk_publishable_key": key}
