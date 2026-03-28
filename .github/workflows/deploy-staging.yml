@@ -70,6 +70,7 @@ jobs:
           RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
           INTEGRATION_MASTER_KEY=${{ secrets.STAGING_INTEGRATION_MASTER_KEY }}
           ADMIN_USER_IDS=${{ secrets.ADMIN_USER_IDS }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
           ENVEOF
 
           echo "=== Creating dashboard .env ==="
