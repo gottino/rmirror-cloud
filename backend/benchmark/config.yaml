@@ -1,0 +1,43 @@
+prompt: |
+  Transcribe all handwritten text from this page.
+  The content is mixed German and English.
+
+  Rules:
+  - Preserve the EXACT layout: line breaks, indentation, and spatial hierarchy as written
+  - Each new line of handwriting = a new line in output
+  - Indented text stays indented (use 2-space increments)
+  - Bullet points: use - (dash)
+  - Checkboxes: use - [ ] (unchecked) or - [x] (checked)
+  - Arrows: use → ← ↑ ↓ for straight arrows, ↳ for curved/continuation arrows
+  - Underlined text = headings (use ## or ###)
+  - Dates are dd-mm-yyyy format (European). If a date appears (often right side of page),
+    start with **Date: dd-mm-yyyy** followed by ---
+  - Output clean Markdown, no explanations
+
+models:
+  claude-haiku:
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    env_key: CLAUDE_API_KEY
+
+  claude-sonnet:
+    provider: anthropic
+    model: claude-sonnet-4-6-20250514
+    env_key: CLAUDE_API_KEY
+
+  gpt-4.1-mini:
+    provider: openai
+    model: gpt-4.1-mini
+    env_key: OPENAI_API_KEY
+
+  gemini-flash:
+    provider: google
+    model: gemini-2.5-flash
+    env_key: GOOGLE_API_KEY
+
+  gemini-pro:
+    provider: google
+    model: gemini-2.5-pro
+    env_key: GOOGLE_API_KEY
+
+runs_per_page: 3
