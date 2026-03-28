@@ -4,20 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>rMirror Agent Authentication</title>
-
-    <!-- Clerk JavaScript SDK — key injected by agent Flask server -->
-    <script
-        async
-        crossorigin="anonymous"
-        data-clerk-publishable-key="{{ clerk_publishable_key }}"
-        src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"
-        onload="window.Clerk.load()"
-    ></script>
-
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
@@ -46,34 +36,23 @@
         .info-box p { color: #1d1d1f; line-height: 1.6; margin-bottom: 10px; }
         .info-box p:last-child { margin-bottom: 0; }
         .info-box strong { color: #667eea; }
-        .clerk-container { margin-bottom: 20px; }
-        .signed-in-content { display: none; text-align: center; }
-        .success-icon { font-size: 64px; margin-bottom: 20px; }
-        .user-info {
-            background: #d1f2eb;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        .user-info h2 { color: #0e6655; margin-bottom: 10px; }
-        .user-info p { color: #0e6655; margin-bottom: 0; }
-        .status-message {
+        .status-box {
             background: #f5f5f7;
             border-radius: 12px;
             padding: 20px;
-            margin-bottom: 20px;
+            margin-top: 20px;
             text-align: center;
         }
-        .status-message p { color: #86868b; margin-bottom: 0; }
-        .error-message {
+        .status-box p { color: #86868b; }
+        .error-box {
             background: #fdeaea;
             border-radius: 12px;
             padding: 20px;
-            margin-bottom: 20px;
+            margin-top: 20px;
             text-align: center;
             display: none;
         }
-        .error-message p { color: #c0392b; margin-bottom: 0; }
+        .error-box p { color: #c0392b; }
         button {
             background: #667eea;
             color: white;
@@ -85,18 +64,9 @@
             cursor: pointer;
             width: 100%;
             transition: background 0.2s;
+            margin-top: 12px;
         }
         button:hover { background: #5568d3; }
-        .spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255,255,255,.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -107,166 +77,114 @@
             <p class="subtitle">Authentication Required</p>
         </div>
 
-        <div id="initial-content">
-            <div class="info-box">
-                <p>To sync your reMarkable notebooks to the cloud, you need to sign in with your rMirror account.</p>
-                <p><strong>This page will automatically communicate with your local rMirror Agent.</strong></p>
-            </div>
-            <div class="clerk-container" id="clerk-signin"></div>
+        <div class="info-box">
+            <p>To sync your reMarkable notebooks to the cloud, you need to sign in with your rMirror account.</p>
+            <p><strong>This page will automatically communicate with your local rMirror Agent.</strong></p>
         </div>
 
-        <div class="signed-in-content" id="signed-in-content">
-            <div id="account-selection">
-                <div class="success-icon" style="font-size: 48px;">&#x1F464;</div>
-                <div class="user-info" style="background: #f5f5f7;">
-                    <h2 style="color: #1d1d1f;">Continue as</h2>
-                    <p><strong id="user-name"></strong></p>
-                    <p id="user-email" style="color: #86868b;"></p>
-                </div>
-                <button onclick="proceedWithCurrentUser()" style="margin-bottom: 12px;">
-                    Continue
-                </button>
-                <button onclick="useDifferentAccount()" style="background: transparent; color: #667eea; border: 1px solid #667eea;">
-                    Use Different Account
-                </button>
-            </div>
+        <!-- Clerk mounts sign-in here -->
+        <div id="clerk-signin"></div>
 
-            <div id="sending-state" style="display: none;">
-                <div class="success-icon">&#x2713;</div>
-                <div class="user-info">
-                    <h2>Authenticated</h2>
-                    <p>Signed in as <strong id="user-name-sending"></strong></p>
-                </div>
-                <div class="status-message">
-                    <p id="status-text">Sending credentials to your local agent...</p>
-                </div>
-                <div class="error-message" id="error-message">
-                    <p id="error-text"></p>
-                </div>
-                <button id="retry-btn" style="display: none;" onclick="sendTokenToAgent()">
-                    Retry Connection
-                </button>
+        <!-- Shown after sign-in completes -->
+        <div id="post-signin" style="display: none;">
+            <div class="status-box">
+                <p id="status-text">Exchanging token...</p>
             </div>
+            <div class="error-box" id="error-box">
+                <p id="error-text"></p>
+            </div>
+            <button id="retry-btn" style="display: none;" onclick="exchangeToken()">Retry</button>
         </div>
     </div>
 
     <script>
-        // API URL injected by agent Flask server
-        const API_URL = '{{ api_url }}';
-        // Callback URL is always this agent's local server
-        const callbackUrl = window.location.origin + '/auth/callback';
+        var API_URL = '{{ api_url }}';
+        var CLERK_KEY = '{{ clerk_publishable_key }}';
+        var CALLBACK_URL = window.location.origin + '/auth/callback';
 
-        window.addEventListener('load', async () => {
-            const clerk = window.Clerk;
-            await clerk.load();
+        // Decode Clerk key to get the instance domain for loading the SDK
+        var prefix = CLERK_KEY.startsWith('pk_test_') ? 'pk_test_' : 'pk_live_';
+        var domain = atob(CLERK_KEY.slice(prefix.length));
+        if (domain.endsWith('$')) domain = domain.slice(0, -1);
 
-            const signInDiv = document.getElementById('clerk-signin');
-            const initialContent = document.getElementById('initial-content');
-            const signedInContent = document.getElementById('signed-in-content');
-            const statusText = document.getElementById('status-text');
-            const errorMessage = document.getElementById('error-message');
-            const errorText = document.getElementById('error-text');
-            const retryBtn = document.getElementById('retry-btn');
+        // Load Clerk SDK from the instance's own CDN
+        var script = document.createElement('script');
+        script.src = 'https://' + domain + '/npm/@clerk/clerk-js@latest/dist/clerk.browser.js';
+        script.setAttribute('data-clerk-publishable-key', CLERK_KEY);
+        script.setAttribute('crossorigin', 'anonymous');
+        script.onload = function() {
+            window.Clerk.load().then(initClerk);
+        };
+        document.head.appendChild(script);
 
-            function showError(message) {
-                statusText.parentElement.style.display = 'none';
-                document.querySelector('#sending-state .user-info').style.display = 'none';
-                document.querySelector('#sending-state .success-icon').style.display = 'none';
-                errorMessage.style.display = 'block';
-                errorText.textContent = message;
-                retryBtn.style.display = 'block';
+        function initClerk() {
+            var clerk = window.Clerk;
+
+            if (clerk.user) {
+                // Already signed in — exchange token
+                onSignedIn();
+            } else {
+                // Not signed in — show sign-in form
+                clerk.mountSignIn(document.getElementById('clerk-signin'), {
+                    afterSignInUrl: window.location.href,
+                    afterSignUpUrl: window.location.href,
+                });
+
+                // Listen for sign-in completion
+                clerk.addListener(function(resources) {
+                    if (resources.user) {
+                        clerk.unmountSignIn(document.getElementById('clerk-signin'));
+                        onSignedIn();
+                    }
+                });
             }
+        }
 
-            function showStatus(message) {
-                document.querySelector('#sending-state .user-info').style.display = 'block';
-                document.querySelector('#sending-state .success-icon').style.display = 'block';
-                errorMessage.style.display = 'none';
-                statusText.parentElement.style.display = 'block';
-                statusText.textContent = message;
+        function onSignedIn() {
+            document.getElementById('clerk-signin').style.display = 'none';
+            document.getElementById('post-signin').style.display = 'block';
+            exchangeToken();
+        }
+
+        async function exchangeToken() {
+            var statusText = document.getElementById('status-text');
+            var errorBox = document.getElementById('error-box');
+            var errorText = document.getElementById('error-text');
+            var retryBtn = document.getElementById('retry-btn');
+
+            try {
+                errorBox.style.display = 'none';
                 retryBtn.style.display = 'none';
-            }
+                statusText.textContent = 'Getting session token...';
 
-            async function sendTokenToAgent() {
-                try {
-                    showStatus('Getting authentication token...');
-                    const clerkToken = await clerk.session.getToken();
+                var clerkToken = await window.Clerk.session.getToken();
 
-                    showStatus('Exchanging for agent token...');
-                    const response = await fetch(API_URL + '/auth/agent-token', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': 'Bearer ' + clerkToken,
-                            'Content-Type': 'application/json'
-                        }
-                    });
+                statusText.textContent = 'Exchanging for agent token...';
 
-                    if (!response.ok) {
-                        const errorData = await response.json().catch(function() { return {}; });
-                        showError('Failed to get agent token: ' + (errorData.detail || response.statusText));
-                        return;
+                var response = await fetch(API_URL + '/auth/agent-token', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + clerkToken,
+                        'Content-Type': 'application/json'
                     }
+                });
 
-                    const data = await response.json();
-                    showStatus('Sending credentials to your local agent...');
-                    window.location.href = callbackUrl + '?token=' + encodeURIComponent(data.access_token);
-                } catch (error) {
-                    console.error('Error in auth flow:', error);
-                    showError('Failed to complete authentication. Please try again.');
+                if (!response.ok) {
+                    var errData = {};
+                    try { errData = await response.json(); } catch(e) {}
+                    throw new Error(errData.detail || response.statusText);
                 }
+
+                var data = await response.json();
+                statusText.textContent = 'Redirecting to agent...';
+                window.location.href = CALLBACK_URL + '?token=' + encodeURIComponent(data.access_token);
+            } catch (err) {
+                errorBox.style.display = 'block';
+                errorText.textContent = 'Authentication failed: ' + err.message;
+                retryBtn.style.display = 'block';
+                statusText.textContent = 'Failed';
             }
-
-            function updateUI(user, autoSend) {
-                var accountSelection = document.getElementById('account-selection');
-                var sendingState = document.getElementById('sending-state');
-
-                if (user) {
-                    initialContent.style.display = 'none';
-                    signedInContent.style.display = 'block';
-
-                    var displayName = user.firstName || user.username || 'User';
-                    var email = user.primaryEmailAddress ? user.primaryEmailAddress.emailAddress : '';
-
-                    document.getElementById('user-name').textContent = displayName;
-                    document.getElementById('user-email').textContent = email;
-                    document.getElementById('user-name-sending').textContent = displayName;
-
-                    if (autoSend) {
-                        accountSelection.style.display = 'none';
-                        sendingState.style.display = 'block';
-                        sendTokenToAgent();
-                    } else {
-                        accountSelection.style.display = 'block';
-                        sendingState.style.display = 'none';
-                    }
-                } else {
-                    initialContent.style.display = 'block';
-                    signedInContent.style.display = 'none';
-                    clerk.mountSignIn(signInDiv, {
-                        afterSignInUrl: '/auth/bridge',
-                        afterSignUpUrl: '/auth/bridge',
-                    });
-                }
-            }
-
-            function proceedWithCurrentUser() {
-                document.getElementById('account-selection').style.display = 'none';
-                document.getElementById('sending-state').style.display = 'block';
-                sendTokenToAgent();
-            }
-
-            async function useDifferentAccount() {
-                await clerk.signOut();
-            }
-
-            window.sendTokenToAgent = sendTokenToAgent;
-            window.proceedWithCurrentUser = proceedWithCurrentUser;
-            window.useDifferentAccount = useDifferentAccount;
-
-            updateUI(clerk.user, false);
-            clerk.addListener(function(resources) {
-                updateUI(resources.user, false);
-            });
-        });
+        }
     </script>
 </body>
 </html>
