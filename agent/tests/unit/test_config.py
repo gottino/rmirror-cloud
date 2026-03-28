@@ -30,7 +30,7 @@ class TestAPIConfig:
         assert config.password == ""
 
     def test_token_property_returns_keychain_token(self, mock_keychain):
-        """Test token property retrieves from keychain."""
+        """Test token property retrieves from keychain namespaced by API domain."""
         mock_keychain.get_token.return_value = "keychain-token"
         config = APIConfig()
 
@@ -38,7 +38,7 @@ class TestAPIConfig:
         token = config.token
 
         assert token == "keychain-token"
-        mock_keychain.get_token.assert_called()
+        mock_keychain.get_token.assert_called_with("rmirror.io")
 
     def test_token_property_prefers_memory(self, mock_keychain):
         """Test token property prefers in-memory token."""
@@ -51,13 +51,21 @@ class TestAPIConfig:
         assert token == "memory-token"
 
     def test_token_setter_stores_in_keychain(self, mock_keychain):
-        """Test token setter stores in keychain."""
+        """Test token setter stores in keychain namespaced by API domain."""
         config = APIConfig()
 
         config.token = "new-token"
 
         assert config._token == "new-token"
-        mock_keychain.store_token.assert_called_with("new-token")
+        mock_keychain.store_token.assert_called_with("new-token", "rmirror.io")
+
+    def test_token_keychain_namespace_by_url(self, mock_keychain):
+        """Test that different API URLs use different keychain namespaces."""
+        config_prod = APIConfig(url="https://rmirror.io/api/v1")
+        config_staging = APIConfig(url="https://staging.rmirror.io/api/v1")
+
+        assert config_prod._keychain_user_id == "rmirror.io"
+        assert config_staging._keychain_user_id == "staging.rmirror.io"
 
     def test_clear_token(self, mock_keychain):
         """Test clear_token removes from memory and keychain."""
@@ -67,7 +75,7 @@ class TestAPIConfig:
         config.clear_token()
 
         assert config._token is None
-        mock_keychain.delete_token.assert_called()
+        mock_keychain.delete_token.assert_called_with("rmirror.io")
 
 
 class TestReMarkableConfig:
