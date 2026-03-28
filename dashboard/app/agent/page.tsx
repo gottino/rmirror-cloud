@@ -161,7 +161,7 @@ function AgentAuthBridgeInner() {
               Continue
             </button>
             <button
-              onClick={() => signOut()}
+              onClick={() => signOut({ redirectUrl: `/agent?callback=${encodeURIComponent(callbackUrl)}` })}
               className="w-full py-3 px-4 rounded-lg font-medium text-[var(--primary)] bg-transparent border border-[var(--primary)] hover:bg-[var(--terracotta-light)] transition-all"
             >
               Use Different Account
