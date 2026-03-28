@@ -108,7 +108,12 @@ class Settings(BaseSettings):
     clerk_webhook_secret: Optional[str] = None
 
     # CORS
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5555",
+        "http://127.0.0.1:5555",
+    ]
 
     # File Processing
     max_upload_size: int = 100 * 1024 * 1024  # 100MB
