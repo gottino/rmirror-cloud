@@ -306,6 +306,13 @@ def register_routes(app: Flask) -> None:
                 "<p><a href='/'>Back to agent</a></p>"
             ), 502
 
+        # Production Clerk keys only work from their registered domain,
+        # so redirect to the external bridge page hosted on that domain.
+        if clerk_key.startswith("pk_live_"):
+            callback = f"http://localhost:{config.web.port}/auth/callback"
+            return redirect(f"{api_base}/agent?callback={callback}")
+
+        # Dev/test keys work from localhost — serve the local bridge
         return render_template(
             "auth_bridge.html",
             clerk_publishable_key=clerk_key,

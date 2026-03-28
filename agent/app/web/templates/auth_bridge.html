@@ -102,14 +102,21 @@
         var CLERK_KEY = '{{ clerk_publishable_key }}';
         var CALLBACK_URL = window.location.origin + '/auth/callback';
 
-        // Decode Clerk key to get the instance domain for loading the SDK
-        var prefix = CLERK_KEY.startsWith('pk_test_') ? 'pk_test_' : 'pk_live_';
-        var domain = atob(CLERK_KEY.slice(prefix.length));
-        if (domain.endsWith('$')) domain = domain.slice(0, -1);
+        // Determine Clerk SDK URL based on key type
+        // Dev/test keys: load from instance CDN (needed for UI components)
+        // Live keys: load from jsdelivr (production Clerk proxy doesn't serve SDK)
+        var sdkUrl;
+        if (CLERK_KEY.startsWith('pk_test_')) {
+            var domain = atob(CLERK_KEY.slice('pk_test_'.length));
+            if (domain.endsWith('$')) domain = domain.slice(0, -1);
+            sdkUrl = 'https://' + domain + '/npm/@clerk/clerk-js@latest/dist/clerk.browser.js';
+        } else {
+            sdkUrl = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js';
+        }
 
-        // Load Clerk SDK from the instance's own CDN
+        // Load Clerk SDK
         var script = document.createElement('script');
-        script.src = 'https://' + domain + '/npm/@clerk/clerk-js@latest/dist/clerk.browser.js';
+        script.src = sdkUrl;
         script.setAttribute('data-clerk-publishable-key', CLERK_KEY);
         script.setAttribute('crossorigin', 'anonymous');
         script.onload = function() {
