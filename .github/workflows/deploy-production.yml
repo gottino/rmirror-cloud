@@ -83,6 +83,7 @@ jobs:
           NEXT_PUBLIC_ADMIN_USER_IDS: ${{ vars.NEXT_PUBLIC_ADMIN_USER_IDS }}
           NEXT_PUBLIC_UMAMI_URL: ${{ secrets.NEXT_PUBLIC_UMAMI_URL }}
           NEXT_PUBLIC_UMAMI_WEBSITE_ID: ${{ secrets.NEXT_PUBLIC_UMAMI_WEBSITE_ID }}
+          GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
         run: |
           ssh -i ~/.ssh/deploy_key \
               -p $SERVER_PORT \
@@ -134,6 +135,7 @@ jobs:
                update_env backend/.env CLERK_PUBLISHABLE_KEY \"$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\" && \
                update_env backend/.env UMAMI_URL \"$NEXT_PUBLIC_UMAMI_URL\" && \
                update_env backend/.env UMAMI_WEBSITE_ID \"$NEXT_PUBLIC_UMAMI_WEBSITE_ID\" && \
+               update_env backend/.env GOOGLE_AI_API_KEY \"$GOOGLE_AI_API_KEY\" && \
 
                # Run deploy script
                ./backend/scripts/deploy.sh main"
