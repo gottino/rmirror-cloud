@@ -130,6 +130,15 @@ PROVIDERS = {
     "google": call_google,
 }
 
+# Approximate cost per page for dry-run estimates
+COST_PER_PAGE = {
+    "claude-haiku": 0.007,
+    "claude-sonnet": 0.030,
+    "gpt-4.1-mini": 0.005,
+    "gemini-flash": 0.003,
+    "gemini-pro": 0.015,
+}
+
 
 def discover_pages(pages_dir: Path) -> list[Path]:
     """Find all PDF files in the pages directory."""
@@ -177,8 +186,13 @@ def run_benchmark(config: dict, model_filter: list[str] | None, runs_override: i
 
     if dry_run:
         print("\n[DRY RUN] Would execute:")
+        total_cost = 0.0
         for name in available_models:
-            print(f"  {name}: {len(pages)} pages x {runs_per_page} runs = {len(pages) * runs_per_page} calls")
+            calls = len(pages) * runs_per_page
+            cost = COST_PER_PAGE.get(name, 0) * len(pages) * runs_per_page
+            total_cost += cost
+            print(f"  {name}: {len(pages)} pages x {runs_per_page} runs = {calls} calls (~${cost:.2f})")
+        print(f"\n  Estimated total cost: ~${total_cost:.2f}")
         return
 
     # Create timestamped results directory
@@ -230,6 +244,7 @@ def run_benchmark(config: dict, model_filter: list[str] | None, runs_override: i
 
         if model_meta["calls"] > 0:
             model_meta["avg_duration_ms"] = round(model_meta["total_duration_ms"] / model_meta["calls"])
+        del model_meta["total_duration_ms"]
         meta["models"][model_name] = model_meta
 
     # Write metadata

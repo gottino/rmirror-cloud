@@ -14,6 +14,15 @@ WEIGHT_CER = 0.4
 WEIGHT_LINE = 0.3
 WEIGHT_STRUCTURE = 0.3
 
+# Approximate cost per page for report
+COST_PER_PAGE = {
+    "claude-haiku": 0.007,
+    "claude-sonnet": 0.030,
+    "gpt-4.1-mini": 0.005,
+    "gemini-flash": 0.003,
+    "gemini-pro": 0.015,
+}
+
 
 def compute_cer(output: str, ground_truth: str) -> float:
     """Character Error Rate: edit distance / reference length. Lower is better. Range [0, 1]."""
@@ -197,17 +206,20 @@ def score_run(run_dir: Path, ground_truth_dir: Path, verbose: bool):
     print(f"\nOCR Benchmark Results \u2014 {timestamp}")
     print("=" * 70)
     print(f"{total_models} models x {total_pages} pages x {runs_per_page} runs\n")
-    print(f"{'Model':<20} {'CER\u2193':>6} {'Lines\u2191':>7} {'Struct\u2191':>8} {'Score\u2191':>7} {'StdDev':>7}")
-    print("\u2500" * 70)
+    print(f"{'Model':<20} {'CER\u2193':>6} {'Lines\u2191':>7} {'Struct\u2191':>8} {'Score\u2191':>7} {'StdDev':>7} {'$/page':>7}")
+    print("\u2500" * 77)
 
     for model_name, stats in sorted(summary.items(), key=lambda x: x[1]["composite"]["mean"], reverse=True):
+        cost = COST_PER_PAGE.get(model_name, 0)
+        cost_str = f"~${cost:.3f}" if cost else "?"
         print(
             f"{model_name:<20} "
             f"{stats['cer']['mean']:>6.2f} "
             f"{stats['line_accuracy']['mean']:>7.2f} "
             f"{stats['structure']['mean']:>8.2f} "
             f"{stats['composite']['mean']:>7.2f} "
-            f"{stats['composite']['stddev']:>7.3f}"
+            f"{stats['composite']['stddev']:>7.3f} "
+            f"{cost_str:>7}"
         )
 
         if stats["composite"]["stddev"] > 0.1:
