@@ -75,8 +75,8 @@ def compute_structure_score(output: str, ground_truth: str) -> float:
         sub_scores.append(1.0 if out_checks == 0 else 0.5)
 
     # Bullet count (lines starting with "- " but not checkboxes)
-    gt_bullets = len([l for l in ground_truth.splitlines() if re.match(r"\s*- (?!\[)", l)])
-    out_bullets = len([l for l in output.splitlines() if re.match(r"\s*- (?!\[)", l)])
+    gt_bullets = len([line for line in ground_truth.splitlines() if re.match(r"\s*- (?!\[)", line)])
+    out_bullets = len([line for line in output.splitlines() if re.match(r"\s*- (?!\[)", line)])
     if gt_bullets > 0:
         sub_scores.append(max(0.0, 1.0 - abs(out_bullets - gt_bullets) / gt_bullets))
     else:
@@ -84,8 +84,8 @@ def compute_structure_score(output: str, ground_truth: str) -> float:
 
     # Indentation levels: count lines with 2+, 4+, 6+ leading spaces
     for indent in [2, 4, 6]:
-        gt_indented = len([l for l in ground_truth.splitlines() if len(l) - len(l.lstrip()) >= indent])
-        out_indented = len([l for l in output.splitlines() if len(l) - len(l.lstrip()) >= indent])
+        gt_indented = len([line for line in ground_truth.splitlines() if len(line) - len(line.lstrip()) >= indent])
+        out_indented = len([line for line in output.splitlines() if len(line) - len(line.lstrip()) >= indent])
         if gt_indented > 0:
             sub_scores.append(max(0.0, 1.0 - abs(out_indented - gt_indented) / gt_indented))
 
@@ -226,7 +226,7 @@ def score_run(run_dir: Path, ground_truth_dir: Path, verbose: bool):
             print(f"  \u26a0 HIGH VARIANCE (stddev {stats['composite']['stddev']:.3f})")
 
     if verbose:
-        print(f"\nPer-page breakdown:")
+        print("\nPer-page breakdown:")
         print("-" * 70)
         for model_name, pages in sorted(all_scores.items()):
             for page_stem, runs in sorted(pages.items()):
