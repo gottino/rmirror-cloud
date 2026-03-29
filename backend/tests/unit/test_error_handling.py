@@ -4,11 +4,11 @@ Tests various error conditions and ensures proper error handling
 without exposing sensitive information or crashing the application.
 """
 
-import pytest
-from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from httpx import TimeoutException
 from sqlalchemy.orm import Session
-from httpx import TimeoutException, HTTPStatusError
 
 from tests.conftest import create_user_with_quota
 
@@ -21,20 +21,17 @@ class TestOCRServiceErrors:
         """OCR service should handle timeout gracefully."""
         from app.core.ocr_service import OCRService
 
-        with patch("app.core.ocr_service.anthropic") as mock_anthropic:
-            # Simulate timeout
+        with patch("app.core.ocr_service.genai") as mock_genai:
             mock_client = MagicMock()
-            mock_client.messages.create = MagicMock(
+            mock_client.models.generate_content = MagicMock(
                 side_effect=TimeoutException("Connection timed out")
             )
-            mock_anthropic.Anthropic.return_value = mock_client
+            mock_genai.Client.return_value = mock_client
 
-            # Provide fake API key directly to constructor
             ocr_service = OCRService(api_key="test-api-key-for-ci")
             with pytest.raises(Exception) as exc_info:
                 await ocr_service.extract_text_from_pdf(b"fake_pdf_bytes")
 
-            # Should raise with timeout-related message
             assert "timed out" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
@@ -42,40 +39,32 @@ class TestOCRServiceErrors:
         """OCR service should handle API rate limits gracefully."""
         from app.core.ocr_service import OCRService
 
-        with patch("app.core.ocr_service.anthropic") as mock_anthropic:
-            # Simulate 429 rate limit response
-            mock_response = MagicMock()
-            mock_response.status_code = 429
-            mock_response.json.return_value = {"error": {"type": "rate_limit_error"}}
-
+        with patch("app.core.ocr_service.genai") as mock_genai:
             mock_client = MagicMock()
-            mock_client.messages.create = MagicMock(
+            mock_client.models.generate_content = MagicMock(
                 side_effect=Exception("Rate limit exceeded")
             )
-            mock_anthropic.Anthropic.return_value = mock_client
+            mock_genai.Client.return_value = mock_client
 
-            # Provide fake API key directly to constructor
             ocr_service = OCRService(api_key="test-api-key-for-ci")
             with pytest.raises(Exception, match="Rate limit exceeded"):
                 await ocr_service.extract_text_from_pdf(b"fake_pdf_bytes")
 
     @pytest.mark.asyncio
     async def test_ocr_service_invalid_response(self, db: Session):
-        """OCR service should handle malformed API responses."""
+        """OCR service should handle empty API responses."""
         from app.core.ocr_service import OCRService
 
-        with patch("app.core.ocr_service.anthropic") as mock_anthropic:
-            # Simulate malformed response (missing expected fields)
+        with patch("app.core.ocr_service.genai") as mock_genai:
             mock_response = MagicMock()
-            mock_response.content = []  # Empty content list
+            mock_response.text = ""
+            mock_response.usage_metadata = None
 
             mock_client = MagicMock()
-            mock_client.messages.create = MagicMock(return_value=mock_response)
-            mock_anthropic.Anthropic.return_value = mock_client
+            mock_client.models.generate_content = MagicMock(return_value=mock_response)
+            mock_genai.Client.return_value = mock_client
 
-            # Provide fake API key directly to constructor
             ocr_service = OCRService(api_key="test-api-key-for-ci")
-            # Empty content list should return empty string (line 148 in ocr_service.py)
             result = await ocr_service.extract_text_from_pdf(b"fake_pdf_bytes")
             assert result == ""
 
@@ -160,6 +149,7 @@ class TestWebhookErrors:
     async def test_clerk_webhook_endpoint_exists(self):
         """Clerk webhook endpoint should exist and accept POST."""
         from fastapi.testclient import TestClient
+
         from app.main import app
 
         client = TestClient(app)
@@ -177,6 +167,7 @@ class TestWebhookErrors:
     async def test_clerk_webhook_invalid_event_type(self):
         """Clerk webhook should handle unknown event types gracefully."""
         from fastapi.testclient import TestClient
+
         from app.main import app
 
         client = TestClient(app)
@@ -201,8 +192,9 @@ class TestDatabaseErrors:
 
     def test_db_connection_handling(self, db: Session):
         """Database operations should handle connection issues gracefully."""
-        from app.models.user import User
         from sqlalchemy.exc import SQLAlchemyError
+
+        from app.models.user import User
 
         # Test that invalid queries raise a proper database error
         try:

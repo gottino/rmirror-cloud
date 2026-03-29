@@ -57,7 +57,7 @@ jobs:
           CLERK_SECRET_KEY=${{ secrets.STAGING_CLERK_SECRET_KEY }}
           CLERK_WEBHOOK_SECRET=${{ secrets.STAGING_CLERK_WEBHOOK_SECRET }}
           CLERK_JWKS_URL=${{ secrets.STAGING_CLERK_JWKS_URL }}
-          CLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}
+          GOOGLE_AI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
           S3_ENDPOINT_URL=${{ secrets.B2_ENDPOINT_URL }}
           S3_ACCESS_KEY=${{ secrets.B2_ACCESS_KEY_ID }}
           S3_SECRET_KEY=${{ secrets.B2_SECRET_ACCESS_KEY }}
