@@ -3,6 +3,7 @@
 import { useAuth, useUser, SignIn, useClerk } from '@clerk/nextjs';
 import { useSearchParams } from 'next/navigation';
 import { useState, useCallback, Suspense } from 'react';
+import Image from 'next/image';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
 
@@ -90,7 +91,7 @@ function AgentAuthBridgeInner() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[var(--background)] p-5">
         <div className="bg-[var(--card)] rounded-2xl p-10 max-w-md w-full shadow-lg border border-[var(--border)] text-center">
-          <div className="text-5xl mb-4">📓</div>
+          <Image src="/rm-icon.png" alt="rMirror" width={56} height={56} className="mx-auto mb-4" />
           <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-3">rMirror Agent</h1>
           <p className="text-[var(--muted-foreground)]">
             This page is used by the rMirror Agent for authentication.
@@ -123,7 +124,7 @@ function AgentAuthBridgeInner() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--background)] p-5 gap-6">
         <div className="text-center">
-          <div className="text-5xl mb-3">📓</div>
+          <Image src="/rm-icon.png" alt="rMirror" width={56} height={56} className="mx-auto mb-3" />
           <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-1">rMirror Agent</h1>
           <p className="text-[var(--muted-foreground)]">Sign in to connect your agent</p>
         </div>
@@ -141,7 +142,7 @@ function AgentAuthBridgeInner() {
     <div className="min-h-screen flex items-center justify-center bg-[var(--background)] p-5">
       <div className="bg-[var(--card)] rounded-2xl p-10 max-w-md w-full shadow-lg border border-[var(--border)]">
         <div className="text-center mb-8">
-          <div className="text-5xl mb-3">📓</div>
+          <Image src="/rm-icon.png" alt="rMirror" width={56} height={56} className="mx-auto mb-3" />
           <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-1">rMirror Agent</h1>
           <p className="text-[var(--muted-foreground)]">Connect your agent to rMirror Cloud</p>
         </div>
