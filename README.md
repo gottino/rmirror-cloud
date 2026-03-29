@@ -6,7 +6,7 @@ Mirror your reMarkable notes to the cloud with AI-powered handwriting recognitio
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.135+-green.svg)](https://fastapi.tiangolo.com)
 [![Next.js 14](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org)
 
 ---
@@ -14,10 +14,11 @@ Mirror your reMarkable notes to the cloud with AI-powered handwriting recognitio
 ## ✨ Features
 
 - 🔄 **Automatic Sync** - Lightweight macOS agent monitors your reMarkable and syncs to the cloud
-- 🤖 **AI Handwriting Recognition** - Claude Vision OCR for superior accuracy
+- 🤖 **AI Handwriting Recognition** - Gemini 2.5 Flash Vision for superior accuracy
 - 🔌 **Notion Integration** - Automatic sync to Notion databases with OAuth authentication
+- 📓 **Obsidian Integration** - Sync notebooks to your Obsidian vault via plugin
 - 🌐 **Web Dashboard** - Browse, search, and manage notebooks from anywhere
-- 📊 **Quota Management** - Free tier with 30 pages/month, graceful degradation when exhausted
+- 📊 **Quota Management** - Beta tier with 200 pages/month, graceful degradation when exhausted
 - ⚡ **Smart Sync** - Metadata-only updates 50-100x faster than full content sync
 - 🔓 **Fully Open Source** - AGPL-3.0 licensed, audit the code yourself
 - 🛡️ **Privacy First** - Self-host option for complete control
@@ -30,7 +31,7 @@ Mirror your reMarkable notes to the cloud with AI-powered handwriting recognitio
 
 **Currently in beta** - Join the waitlist at [rmirror.io](https://rmirror.io)
 
-**Free tier:** 30 pages/month OCR processing
+**Beta tier:** 200 pages/month OCR processing
 **Pro (planned):** Unlimited processing + priority support
 
 ### Option 2: Self-Hosting
@@ -46,7 +47,7 @@ cd rmirror-cloud
 cd backend
 poetry install
 cp .env.example .env
-# Edit .env with your Claude API key and database URL
+# Edit .env with your Google AI API key and database URL
 poetry run alembic upgrade head
 poetry run uvicorn app.main:app --reload
 
@@ -73,7 +74,7 @@ See [Development Setup](#-development-setup) for detailed instructions.
 
 ```
 ┌─────────────────┐
-│   Mac Agent     │  ← Python background service (v1.4.1)
+│   Mac Agent     │  ← Python background service (v1.6.0)
 │  (Menu Bar App) │     File watching + Flask web UI
 └────────┬────────┘
          │ HTTPS (JWT auth)
@@ -88,7 +89,7 @@ See [Development Setup](#-development-setup) for detailed instructions.
 │         │          └─────────────┘ │
 │  ┌──────▼───────┐                  │
 │  │ OCR Pipeline │  ┌─────────────┐ │
-│  │ Claude Vision│  │ Quota System│ │
+│  │ Gemini Vision│  │ Quota System│ │
 │  └──────────────┘  └─────────────┘ │
 │                                     │
 │  ┌──────────────┐  ┌─────────────┐ │
@@ -113,7 +114,7 @@ See [Development Setup](#-development-setup) for detailed instructions.
          │
          ↓
    External APIs
-   (Notion OAuth, Readwise planned)
+   (Notion OAuth, Obsidian, Readwise planned)
 ```
 
 **Components:**
@@ -133,7 +134,7 @@ See [Development Setup](#-development-setup) for detailed instructions.
 | Agent | Python + Flask + rumps | Lightweight, native macOS menu bar integration |
 | Backend | FastAPI + SQLAlchemy | Async Python, type-safe, auto-generated OpenAPI docs |
 | Database | PostgreSQL / SQLite | Robust for production, simple for dev |
-| OCR | Claude Vision API | Best-in-class handwriting recognition |
+| OCR | Google Gemini 2.5 Flash | Best quality/cost ratio for handwriting OCR |
 | Storage | S3-compatible (Backblaze B2) | Scalable, cost-effective object storage |
 | Dashboard | Next.js 14 + Clerk | SSR, great DX, managed authentication |
 | Auth | JWT (30-day tokens) | Stateless, secure, long-lived for agent |
@@ -141,7 +142,7 @@ See [Development Setup](#-development-setup) for detailed instructions.
 
 ---
 
-## 🎯 Current Status (January 2026)
+## 🎯 Current Status (March 2026)
 
 ### ✅ Production Ready
 
@@ -155,13 +156,13 @@ See [Development Setup](#-development-setup) for detailed instructions.
 - [x] S3-compatible storage (Backblaze B2)
 
 **OCR & Processing**
-- [x] Claude Vision API integration
+- [x] Gemini 2.5 Flash Vision API
 - [x] OCR processing pipeline
 - [x] PDF generation from reMarkable files
 - [x] Handwriting recognition with context awareness
 
 **Quota System**
-- [x] Free tier: 30 pages/month OCR processing
+- [x] Beta tier: 200 pages/month OCR processing
 - [x] Graceful degradation when quota exhausted
   - Uploads accepted, PDFs generated
   - OCR deferred with `PENDING_QUOTA` status
@@ -181,6 +182,7 @@ See [Development Setup](#-development-setup) for detailed instructions.
   - Updates Notion properties: `last_opened`, `page_count`, `path`
   - Separate from full content sync
 - [x] Page limit control for initial sync (prevents quota exhaustion)
+- [x] Obsidian vault sync via plugin
 
 **macOS Agent**
 - [x] Python background service with menu bar app
@@ -190,8 +192,10 @@ See [Development Setup](#-development-setup) for detailed instructions.
 - [x] Exponential backoff retry logic
 - [x] Long-lived token authentication (30-day JWT)
 - [x] Quota display in menu bar and web UI
-- [x] Production release v1.4.1 with `.app` bundle
+- [x] Production release v1.6.0 with `.app` bundle
 - [x] Automation scripts for build and release
+- [x] Auth bridge for agent authentication
+- [x] Per-notebook deletion support
 
 **Web Dashboard**
 - [x] Next.js 14 web interface (deployed on Vercel)
@@ -208,6 +212,11 @@ See [Development Setup](#-development-setup) for detailed instructions.
 - [x] Deployment guides
 - [x] Development setup documentation
 - [x] Domain-specific `.claudecontext` files
+- [x] Legal compliance (Privacy Policy, Terms of Service, DPA)
+
+**Tooling**
+- [x] OCR benchmark tool for model evaluation
+- [x] Analytics integration
 
 ### 🚧 Planned
 
@@ -218,7 +227,6 @@ See [Development Setup](#-development-setup) for detailed instructions.
 
 **Integrations**
 - [ ] Readwise integration
-- [ ] Obsidian sync
 - [ ] Todo app integration (other than Notion)
 
 **Agent**
@@ -246,7 +254,7 @@ See [Development Setup](#-development-setup) for detailed instructions.
 - Node.js 18 or later
 - Poetry (Python dependency management)
 - PostgreSQL (production) or SQLite (development)
-- Claude API key (for OCR)
+- Google AI API key (for OCR)
 - Clerk account (for dashboard authentication)
 
 ### Backend Setup
@@ -262,7 +270,7 @@ cp .env.example .env
 
 # Edit .env and set:
 # - DATABASE_URL (use SQLite for dev: sqlite:///./rmirror.db)
-# - ANTHROPIC_API_KEY (get from console.anthropic.com)
+# - GOOGLE_AI_API_KEY (get from aistudio.google.com)
 # - SECRET_KEY (generate with: openssl rand -hex 32)
 
 # Run database migrations
@@ -533,7 +541,7 @@ This means:
 
 Built with ❤️ using:
 
-- [Claude](https://anthropic.com) for AI-powered OCR
+- [Google Gemini](https://deepmind.google/technologies/gemini/) for AI-powered OCR
 - [FastAPI](https://fastapi.tiangolo.com) for the backend
 - [Next.js](https://nextjs.org) for the web dashboard
 - [Clerk](https://clerk.com) for authentication

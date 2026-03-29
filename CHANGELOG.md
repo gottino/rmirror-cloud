@@ -9,6 +9,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### OCR Model Switch to Gemini 2.5 Flash (2026-03-29)
+- **Benchmarked 5 OCR models** across 3 providers (Anthropic, OpenAI, Google) on real reMarkable handwriting samples
+- **Gemini 2.5 Flash selected** as new default: composite quality score 0.699, cost $0.003/page vs $0.007 for Claude Haiku
+- **Scoring dimensions**: CER (character error rate), line accuracy, structure detection, heading recognition
+- **Provider cost comparison** documented in benchmark results
+
+#### OCR Benchmark Tool (2026-03-28)
+- **Standalone `benchmark/` tool** for evaluating OCR quality across providers
+- **`benchmark/run.py`**: multi-provider execution loop with dry-run support and meta.yaml output
+- **`benchmark/score.py`**: CER, line accuracy, and structure metrics scoring
+- **Synthetic test fixture** for benchmark smoke testing without real API calls
+- **Cost estimates** included in benchmark output for provider comparison
+
+#### Agent Auth Bridge (2026-03-28)
+- **Self-hosted Clerk auth page** (`/agent-auth`) for agent login flow, replacing redirect to dashboard
+- **Public route** exempt from Clerk middleware protection
+- **Clerk JS SDK pinned to v4** for stability
+- **Callback URL preserved** on sign-out to resume the auth flow after re-login
+- **Environment switching** between staging and production Clerk instances
+- **rM logo** replaces notebook emoji on the auth bridge page
+
+#### Per-Notebook Deletion (2026-03-22)
+- **Cascade delete** removes pages, notebook-page mappings, sync queue entries, and sync records
+- **S3/B2 object cleanup** for all PDFs associated with deleted notebooks
+- **Agent awareness** of server-side deletions
+- **Complete cleanup** prevents orphaned sync records from causing duplicate detection issues
+
+#### Obsidian Integration (2026-03-15)
+- **API key authentication** for Obsidian plugin access (SHA-256 hashed keys stored in database)
+- **Content hash-based sync**: `obsidian_content_hash` tracks last-synced content to skip unchanged pages
+- **Obsidian API endpoints** registered under `/v1/obsidian`
+- **Dashboard integration card** with API key generation and management UI
+- **Excluded from push-based sync queue** (pull-only model via plugin)
+- **Backfill migration** for `obsidian_content_hash` on pre-existing notebooks
+
+#### Admin Dashboard (2026-02-28)
+- **Waitlist management** view for monitoring and acting on beta signups
+- **User onboarding milestones** display: agent install, first upload, Notion connected
+- **Admin-only routes** protected by user ID allowlist
+
+#### Beta User Quota System (2026-02-22)
+- **200 pages/month quota** for beta users (vs 30 pages/month free tier)
+- **`is_beta_user` flag** on user model for manual and automated enrollment
+- **Auto-enrollment via Clerk webhook** on new user registration during beta period
+
+#### Umami Analytics (2026-02-20)
+- **Self-hosted Umami** on `analytics.rmirror.io` for cookie-less, privacy-respecting tracking
+- **End-to-end event tracking** across dashboard and landing page
+- **Backend env vars** added to production deploy workflow
+
+#### Legal Compliance (2026-02-20)
+- **Version-based terms and privacy acceptance** flow: users must accept current version on login
+- **Public legal pages** at `/legal/privacy` and `/legal/terms` (no auth required)
+- **Acceptance recorded** in database with version and timestamp
+
+#### Onboarding and Drip Campaign (2026-02-15)
+- **Onboarding checklist** in dashboard sidebar with milestone tracking (agent install, first sync, Notion connected)
+- **Automated email drip campaign** with sequenced onboarding messages via Resend
+- **Two-phase onboarding flow** consolidating setup steps
+- **Support email** and Notion feedback form links added to sidebar
+
+#### Open Signups (2026-03-01)
+- **Removed invite gate** - signups open to all without waitlist approval
+- **Setup wizard** with Gatekeeper bypass instructions for macOS notarization
+- **`GET /agents/latest-version`** public endpoint for dashboard download link (no hardcoded URLs)
+- **Pre-download funnel** with setup wizard before DMG download
+
+#### Agent v1.6.0 (2026-03-29)
+- **Version bump** to 1.6.0 with backend `agent_latest_version` config updated
+
+#### Agent v1.5.6 (2026-03-22)
+- **Auth popup blocker fix** - resolved issue preventing Clerk sign-in window from opening
+- **Config save crash fix** and restart hang resolved
+
+#### Agent v1.5.5 (2026-03-16)
+- **W^X entitlement** added for Intel build to satisfy macOS security requirements
+- **Inside-out signing** for Intel DMG (sign binaries before bundling)
+- **`disable-library-validation`** entitlement for Intel builds
+
+#### Agent v1.5.4 (2026-03-10)
+- **Graceful handling of missing reMarkable folder** - logs warning instead of crashing on startup
+
+#### Agent v1.5.3 (2026-03-05)
+- **Setup wizard polish** with Gatekeeper note and sync screenshot
+
+#### Agent v1.5.2 (2026-02-28)
+- **Intel DMG build** via GitHub Actions `build-agent-intel.yml` workflow (`macos-15-intel` runner)
+- **B2 auth fix** in Intel build workflow
+
+#### Agent v1.5.1 (2026-02-22)
+- **Template filtering** - skip reMarkable built-in templates in all metadata parsers
+
+#### Agent v1.5.0 (2026-02-10)
+- **Auto-update feature** with user-triggered update checking
+- **Build script fix** for macOS app bundle generation
+
+#### CI/CD Pipeline (2026-02-08)
+- **Comprehensive CI workflow** for backend (pytest), dashboard (lint + build), and agent
+- **Staging environment** with separate deployment workflow
+- **Apple Silicon build workflow** (`build-agent.yml`) on `macos-15` runner
+- **CLERK_JWKS_URL and DEBUG** environment variables added to deployment workflows
+
+#### Search and Discovery (2026-02-05)
+- **Fuzzy full-text search** across notebook names and OCR content
+- **Folder, date, and in-notebook filters** for search refinement
+- **Content matches weighted higher** than name matches in result ranking
+- **Notebook-level pagination** instead of raw match pagination
+
+#### Security Hardening (2026-02-06)
+- **5 critical security vulnerabilities patched**: SSL verification, JWT bypass, OAuth CSRF, encryption bypass, SQL injection
+- **Phase 4 medium priority fixes**: HMAC-signed OAuth state, parameterized PostgreSQL SET commands
+- **CLERK_JWKS_URL** required in production (raises RuntimeError if missing)
+- **Dev mode bypass** hardened with localhost check
+
+#### Structured Logging and Observability (2026-02-04)
+- **Structured JSON logging** for all backend requests
+- **Request tracing** with correlation IDs
+- **Health check endpoints** for uptime monitoring
+
+#### Notebook Export (2026-02-01)
+- **Markdown export** of OCR text per notebook
+- **PDF export** with placeholder PDFs for pages without stored PDFs
+- **Settings page** with data export and account deletion (Danger Zone)
+- **Account export** query aligned with notebook detail endpoint
+
 #### Documentation Update (2026-01-21)
 - **Comprehensive documentation refresh** for January 2026 state
 - **Updated README.md** with current architecture and features
@@ -137,6 +262,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Home icon conflict resolution** with lucide-react
 
 ### Changed
+
+#### Dependencies (2026-03-29)
+- **FastAPI upgraded** from 0.109 to 0.135 for httpx 0.28 compatibility
+- **httpx upgraded** from 0.26 to 0.28, required by google-genai SDK
+- **google-genai** moved from dev to production dependencies
+- **OCR provider changed** from Anthropic Claude Haiku to Google Gemini 2.5 Flash
+
+#### Agent Web UI Port (2026-03-05)
+- **Port changed from 5555 to 9090** for the agent local web interface
+
+#### Notion Integration (2026-02-10)
+- **Legacy `api_token` support deprecated** in favor of OAuth `access_token`
+- **Improved initial sync** with full metadata support
+- **`_get_http_client` helper** and `use_status_property` support added
+- **Status property detection** for Notion todos sync
+
+#### Dashboard Design (2026-02-05)
+- **Moleskine design system applied** to Clerk authentication pages
+- **Input border contrast improved** for accessibility
+- **Auth flows kept within app domain** (no redirects to external Clerk pages)
+- **Hero animation and responsive window chrome** improved on landing page
+- **macOS Tahoe window chrome** added to landing page screenshots
+
+### Fixed
+
+#### Agent Signing (2026-03-16 to 2026-03-28)
+- **W^X entitlement** added to resolve macOS security policy violations on Intel
+- **Inside-out signing** for Intel DMG: sign all Mach-O binaries before app bundle signing
+- **`disable-library-validation`** entitlement for Intel builds to allow dynamic library loading
+- **All Mach-O binaries signed** in notarization workflow to pass Apple notarization
+
+#### Auth Bridge (2026-03-28)
+- **Clerk JS SDK pinned to v4** to prevent breaking changes from newer SDK versions
+- **Callback URL preserved** when signing out on the agent auth bridge
+- **CORS defaults** updated to include agent localhost origins
+- **`CLERK_PUBLISHABLE_KEY` env var name** corrected to match Pydantic field definition
+
+#### Obsidian Integration (2026-03-15)
+- **`obsidian_content_hash` backfilled** for pre-existing notebooks via migration
+- **Import sorting** fixed in backfill migration to pass ruff lint
+
+#### Agent (2026-02-22 to 2026-03-22)
+- **Auth popup blocker** resolved for agent Clerk sign-in window
+- **Config save crash** and restart hang fixed in agent web UI
+- **Keychain namespace** changes reflected in agent config tests
+- **HS256 agent tokens** handled correctly in Clerk auth middleware
+- **Agent auth API URL** reverted to `/v1` to match Nginx routing
+- **f-string without placeholders** removed to pass ruff lint
+
+#### Backend (2026-02-04 to 2026-03-01)
+- **Ruff import sorting** fixes across drip service, migration files, and search service
+- **PostgreSQL boolean default** uses `'false'` instead of `'0'`
+- **Waitlist API** uses sync Session to avoid async session errors
+- **Dev mode bypass** hardened with localhost-only check
+- **Admin page auth** fixed for production use
+- **SSL verification** respects `dev_mode` flag in update checker
+- **Clerk auth enforced** on users API and onboarding endpoints
+- **Quota tests** updated to mock `useQuota` context hook instead of `getQuotaStatus`
 
 #### Mac Agent (2025-11-19)
 - Python-based background service for automatic reMarkable sync
@@ -315,7 +498,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ✅ Development setup guides
 - ✅ Centralized documentation structure
 
-**Mac Agent v1.4.1** (January 2026)
+**Mac Agent v1.6.0** (March 2026)
 - ✅ Python background service with menu bar integration
 - ✅ Real-time file watching with watchdog
 - ✅ Intelligent sync queue with batching
@@ -323,6 +506,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ✅ Selective notebook sync configuration
 - ✅ Quota display with color-coded status
 - ✅ 30-day token authentication
+- ✅ Auto-update with user-triggered version checking
+- ✅ Intel and Apple Silicon DMG builds via GitHub Actions
+- ✅ Self-hosted auth bridge for Clerk sign-in
+- ✅ Graceful missing-folder handling
 
 **Web Dashboard** (January 2026)
 - ✅ Notebook browsing interface with folder navigation
@@ -337,6 +524,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ✅ Graceful degradation
 - ✅ Email notifications
 - ✅ Dashboard and agent display
+
+**Obsidian Integration** (March 2026)
+- ✅ API key authentication for Obsidian plugin
+- ✅ Content hash-based pull sync
+- ✅ Dashboard integration card with key management
+- ✅ Excluded from push-based sync queue
+
+**OCR Benchmark and Gemini Migration** (March 2026)
+- ✅ Standalone benchmark tool with multi-provider support
+- ✅ CER, line accuracy, and structure scoring metrics
+- ✅ Benchmarked 5 models across 3 providers
+- ✅ Migrated OCR to Google Gemini 2.5 Flash ($0.003/page)
 
 ### Upcoming Milestones
 
@@ -353,8 +552,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
-- **Unreleased** - Production-ready system with quota management, metadata sync, and full dashboard
-- **Agent v1.4.1** - Production release with deleted pages filtering and bug fixes
+- **Unreleased** - Production-ready system with Gemini OCR, Obsidian integration, open signups, and full dashboard
+- **Agent v1.6.0** - Self-hosted auth bridge, Intel + Apple Silicon builds, auto-update, graceful error handling
+- **Agent v1.5.6** - Auth popup fix, config save crash fix
+- **Agent v1.5.5** - Intel signing entitlements (W^X, disable-library-validation)
+- **Agent v1.5.4** - Graceful missing reMarkable folder handling
+- **Agent v1.5.3** - Setup wizard polish with Gatekeeper instructions
+- **Agent v1.5.2** - Intel DMG build via GitHub Actions
+- **Agent v1.5.1** - Template filtering in metadata parsers
+- **Agent v1.5.0** - Auto-update feature
+- **Agent v1.4.1** - Deleted pages filtering and UUID truncation bug fix
 - **0.1.0** - Initial development phase with core backend and OCR processing
 
 ---

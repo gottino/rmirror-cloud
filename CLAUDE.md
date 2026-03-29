@@ -145,7 +145,7 @@ This project uses domain-specific `.claudecontext` files for focused sessions:
 
 **Database-Driven Deduplication**: `sync_records` table is source of truth. Uses `page_uuid` (reMarkable's unique ID) for deduplication, not content hashes. Clean Notion titles without hashes.
 
-**Quota System**: Separate `subscriptions` and `quota_usage` tables. Free tier: 30 pages/month. Enforced at backend before OCR. Graceful degradation: accepts uploads when exhausted, skips OCR, pages set to `PENDING_QUOTA` status.
+**Quota System**: Separate `subscriptions` and `quota_usage` tables. Beta tier: 200 pages/month (free tier: 30). Enforced at backend before OCR. Graceful degradation: accepts uploads when exhausted, skips OCR, pages set to `PENDING_QUOTA` status.
 
 **Metadata vs Content Sync**: Two sync types - `NOTEBOOK` (full content with OCR) and `NOTEBOOK_METADATA` (lightweight, updates only Notion properties). Metadata syncs 50-100x faster (~100ms vs ~5s).
 
@@ -282,9 +282,19 @@ cat /var/www/rmirror-cloud/backend/.env | grep DATABASE_URL
 
 All UI components (emails, dashboard, agent) use this consistent design system.
 
-## Current Status (January 2026)
+## Current Status (March 2026)
 
 **Completed**:
+- OCR switched to Google Gemini 2.5 Flash (was Claude Haiku)
+- OCR benchmark tool (5 models, 3 providers)
+- Obsidian integration (API key auth, content hash sync)
+- Agent auth bridge (self-hosted Clerk page)
+- Per-notebook deletion with cascade cleanup
+- Beta user quota (200 pages/month)
+- Legal compliance (terms/privacy acceptance)
+- Umami analytics (self-hosted, cookie-less)
+- Onboarding checklist + email drip campaign
+- Agent v1.6.0 with Intel build support
 - Quota system Phase 1 (30 pages/month free tier)
 - Graceful degradation (accept uploads when quota exhausted)
 - Retroactive OCR processing (newest pages first)
