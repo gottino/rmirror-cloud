@@ -95,6 +95,7 @@ class Settings(BaseSettings):
 
     # Claude API for OCR
     claude_api_key: Optional[str] = None
+    ocr_model: str = "claude-haiku-4-5-20251001"
 
     # Authentication
     secret_key: str
@@ -138,7 +139,7 @@ class Settings(BaseSettings):
     umami_website_id: Optional[str] = None
 
     # Agent Downloads
-    agent_latest_version: str = "1.5.6"
+    agent_latest_version: str = "1.6.0"
     agent_download_url_macos: str = ""
 
     # Beta / Admin
