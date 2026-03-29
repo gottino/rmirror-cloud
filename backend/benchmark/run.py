@@ -177,23 +177,29 @@ def run_benchmark(config: dict, model_filter: list[str] | None, runs_override: i
         else:
             print(f"WARNING: Skipping {name} — {env_key} not set")
 
+    if dry_run:
+        # In dry-run mode, show plan for all configured models (keys not required)
+        all_models = models
+        total_calls = len(all_models) * len(pages) * runs_per_page
+        print(f"\nBenchmark plan: {len(all_models)} models x {len(pages)} pages x {runs_per_page} runs = {total_calls} API calls")
+        print("\n[DRY RUN] Would execute:")
+        total_cost = 0.0
+        for name, cfg in all_models.items():
+            calls = len(pages) * runs_per_page
+            cost = COST_PER_PAGE.get(name, 0) * len(pages) * runs_per_page
+            total_cost += cost
+            key_status = "key set" if os.environ.get(cfg["env_key"]) else "NO KEY"
+            print(f"  {name} ({key_status}): {len(pages)} pages x {runs_per_page} runs = {calls} calls (~${cost:.2f})")
+        print(f"\n  Pages: {[p.name for p in pages]}")
+        print(f"  Estimated total cost: ~${total_cost:.2f}")
+        return
+
     if not available_models:
         print("ERROR: No models available. Set at least one API key.")
         sys.exit(1)
 
     total_calls = len(available_models) * len(pages) * runs_per_page
     print(f"\nBenchmark: {len(available_models)} models x {len(pages)} pages x {runs_per_page} runs = {total_calls} API calls")
-
-    if dry_run:
-        print("\n[DRY RUN] Would execute:")
-        total_cost = 0.0
-        for name in available_models:
-            calls = len(pages) * runs_per_page
-            cost = COST_PER_PAGE.get(name, 0) * len(pages) * runs_per_page
-            total_cost += cost
-            print(f"  {name}: {len(pages)} pages x {runs_per_page} runs = {calls} calls (~${cost:.2f})")
-        print(f"\n  Estimated total cost: ~${total_cost:.2f}")
-        return
 
     # Create timestamped results directory
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
