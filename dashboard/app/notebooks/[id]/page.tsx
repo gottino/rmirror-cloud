@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
 import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu, Search, X, Loader2, Trash2 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
 import { getNotebook, getIntegrations, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
@@ -205,7 +206,7 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId, quota, isTargetP
 
           {page.ocr_status === 'completed' && page.ocr_text ? (
             <div className="prose prose-sm sm:prose max-w-none prose-headings:font-semibold prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg prose-p:text-[var(--warm-charcoal)] prose-ul:text-[var(--warm-charcoal)] prose-ol:text-[var(--warm-charcoal)] prose-li:text-[var(--warm-charcoal)] prose-strong:text-[var(--warm-charcoal)] prose-a:text-[var(--terracotta)] hover:prose-a:opacity-80">
-              <ReactMarkdown breaks>{page.ocr_text}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkBreaks]}>{page.ocr_text}</ReactMarkdown>
             </div>
           ) : page.ocr_status === 'failed' && page.ocr_error ? (
             <div className="rounded p-4" style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.2)' }}>
