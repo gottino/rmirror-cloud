@@ -205,7 +205,7 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId, quota, isTargetP
 
           {page.ocr_status === 'completed' && page.ocr_text ? (
             <div className="prose prose-sm sm:prose max-w-none prose-headings:font-semibold prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg prose-p:text-[var(--warm-charcoal)] prose-ul:text-[var(--warm-charcoal)] prose-ol:text-[var(--warm-charcoal)] prose-li:text-[var(--warm-charcoal)] prose-strong:text-[var(--warm-charcoal)] prose-a:text-[var(--terracotta)] hover:prose-a:opacity-80">
-              <ReactMarkdown>{page.ocr_text.replace(/\n/g, '  \n')}</ReactMarkdown>
+              <ReactMarkdown>{page.ocr_text.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').replace(/\n/g, '  \n')}</ReactMarkdown>
             </div>
           ) : page.ocr_status === 'failed' && page.ocr_error ? (
             <div className="rounded p-4" style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.2)' }}>

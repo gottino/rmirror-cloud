@@ -1,6 +1,7 @@
 """OCR service using Google Gemini Vision API for handwritten text extraction."""
 
 import logging
+import re
 import time
 
 from google import genai
@@ -25,7 +26,7 @@ OCR_PROMPT = (
     "- Underlined text = headings (use ## or ###)\n"
     "- Dates are dd-mm-yyyy format (European). If a date appears (often right side of page), "
     "start with **Date: dd-mm-yyyy** followed by ---\n"
-    "- Output clean Markdown, no explanations\n\n"
+    "- Output clean Markdown, no explanations, no code fences (no ```)\n\n"
     "Example — if handwriting shows:\n"
     "  • Topic A → details\n"
     "  • Topic B\n"
@@ -135,6 +136,10 @@ class OCRService:
                 output_tokens = response.usage_metadata.candidates_token_count or 0
 
             extracted_text = response.text or ""
+
+            # Strip markdown code fences that Gemini sometimes wraps output in
+            extracted_text = re.sub(r'^```\w*\n?', '', extracted_text)
+            extracted_text = re.sub(r'\n?```$', '', extracted_text)
 
             if extracted_text:
                 logger.info(
