@@ -395,7 +395,7 @@ async def sync_notebooks(
             SyncNotebookResponse(
                 notebook_uuid=nb.notebook_uuid,
                 visible_name=nb.visible_name,
-                folder_path=nb.full_path,
+                folder_path="/".join(nb.full_path.split("/")[:-1]) if nb.full_path and "/" in nb.full_path else "",
                 page_count=len(pages),
                 content_hash=nb.obsidian_content_hash or "",
                 last_modified=nb.updated_at.isoformat(),
