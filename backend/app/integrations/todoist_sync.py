@@ -10,7 +10,7 @@ from app.models.sync_record import SyncItemType, SyncStatus
 
 logger = logging.getLogger(__name__)
 
-TODOIST_API_URL = "https://api.todoist.com/rest/v2"
+TODOIST_API_URL = "https://api.todoist.com/api/v1"
 
 
 class TodoistSyncTarget(SyncTarget):

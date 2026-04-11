@@ -8,6 +8,7 @@ import logging
 import time
 from typing import List, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -192,13 +193,61 @@ async def list_projects(
             TodoistProject(
                 id=str(p["id"]),
                 name=p["name"],
-                is_inbox_project=p.get("is_inbox_project", False),
+                is_inbox_project=p.get("inbox_project", p.get("is_inbox_project", False)),
             )
             for p in projects
         ]
     except Exception as e:
         logger.error(f"Error listing Todoist projects: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch projects from Todoist")
+
+
+class CreateProjectRequest(BaseModel):
+    name: str = "reMarkable Notes"
+
+
+@router.post("/projects/create", response_model=TodoistProject)
+async def create_project(
+    request: CreateProjectRequest,
+    current_user: User = Depends(get_clerk_active_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new Todoist project."""
+    config = (
+        db.query(IntegrationConfig)
+        .filter(
+            IntegrationConfig.user_id == current_user.id,
+            IntegrationConfig.target_name == "todoist",
+        )
+        .first()
+    )
+
+    if not config:
+        raise HTTPException(status_code=404, detail="Todoist not connected. Complete OAuth first.")
+
+    config_dict = config.get_config()
+    access_token = config_dict.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="No access token. Please reconnect.")
+
+    try:
+        oauth_service = TodoistOAuthService()
+        project = await oauth_service.create_project(access_token, request.name)
+        return TodoistProject(
+            id=str(project["id"]),
+            name=project["name"],
+            is_inbox_project=False,
+        )
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 403:
+            error_data = e.response.json() if e.response.text else {}
+            if error_data.get("error_tag") == "MAX_PROJECTS_LIMIT_REACHED":
+                raise HTTPException(status_code=400, detail="Project limit reached in Todoist. Please select an existing project or upgrade your Todoist plan.")
+        logger.error(f"Error creating Todoist project: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create project in Todoist")
+    except Exception as e:
+        logger.error(f"Error creating Todoist project: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create project in Todoist")
 
 
 @router.post("/project")

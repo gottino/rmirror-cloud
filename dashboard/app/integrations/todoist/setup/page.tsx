@@ -6,7 +6,7 @@ import UserMenu from '@/components/UserMenu';
 import { useRouter } from 'next/navigation';
 import { Menu } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
-import { getTodoistProjects, setTodoistProject, TodoistProject } from '@/lib/api';
+import { getTodoistProjects, setTodoistProject, createTodoistProject, TodoistProject } from '@/lib/api';
 import { trackEvent } from '@/lib/analytics';
 
 function TodoistSetupContent() {
@@ -21,6 +21,7 @@ function TodoistSetupContent() {
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -49,6 +50,25 @@ function TodoistSetupContent() {
       setError(err instanceof Error ? err.message : 'Failed to load projects');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleCreateProject() {
+    setCreating(true);
+    setError(null);
+    try {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (!token) return;
+
+      const newProject = await createTodoistProject(token, 'reMarkable Notes');
+      setProjects((prev) => [newProject, ...prev]);
+      setSelectedProjectId(newProject.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create project');
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -170,6 +190,19 @@ function TodoistSetupContent() {
                 </div>
               ) : (
                 <div className="space-y-4">
+                  <button
+                    onClick={handleCreateProject}
+                    disabled={creating}
+                    className="w-full px-4 py-3 rounded-md text-sm font-medium transition-colors border-2 border-dashed disabled:opacity-50"
+                    style={{
+                      borderColor: 'var(--terracotta)',
+                      color: 'var(--terracotta)',
+                      backgroundColor: 'transparent',
+                    }}
+                  >
+                    {creating ? 'Creating...' : '+ Create "reMarkable Notes" project'}
+                  </button>
+
                   <div className="space-y-2">
                     {projects.map((project) => (
                       <label

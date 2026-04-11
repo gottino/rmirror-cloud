@@ -951,6 +951,19 @@ export async function getTodoistStatus(token: string): Promise<TodoistStatus> {
   return response.json();
 }
 
+export async function createTodoistProject(token: string, name: string = 'reMarkable Notes'): Promise<TodoistProject> {
+  const response = await fetch(`${API_URL}/integrations/todoist/projects/create`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) throw new Error('Failed to create Todoist project');
+  return response.json();
+}
+
 export async function disconnectTodoist(token: string) {
   const response = await fetch(`${API_URL}/integrations/todoist/disconnect`, {
     method: 'DELETE',

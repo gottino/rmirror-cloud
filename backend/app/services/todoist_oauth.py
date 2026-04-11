@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 TODOIST_AUTH_URL = "https://todoist.com/oauth/authorize"
 TODOIST_TOKEN_URL = "https://todoist.com/oauth/access_token"
-TODOIST_API_URL = "https://api.todoist.com/rest/v2"
+TODOIST_API_URL = "https://api.todoist.com/api/v1"
 
 
 class TodoistOAuthService:
@@ -34,6 +34,7 @@ class TodoistOAuthService:
             "client_id": self.client_id,
             "scope": "data:read,data:read_write,task:add",
             "state": state,
+            "redirect_uri": self.redirect_uri,
         }
         return f"{TODOIST_AUTH_URL}?{urlencode(params)}"
 
@@ -60,7 +61,11 @@ class TodoistOAuthService:
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            # v1 API returns paginated response with "results" key
+            if isinstance(data, dict) and "results" in data:
+                return data["results"]
+            return data
 
     async def create_project(self, access_token: str, name: str) -> Dict[str, Any]:
         """Create a new Todoist project."""
@@ -73,5 +78,9 @@ class TodoistOAuthService:
                 },
                 json={"name": name},
             )
+            if not response.is_success:
+                self.logger.error(
+                    f"Todoist create project failed: {response.status_code} - {response.text}"
+                )
             response.raise_for_status()
             return response.json()
