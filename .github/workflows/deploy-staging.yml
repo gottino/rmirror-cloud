@@ -69,7 +69,7 @@ jobs:
           NOTION_REDIRECT_URI=https://staging.rmirror.io/integrations/notion/callback
           TODOIST_CLIENT_ID=${{ secrets.TODOIST_CLIENT_ID }}
           TODOIST_CLIENT_SECRET=${{ secrets.TODOIST_CLIENT_SECRET }}
-          TODOIST_REDIRECT_URI=${{ secrets.TODOIST_REDIRECT_URI }}
+          TODOIST_REDIRECT_URI=https://staging.rmirror.io/integrations/todoist/callback
           RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
           INTEGRATION_MASTER_KEY=${{ secrets.STAGING_INTEGRATION_MASTER_KEY }}
           ADMIN_USER_IDS=${{ secrets.ADMIN_USER_IDS }}
