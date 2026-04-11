@@ -131,6 +131,11 @@ class Settings(BaseSettings):
     notion_client_secret: Optional[str] = None
     notion_redirect_uri: Optional[str] = None
 
+    # Todoist OAuth Integration
+    todoist_client_id: Optional[str] = None
+    todoist_client_secret: Optional[str] = None
+    todoist_redirect_uri: Optional[str] = None
+
     # Integration Encryption
     integration_master_key: Optional[str] = None
 

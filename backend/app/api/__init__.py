@@ -17,6 +17,7 @@ from app.api import (
     quota,
     search,
     sync,
+    todoist,
     todos,
     users,
     waitlist,
@@ -38,6 +39,7 @@ api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 api_router.include_router(obsidian.router, prefix="/integrations", tags=["obsidian"])
 api_router.include_router(notion_oauth.router, prefix="/integrations", tags=["integrations", "notion-oauth"])
+api_router.include_router(todoist.router, prefix="/integrations", tags=["integrations", "todoist"])
 api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
 api_router.include_router(todos.router, prefix="/todos", tags=["todos"])
 api_router.include_router(waitlist.router, tags=["waitlist"])

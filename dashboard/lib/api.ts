@@ -884,3 +884,91 @@ export async function getObsidianStatus(token: string): Promise<ObsidianStatusRe
   }
   return response.json();
 }
+
+// ==================== Todoist Integration ====================
+
+export interface TodoistProject {
+  id: string;
+  name: string;
+  is_inbox_project: boolean;
+}
+
+export interface TodoistStatus {
+  connected: boolean;
+  project_name: string | null;
+  project_id: string | null;
+  last_sync: string | null;
+  todos_synced: number;
+}
+
+export async function getTodoistOAuthUrl(token: string) {
+  const response = await fetch(`${API_URL}/integrations/todoist/oauth/authorize`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to get Todoist OAuth URL');
+  return response.json();
+}
+
+export async function todoistOAuthCallback(token: string, code: string, state: string) {
+  const response = await fetch(`${API_URL}/integrations/todoist/oauth/callback`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ code, state }),
+  });
+  if (!response.ok) throw new Error('Failed to complete Todoist OAuth');
+  return response.json();
+}
+
+export async function getTodoistProjects(token: string): Promise<TodoistProject[]> {
+  const response = await fetch(`${API_URL}/integrations/todoist/projects`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to fetch Todoist projects');
+  return response.json();
+}
+
+export async function setTodoistProject(token: string, projectId: string, projectName: string) {
+  const response = await fetch(`${API_URL}/integrations/todoist/project`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ project_id: projectId, project_name: projectName }),
+  });
+  if (!response.ok) throw new Error('Failed to set Todoist project');
+  return response.json();
+}
+
+export async function getTodoistStatus(token: string): Promise<TodoistStatus> {
+  const response = await fetch(`${API_URL}/integrations/todoist/status`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to get Todoist status');
+  return response.json();
+}
+
+export async function createTodoistProject(token: string, name: string = 'reMarkable Notes'): Promise<TodoistProject> {
+  const response = await fetch(`${API_URL}/integrations/todoist/projects/create`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) throw new Error('Failed to create Todoist project');
+  return response.json();
+}
+
+export async function disconnectTodoist(token: string) {
+  const response = await fetch(`${API_URL}/integrations/todoist/disconnect`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Failed to disconnect Todoist');
+  return response.json();
+}
