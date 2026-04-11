@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import time
+from datetime import datetime
 from typing import List, Optional
 
 import httpx
@@ -15,8 +16,11 @@ from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
 from app.config import get_settings
+from app.core.sync_engine import ContentFingerprint
 from app.database import get_db
+from app.models.notebook import Notebook
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
+from app.models.todo import Todo
 from app.models.user import User
 from app.services.todoist_oauth import TodoistOAuthService
 
@@ -276,12 +280,71 @@ async def set_project(
     config.is_enabled = True
     db.commit()
 
+    # Queue existing todos for initial sync
+    queued = _queue_existing_todos(db, current_user.id)
+
     logger.info(
         f"Todoist project set for user {current_user.id}: "
-        f"{request.project_name} ({request.project_id})"
+        f"{request.project_name} ({request.project_id}), "
+        f"queued {queued} existing todos for sync"
     )
 
-    return {"success": True, "message": f"Project '{request.project_name}' selected"}
+    return {"success": True, "message": f"Project '{request.project_name}' selected", "todos_queued": queued}
+
+
+def _queue_existing_todos(db: Session, user_id: int) -> int:
+    """Queue all existing todos for Todoist sync."""
+    todos = db.query(Todo).filter(Todo.user_id == user_id).all()
+    if not todos:
+        return 0
+
+    queued = 0
+    for todo in todos:
+        # Skip if already queued
+        existing = (
+            db.query(SyncQueue)
+            .filter(
+                SyncQueue.user_id == user_id,
+                SyncQueue.item_type == "todo",
+                SyncQueue.item_id == str(todo.id),
+                SyncQueue.target_name == "todoist",
+                SyncQueue.status.in_(["pending", "processing", "completed"]),
+            )
+            .first()
+        )
+        if existing:
+            continue
+
+        # Get notebook UUID
+        notebook = db.query(Notebook).filter(Notebook.id == todo.notebook_id).first()
+        notebook_uuid = notebook.notebook_uuid if notebook else None
+
+        content_hash = ContentFingerprint.for_todo({
+            "text": todo.text,
+            "notebook_uuid": notebook_uuid or "",
+            "page_number": todo.page_number or 0,
+        })
+
+        queue_item = SyncQueue(
+            user_id=user_id,
+            item_type="todo",
+            item_id=str(todo.id),
+            content_hash=content_hash,
+            notebook_uuid=notebook_uuid,
+            page_number=todo.page_number,
+            target_name="todoist",
+            status="pending",
+            priority=8,  # Lower priority than real-time syncs
+            scheduled_at=datetime.utcnow(),
+        )
+        db.add(queue_item)
+        queued += 1
+
+    if queued > 0:
+        db.commit()
+        logger.info(f"Queued {queued} existing todos for Todoist sync (user {user_id})")
+
+    return queued
 
 
 @router.get("/status", response_model=TodoistStatusResponse)
