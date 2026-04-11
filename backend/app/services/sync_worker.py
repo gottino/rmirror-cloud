@@ -12,9 +12,12 @@ from sqlalchemy.orm import Session
 from app.core.sync_engine import SyncItem, SyncItemType
 from app.database import SessionLocal
 from app.integrations.notion_sync import NotionSyncTarget
+from app.integrations.notion_todos_sync import NotionTodosSyncTarget
+from app.integrations.todoist_sync import TodoistSyncTarget
 from app.models.notebook import Notebook
 from app.models.page import Page
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
+from app.models.todo import Todo
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +206,8 @@ class SyncWorker:
         # Process based on item type
         if queue_item.item_type == 'page_text':
             await self._process_page_sync(db, queue_item, config, _item_start)
+        elif queue_item.item_type == 'todo':
+            await self._process_todo_sync(db, queue_item, config, _item_start)
         else:
             logger.warning(f"Unsupported item type: {queue_item.item_type}")
             queue_item.status = 'failed'
@@ -417,6 +422,151 @@ class SyncWorker:
             logger.error(
                 "Sync item failed: page %d: %s",
                 page.id,
+                result.error_message,
+                extra={
+                    "event": "sync.fail",
+                    "queue_id": queue_item.id,
+                    "target": queue_item.target_name,
+                    "duration_ms": duration_ms,
+                    "error": result.error_message,
+                },
+            )
+
+        db.commit()
+
+    async def _process_todo_sync(
+        self,
+        db: Session,
+        queue_item: SyncQueue,
+        config: IntegrationConfig,
+        _item_start: float = 0.0,
+    ):
+        """Process a todo sync to Todoist or Notion Todos."""
+        # Get the todo
+        todo = db.query(Todo).filter(Todo.id == int(queue_item.item_id)).first()
+        if not todo:
+            logger.warning(f"Todo {queue_item.item_id} not found")
+            queue_item.status = 'failed'
+            queue_item.error_message = "Todo not found"
+            db.commit()
+            return
+
+        # Get notebook info
+        notebook = db.query(Notebook).filter(Notebook.id == todo.notebook_id).first()
+
+        # Get decrypted config
+        config_dict = config.get_config()
+
+        # Create appropriate sync target
+        if queue_item.target_name == 'todoist':
+            target = TodoistSyncTarget(
+                access_token=config_dict.get('access_token'),
+                project_id=config_dict.get('project_id'),
+            )
+        elif queue_item.target_name == 'notion-todos':
+            target = NotionTodosSyncTarget(
+                access_token=config_dict.get('access_token'),
+                database_id=config_dict.get('database_id'),
+                use_status_property=config_dict.get('use_status_property', False),
+            )
+        else:
+            logger.warning(f"Unknown todo target: {queue_item.target_name}")
+            queue_item.status = 'failed'
+            queue_item.error_message = f"Unknown todo target: {queue_item.target_name}"
+            db.commit()
+            return
+
+        # Build sync item
+        metadata = json.loads(queue_item.metadata_json) if queue_item.metadata_json else {}
+        sync_item = SyncItem(
+            item_type=SyncItemType.TODO,
+            item_id=str(todo.id),
+            content_hash=queue_item.content_hash,
+            data={
+                'text': todo.text,
+                'completed': todo.completed,
+                'notebook_uuid': queue_item.notebook_uuid,
+                'notebook_name': notebook.visible_name if notebook else 'Unknown',
+                'page_number': todo.page_number,
+                'confidence': todo.confidence,
+                'date_extracted': todo.date_extracted.isoformat() if todo.date_extracted else None,
+                **metadata,
+            },
+            source_table='todos',
+            created_at=todo.created_at,
+            updated_at=todo.updated_at,
+        )
+
+        # Check for existing sync record (update vs create)
+        existing_record = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == queue_item.user_id,
+                SyncRecord.item_id == str(todo.id),
+                SyncRecord.item_type == 'todo',
+                SyncRecord.target_name == queue_item.target_name,
+            )
+            .first()
+        )
+
+        # If exists and content unchanged, skip
+        if existing_record and existing_record.content_hash == queue_item.content_hash:
+            logger.info(f"Todo {todo.id} unchanged for {queue_item.target_name}, skipping")
+            queue_item.status = 'completed'
+            queue_item.completed_at = datetime.utcnow()
+            db.commit()
+            return
+
+        # Sync
+        if existing_record:
+            result = await target.update_item(existing_record.external_id, sync_item)
+        else:
+            result = await target.sync_item(sync_item)
+
+        if result.success:
+            if existing_record:
+                existing_record.external_id = result.target_id
+                existing_record.content_hash = queue_item.content_hash
+                existing_record.status = 'success'
+                existing_record.synced_at = datetime.utcnow()
+                existing_record.updated_at = datetime.utcnow()
+            else:
+                sync_record = SyncRecord(
+                    user_id=queue_item.user_id,
+                    target_name=queue_item.target_name,
+                    item_type='todo',
+                    item_id=str(todo.id),
+                    content_hash=queue_item.content_hash,
+                    external_id=result.target_id,
+                    status='success',
+                    synced_at=datetime.utcnow(),
+                    notebook_uuid=queue_item.notebook_uuid,
+                    page_number=todo.page_number,
+                )
+                db.add(sync_record)
+
+            queue_item.status = 'completed'
+            queue_item.completed_at = datetime.utcnow()
+
+            duration_ms = round((time.monotonic() - _item_start) * 1000, 1)
+            logger.info(
+                "Todo sync completed: todo %d -> %s",
+                todo.id,
+                queue_item.target_name,
+                extra={
+                    "event": "sync.done",
+                    "queue_id": queue_item.id,
+                    "target": queue_item.target_name,
+                    "duration_ms": duration_ms,
+                },
+            )
+        else:
+            duration_ms = round((time.monotonic() - _item_start) * 1000, 1)
+            queue_item.status = 'failed'
+            queue_item.error_message = result.error_message
+            logger.error(
+                "Todo sync failed: todo %d: %s",
+                todo.id,
                 result.error_message,
                 extra={
                     "event": "sync.fail",
