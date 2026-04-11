@@ -79,6 +79,9 @@ jobs:
           NOTION_CLIENT_ID: ${{ secrets.NOTION_CLIENT_ID }}
           NOTION_CLIENT_SECRET: ${{ secrets.NOTION_CLIENT_SECRET }}
           NOTION_REDIRECT_URI: ${{ secrets.NOTION_REDIRECT_URI }}
+          TODOIST_CLIENT_ID: ${{ secrets.TODOIST_CLIENT_ID }}
+          TODOIST_CLIENT_SECRET: ${{ secrets.TODOIST_CLIENT_SECRET }}
+          TODOIST_REDIRECT_URI: ${{ secrets.TODOIST_REDIRECT_URI }}
           ADMIN_USER_IDS: ${{ secrets.ADMIN_USER_IDS }}
           NEXT_PUBLIC_ADMIN_USER_IDS: ${{ vars.NEXT_PUBLIC_ADMIN_USER_IDS }}
           NEXT_PUBLIC_UMAMI_URL: ${{ secrets.NEXT_PUBLIC_UMAMI_URL }}
@@ -131,6 +134,9 @@ jobs:
                update_env backend/.env NOTION_CLIENT_ID \"$NOTION_CLIENT_ID\" && \
                update_env backend/.env NOTION_CLIENT_SECRET \"$NOTION_CLIENT_SECRET\" && \
                update_env backend/.env NOTION_REDIRECT_URI \"$NOTION_REDIRECT_URI\" && \
+               update_env backend/.env TODOIST_CLIENT_ID \"$TODOIST_CLIENT_ID\" && \
+               update_env backend/.env TODOIST_CLIENT_SECRET \"$TODOIST_CLIENT_SECRET\" && \
+               update_env backend/.env TODOIST_REDIRECT_URI \"$TODOIST_REDIRECT_URI\" && \
                update_env backend/.env ADMIN_USER_IDS \"$ADMIN_USER_IDS\" && \
                update_env backend/.env CLERK_PUBLISHABLE_KEY \"$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\" && \
                update_env backend/.env UMAMI_URL \"$NEXT_PUBLIC_UMAMI_URL\" && \
