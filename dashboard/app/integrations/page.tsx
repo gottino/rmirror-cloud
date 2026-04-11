@@ -18,6 +18,10 @@ import {
   disableObsidian,
   getObsidianStatus,
   type ObsidianStatusResponse,
+  getTodoistOAuthUrl,
+  getTodoistStatus,
+  disconnectTodoist,
+  type TodoistStatus,
 } from '@/lib/api';
 import { Copy, Check } from 'lucide-react';
 import { trackEvent } from '@/lib/analytics';
@@ -36,6 +40,8 @@ export default function IntegrationsPage() {
   const [obsidianApiKey, setObsidianApiKey] = useState<string | null>(null);
   const [obsidianCopied, setObsidianCopied] = useState(false);
   const [obsidianLoading, setObsidianLoading] = useState(false);
+  const [todoistStatus, setTodoistStatus] = useState<TodoistStatus | null>(null);
+  const [todoistLoading, setTodoistLoading] = useState(false);
 
   // Development mode bypass
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
@@ -69,6 +75,14 @@ export default function IntegrationsPage() {
         setObsidianStatus(obsStatus);
       } catch {
         // Obsidian not enabled yet, ignore
+      }
+
+      // Also load Todoist status
+      try {
+        const tdStatus = await getTodoistStatus(token);
+        setTodoistStatus(tdStatus);
+      } catch {
+        // Todoist not connected yet
       }
     } catch (err) {
       console.error('Failed to load integrations:', err);
@@ -203,6 +217,40 @@ export default function IntegrationsPage() {
       navigator.clipboard.writeText(obsidianApiKey);
       setObsidianCopied(true);
       setTimeout(() => setObsidianCopied(false), 2000);
+    }
+  }
+
+  async function handleConnectTodoist() {
+    try {
+      setTodoistLoading(true);
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (!token) { setError('Not authenticated'); return; }
+      const { authorization_url } = await getTodoistOAuthUrl(token);
+      trackEvent({ name: 'integration_setup_started', data: { service: 'todoist' } });
+      window.location.href = authorization_url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start OAuth');
+      setTodoistLoading(false);
+    }
+  }
+
+  async function handleDisconnectTodoist() {
+    if (!confirm('Are you sure you want to disconnect Todoist?')) return;
+    try {
+      setTodoistLoading(true);
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (!token) { setError('Not authenticated'); return; }
+      await disconnectTodoist(token);
+      setTodoistStatus(null);
+      trackEvent({ name: 'integration_disconnected', data: { service: 'todoist' } });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to disconnect Todoist');
+    } finally {
+      setTodoistLoading(false);
     }
   }
 
@@ -503,26 +551,61 @@ export default function IntegrationsPage() {
             </div>
           </div>
 
-          {/* Todoist (Coming Soon) */}
-          <div
-            className="rounded-lg p-6 mb-4"
-            style={{ backgroundColor: 'var(--soft-cream)', border: '1px dashed var(--border)' }}
-          >
+          {/* Todoist */}
+          <div className="bg-white rounded-lg shadow p-6 mb-4">
             <div className="flex items-start gap-4">
               <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'var(--terracotta)' }}>
                 <span className="text-white font-bold">T</span>
               </div>
               <div className="flex-1">
                 <h3 className="font-semibold text-lg">Todoist</h3>
-                <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
-                  Sync todos to Todoist for powerful task management
-                </p>
-                <span
-                  className="inline-block px-3 py-1 rounded-full text-xs font-medium"
-                  style={{ backgroundColor: 'var(--amber-gold-light)', color: 'var(--amber-gold)' }}
-                >
-                  Coming Soon
-                </span>
+                {todoistStatus?.connected ? (
+                  <>
+                    <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
+                      Status: <span style={{ color: 'var(--sage-green)', fontWeight: 500 }}>Connected</span>
+                      {todoistStatus.project_name && (
+                        <> &middot; Project: <strong>{todoistStatus.project_name}</strong></>
+                      )}
+                      {todoistStatus.todos_synced > 0 && (
+                        <> &middot; {todoistStatus.todos_synced} todo{todoistStatus.todos_synced !== 1 ? 's' : ''} synced</>
+                      )}
+                      {todoistStatus.last_sync && (
+                        <> &middot; Last synced {timeAgo(todoistStatus.last_sync)}</>
+                      )}
+                    </p>
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        onClick={() => router.push('/integrations/todoist/setup')}
+                        className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        style={{ backgroundColor: 'var(--soft-cream)', border: '1px solid var(--border)' }}
+                      >
+                        Change Project
+                      </button>
+                      <button
+                        onClick={handleDisconnectTodoist}
+                        disabled={todoistLoading}
+                        className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                        style={{ backgroundColor: 'var(--destructive-light)', color: 'var(--destructive)' }}
+                      >
+                        {todoistLoading ? 'Disconnecting...' : 'Disconnect'}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
+                      Sync todos to Todoist for powerful task management
+                    </p>
+                    <button
+                      onClick={handleConnectTodoist}
+                      disabled={todoistLoading}
+                      className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                      style={{ backgroundColor: 'var(--warm-charcoal)', color: 'white' }}
+                    >
+                      {todoistLoading ? 'Connecting...' : 'Connect Todoist'}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

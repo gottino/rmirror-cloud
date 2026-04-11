@@ -21,6 +21,7 @@ type AnalyticsEvent =
   | { name: 'agent_downloaded'; data?: Record<string, never> }
   | { name: 'integration_setup_started'; data: { service: string } }
   | { name: 'notion_database_configured'; data: { action: string } }
+  | { name: 'todoist_project_configured'; data: { project_id: string } }
   | { name: 'data_exported'; data?: Record<string, never> }
   | { name: 'billing_page_viewed'; data?: Record<string, never> }
   | { name: 'pro_waitlist_signup'; data: { source: string } }
