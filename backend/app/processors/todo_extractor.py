@@ -11,9 +11,11 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.sync_engine import ContentFingerprint
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import Page
+from app.models.sync_record import IntegrationConfig, SyncQueue
 from app.models.todo import Todo
 from app.processors.intelligent_todo_deduplication import (
     IntelligentTodoDeduplicator,
@@ -210,7 +212,84 @@ def process_page_todos(
     # Commit changes
     db.commit()
     logger.info(f"Stored {stored_count} todos for page {page.id}")
+
+    # Auto-queue new todos for enabled integrations
+    if stored_count > 0:
+        _queue_todos_for_sync(db, user_id, page)
+
     return stored_count
+
+
+def _queue_todos_for_sync(db: Session, user_id: int, page: Page):
+    """Queue newly extracted todos for all enabled todo integrations."""
+    try:
+        # Find enabled integrations that handle todos
+        todo_integrations = (
+            db.query(IntegrationConfig)
+            .filter(
+                IntegrationConfig.user_id == user_id,
+                IntegrationConfig.is_enabled == True,  # noqa: E712
+                IntegrationConfig.target_name.in_(["todoist", "notion-todos"]),
+            )
+            .all()
+        )
+
+        if not todo_integrations:
+            return
+
+        # Get todos for this page that need syncing
+        todos = (
+            db.query(Todo)
+            .filter(Todo.page_id == page.id, Todo.user_id == user_id)
+            .all()
+        )
+
+        queued_count = 0
+        for todo in todos:
+            content_hash = ContentFingerprint.for_todo({
+                "text": todo.text,
+                "notebook_uuid": page.notebook.notebook_uuid if page.notebook else "",
+                "page_number": todo.page_number or 0,
+            })
+
+            for integration in todo_integrations:
+                # Check if already queued (pending or completed)
+                existing = (
+                    db.query(SyncQueue)
+                    .filter(
+                        SyncQueue.user_id == user_id,
+                        SyncQueue.item_type == "todo",
+                        SyncQueue.item_id == str(todo.id),
+                        SyncQueue.target_name == integration.target_name,
+                        SyncQueue.status.in_(["pending", "processing", "completed"]),
+                    )
+                    .first()
+                )
+
+                if existing:
+                    continue
+
+                queue_item = SyncQueue(
+                    user_id=user_id,
+                    item_type="todo",
+                    item_id=str(todo.id),
+                    content_hash=content_hash,
+                    notebook_uuid=page.notebook.notebook_uuid if page.notebook else None,
+                    page_number=todo.page_number,
+                    target_name=integration.target_name,
+                    status="pending",
+                    priority=5,
+                    scheduled_at=datetime.utcnow(),
+                )
+                db.add(queue_item)
+                queued_count += 1
+
+        if queued_count > 0:
+            db.commit()
+            logger.info(f"Queued {queued_count} todo sync items for user {user_id}")
+
+    except Exception as e:
+        logger.error(f"Error queuing todos for sync: {e}", exc_info=True)
 
 
 def process_notebook_todos(
