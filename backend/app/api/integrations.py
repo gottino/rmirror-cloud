@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_active_user, reject_agent_token
 from app.database import get_db
 from app.integrations.notion_sync import NotionSyncTarget
 from app.integrations.notion_todos_sync import NotionTodosSyncTarget
@@ -15,7 +15,9 @@ from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["integrations"])
+# Integration management is dashboard-only; the Mac agent never calls it, so
+# block long-lived agent tokens from the whole router.
+router = APIRouter(tags=["integrations"], dependencies=[Depends(reject_agent_token)])
 
 
 class NotionIntegrationConfig(BaseModel):

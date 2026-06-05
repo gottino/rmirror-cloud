@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_active_user
+from app.auth.dependencies import get_current_active_user, reject_agent_token_legacy
 from app.database import get_db
 from app.models.notebook import Notebook
 from app.models.todo import Todo
@@ -16,7 +16,8 @@ from app.models.user import User
 from app.processors.todo_extractor import process_notebook_todos
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["todos"])
+# Todos are dashboard-only; the Mac agent never calls them, so block agent tokens.
+router = APIRouter(tags=["todos"], dependencies=[Depends(reject_agent_token_legacy)])
 
 
 # Schemas

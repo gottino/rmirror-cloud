@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_active_user, reject_agent_token
 from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
@@ -22,7 +22,10 @@ from app.services.initial_sync import trigger_initial_sync
 from app.services.notion_oauth import NotionOAuthService
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/notion", tags=["notion-oauth"])
+# Notion OAuth/setup is dashboard-only; block long-lived agent tokens.
+router = APIRouter(
+    prefix="/notion", tags=["notion-oauth"], dependencies=[Depends(reject_agent_token)]
+)
 
 _OAUTH_STATE_EXPIRY_SECONDS = 600  # 10 minutes
 
