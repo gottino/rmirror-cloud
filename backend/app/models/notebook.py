@@ -46,6 +46,10 @@ class Notebook(Base):
     # Storage
     s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Original file
     notebook_pdf_s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Combined PDF
+    # Set on each page upload to mark the combined PDF as stale. The background
+    # worker debounces and rebuilds once this is older than the debounce window,
+    # then resets it to NULL. NULL means the combined PDF is up to date.
+    pdf_dirty_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Cached composite hash of all OCR'd pages (for Obsidian sync change detection)
