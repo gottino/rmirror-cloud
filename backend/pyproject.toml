@@ -79,3 +79,10 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+# Restrict default discovery to the real suite. The backend root also contains
+# manual live-integration scripts named test_*.py (they hit Notion/DB APIs);
+# without this, a bare `pytest` collects them and aborts when one errors on
+# import. Run those scripts explicitly by path when needed.
+testpaths = ["tests"]
