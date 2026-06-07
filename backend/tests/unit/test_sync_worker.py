@@ -12,7 +12,14 @@ from sqlalchemy.orm import Session
 from app.models.notebook import Notebook
 from app.models.page import Page
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
-from app.services.sync_worker import SyncWorker
+from app.services.sync_worker import (
+    MAX_SYNC_RETRIES,
+    RETRY_BASE_DELAY_SECONDS,
+    RETRY_MAX_DELAY_SECONDS,
+    SyncWorker,
+    apply_sync_failure,
+    compute_retry_delay,
+)
 from tests.conftest import create_user_with_quota
 
 
@@ -259,8 +266,8 @@ class TestSyncWorkerProcessing:
         assert existing_record.external_id == "updated-block"
 
     @pytest.mark.asyncio
-    async def test_failed_sync_increments_retry_count(self, db, user, queue_item, notion_config, page):
-        """Failed sync should increment retry_count."""
+    async def test_result_failure_reschedules_with_backoff(self, db, user, queue_item, notion_config, page):
+        """A transient result failure (success=False) reschedules for retry, not 'failed'."""
         worker = SyncWorker()
 
         queue_item.status = "processing"
@@ -282,14 +289,15 @@ class TestSyncWorkerProcessing:
                 await worker._process_queue_item(db, queue_item)
 
         db.refresh(queue_item)
-        assert queue_item.status == "failed"
-        assert queue_item.error_message == "Notion API error"
-        # retry_count incremented once in _process_queue_item (line 155)
+        # Transient failure -> back to pending with a future scheduled_at, retry_count == 1
+        assert queue_item.status == "pending"
         assert queue_item.retry_count == 1
+        assert queue_item.error_message == "Notion API error"
+        assert queue_item.scheduled_at > datetime.utcnow()
 
     @pytest.mark.asyncio
-    async def test_exception_in_sync_marks_failed(self, db, user, queue_item, notion_config, page):
-        """Exception during sync should mark item failed and increment retry."""
+    async def test_exception_in_sync_reschedules_for_retry(self, db, user, queue_item, notion_config, page):
+        """An exception during sync reschedules for retry (not immediate 'failed')."""
         worker = SyncWorker()
         item_id = queue_item.id
 
@@ -304,7 +312,100 @@ class TestSyncWorkerProcessing:
                             return_value={"access_token": "test", "database_id": "db-123"}):
                 await worker._process_pending_items()
 
-        # Query fresh to avoid detached instance issues
+        result = db.query(SyncQueue).filter(SyncQueue.id == item_id).first()
+        assert result.status == "pending"
+        assert result.retry_count == 1
+        assert "Connection refused" in result.error_message
+        assert result.scheduled_at > datetime.utcnow()
+
+    @pytest.mark.asyncio
+    async def test_successful_sync_does_not_increment_retry_count(self, db, user, queue_item, notion_config, page):
+        """A successful sync leaves retry_count at 0 (no per-attempt over-increment)."""
+        worker = SyncWorker()
+        item_id = queue_item.id
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.target_id = "notion-block-1"
+        mock_result.metadata = {}
+
+        with patch("app.services.sync_worker.SessionLocal", return_value=db), \
+             patch.object(db, "close"), \
+             patch("app.services.sync_worker.NotionSyncTarget") as MockTarget:
+            mock_target = MagicMock()
+            mock_target.sync_item = AsyncMock(return_value=mock_result)
+            MockTarget.return_value = mock_target
+
+            with patch.object(IntegrationConfig, "get_config",
+                            return_value={"access_token": "test", "database_id": "db-123"}):
+                await worker._process_pending_items()
+
+        result = db.query(SyncQueue).filter(SyncQueue.id == item_id).first()
+        assert result.status == "completed"
+        assert result.retry_count == 0
+
+    @pytest.mark.asyncio
+    async def test_retries_exhausted_dead_letters(self, db, user, queue_item, notion_config, page):
+        """Once retry_count reaches MAX_SYNC_RETRIES the item is dead-lettered ('failed')."""
+        worker = SyncWorker()
+        item_id = queue_item.id
+        queue_item.retry_count = MAX_SYNC_RETRIES - 1  # one failure away from the cap
+        db.commit()
+
+        with patch("app.services.sync_worker.SessionLocal", return_value=db), \
+             patch.object(db, "close"), \
+             patch("app.services.sync_worker.NotionSyncTarget") as MockTarget:
+            mock_target = MagicMock()
+            mock_target.sync_item = AsyncMock(side_effect=Exception("still failing"))
+            MockTarget.return_value = mock_target
+
+            with patch.object(IntegrationConfig, "get_config",
+                            return_value={"access_token": "test", "database_id": "db-123"}):
+                await worker._process_pending_items()
+
         result = db.query(SyncQueue).filter(SyncQueue.id == item_id).first()
         assert result.status == "failed"
-        assert "Connection refused" in result.error_message
+        assert result.retry_count == MAX_SYNC_RETRIES
+
+    @pytest.mark.asyncio
+    async def test_permanent_failure_is_not_retried(self, db, user, queue_item, page):
+        """A permanent failure (no integration config) fails immediately, no retry scheduled."""
+        worker = SyncWorker()
+        # Note: no notion_config fixture -> integration is missing -> permanent failure
+        await worker._process_queue_item(db, queue_item)
+
+        db.refresh(queue_item)
+        assert queue_item.status == "failed"
+        assert queue_item.retry_count == 0  # not a transient error; no retry consumed
+
+
+class TestRetryPolicy:
+    """Unit tests for the retry/backoff helpers."""
+
+    def test_compute_retry_delay_is_exponential(self):
+        assert compute_retry_delay(1) == timedelta(seconds=RETRY_BASE_DELAY_SECONDS)
+        assert compute_retry_delay(2) == timedelta(seconds=RETRY_BASE_DELAY_SECONDS * 2)
+        assert compute_retry_delay(3) == timedelta(seconds=RETRY_BASE_DELAY_SECONDS * 4)
+
+    def test_compute_retry_delay_is_capped(self):
+        assert compute_retry_delay(99) == timedelta(seconds=RETRY_MAX_DELAY_SECONDS)
+
+    def test_apply_failure_reschedules_within_max(self):
+        now = datetime(2026, 6, 7, 12, 0, 0)
+        item = SyncQueue(status="processing", retry_count=0)
+        retried = apply_sync_failure(item, "boom", now=now)
+
+        assert retried is True
+        assert item.retry_count == 1
+        assert item.status == "pending"
+        assert item.error_message == "boom"
+        assert item.scheduled_at == now + timedelta(seconds=RETRY_BASE_DELAY_SECONDS)
+
+    def test_apply_failure_dead_letters_at_max(self):
+        now = datetime(2026, 6, 7, 12, 0, 0)
+        item = SyncQueue(status="processing", retry_count=MAX_SYNC_RETRIES - 1)
+        retried = apply_sync_failure(item, "boom", now=now)
+
+        assert retried is False
+        assert item.retry_count == MAX_SYNC_RETRIES
+        assert item.status == "failed"

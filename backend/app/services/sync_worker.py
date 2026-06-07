@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -20,6 +20,48 @@ from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.todo import Todo
 
 logger = logging.getLogger(__name__)
+
+
+# Retry/backoff policy for *transient* sync failures (network errors, provider
+# 5xx / rate limits). Permanent failures — missing integration config, deleted
+# page/todo, unknown target — are not retried and are marked 'failed' directly.
+MAX_SYNC_RETRIES = 5
+RETRY_BASE_DELAY_SECONDS = 60
+RETRY_MAX_DELAY_SECONDS = 3600  # cap a single backoff at 1 hour
+
+
+def compute_retry_delay(retry_count: int) -> timedelta:
+    """Exponential backoff for the Nth failed attempt (retry_count >= 1), capped.
+
+    retry_count=1 -> 60s, 2 -> 120s, 3 -> 240s, ... up to RETRY_MAX_DELAY_SECONDS.
+    """
+    exponent = max(retry_count - 1, 0)
+    delay = RETRY_BASE_DELAY_SECONDS * (2 ** exponent)
+    return timedelta(seconds=min(delay, RETRY_MAX_DELAY_SECONDS))
+
+
+def apply_sync_failure(
+    queue_item: "SyncQueue", error_message: str, *, now: Optional[datetime] = None
+) -> bool:
+    """Record a transient failure on a queue item.
+
+    Increments retry_count exactly once. While under MAX_SYNC_RETRIES the item is
+    returned to 'pending' with a future scheduled_at so the poller retries it
+    after a backoff; once the retries are exhausted it is dead-lettered ('failed').
+
+    Returns True if the item was rescheduled for retry, False if dead-lettered.
+    """
+    now = now or datetime.utcnow()
+    queue_item.retry_count += 1
+    queue_item.error_message = error_message
+
+    if queue_item.retry_count >= MAX_SYNC_RETRIES:
+        queue_item.status = 'failed'
+        return False
+
+    queue_item.status = 'pending'
+    queue_item.scheduled_at = now + compute_retry_delay(queue_item.retry_count)
+    return True
 
 
 class SyncWorker:
@@ -137,21 +179,24 @@ class SyncWorker:
                 try:
                     await self._process_queue_item(db, queue_item)
                 except Exception as e:
+                    # Unexpected exceptions (network, provider 5xx) are transient:
+                    # reschedule with backoff, or dead-letter once retries exhausted.
+                    retrying = apply_sync_failure(queue_item, str(e))
                     logger.error(
                         "Sync item failed",
                         exc_info=True,
                         extra={
-                            "event": "sync.fail",
+                            "event": "sync.retry" if retrying else "sync.fail",
                             "queue_id": queue_item.id,
                             "target": queue_item.target_name,
                             "error": str(e),
                             "retry_count": queue_item.retry_count,
+                            "retrying": retrying,
+                            "next_attempt_at": (
+                                queue_item.scheduled_at.isoformat() if retrying else None
+                            ),
                         },
                     )
-                    # Mark as failed
-                    queue_item.status = 'failed'
-                    queue_item.error_message = str(e)
-                    queue_item.retry_count += 1
                     db.commit()
 
         finally:
@@ -165,8 +210,8 @@ class SyncWorker:
             db: Database session
             queue_item: Queue item to process
         """
-        # Increment retry count (status already set to 'processing' by caller)
-        queue_item.retry_count += 1
+        # retry_count is only bumped on actual failures (see apply_sync_failure),
+        # not on every attempt — a successful sync must leave it untouched.
         _item_start = time.monotonic()
 
         logger.info(
@@ -417,18 +462,20 @@ class SyncWorker:
             )
         else:
             duration_ms = round((time.monotonic() - _item_start) * 1000, 1)
-            queue_item.status = 'failed'
-            queue_item.error_message = result.error_message
+            # Provider returned a failure (rate limit, 5xx, archived block): treat
+            # as transient and reschedule with backoff until retries are exhausted.
+            retrying = apply_sync_failure(queue_item, result.error_message or "sync failed")
             logger.error(
                 "Sync item failed: page %d: %s",
                 page.id,
                 result.error_message,
                 extra={
-                    "event": "sync.fail",
+                    "event": "sync.retry" if retrying else "sync.fail",
                     "queue_id": queue_item.id,
                     "target": queue_item.target_name,
                     "duration_ms": duration_ms,
                     "error": result.error_message,
+                    "retrying": retrying,
                 },
             )
 
@@ -562,18 +609,19 @@ class SyncWorker:
             )
         else:
             duration_ms = round((time.monotonic() - _item_start) * 1000, 1)
-            queue_item.status = 'failed'
-            queue_item.error_message = result.error_message
+            # Provider failure: transient, reschedule with backoff until exhausted.
+            retrying = apply_sync_failure(queue_item, result.error_message or "sync failed")
             logger.error(
                 "Todo sync failed: todo %d: %s",
                 todo.id,
                 result.error_message,
                 extra={
-                    "event": "sync.fail",
+                    "event": "sync.retry" if retrying else "sync.fail",
                     "queue_id": queue_item.id,
                     "target": queue_item.target_name,
                     "duration_ms": duration_ms,
                     "error": result.error_message,
+                    "retrying": retrying,
                 },
             )
 
