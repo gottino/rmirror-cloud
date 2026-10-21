@@ -15,7 +15,7 @@ from sqlalchemy import Column, DateTime, Integer, String, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_session_user
 from app.config import get_settings
 from app.database import Base, get_db
 from app.models.user import User
@@ -134,7 +134,7 @@ def _validate_invite_token(token: str, secret_key: str) -> Optional[dict]:
 
 
 async def get_admin_user(
-    current_user: User = Depends(get_clerk_active_user),
+    current_user: User = Depends(get_clerk_session_user),
 ) -> User:
     """Verify the current user is an admin."""
     settings = get_settings()

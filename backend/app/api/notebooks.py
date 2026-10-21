@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
 from app.core.pdf_service import PDFService
 from app.database import get_db
 from app.dependencies import get_storage_service
@@ -391,7 +391,7 @@ async def get_notebook(
 async def export_notebook(
     notebook_id: int,
     format: Annotated[str, Query(description="Export format: markdown or pdf")] = "markdown",
-    current_user: Annotated[User, Depends(get_clerk_active_user)] = None,
+    current_user: Annotated[User, Depends(get_clerk_session_user)] = None,
     db: Annotated[Session, Depends(get_db)] = None,
     storage: Annotated[StorageService, Depends(get_storage_service)] = None,
 ):
@@ -607,7 +607,7 @@ class DeleteNotebookResponse(BaseModel):
 @router.delete("/{notebook_id}", status_code=status.HTTP_200_OK, response_model=DeleteNotebookResponse)
 async def delete_notebook(
     notebook_id: int,
-    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_session_user)],
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageService, Depends(get_storage_service)],
     cleanup_notion: bool = Query(default=False, description="Also archive the Notion page"),

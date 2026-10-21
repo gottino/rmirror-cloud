@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_active_user, reject_agent_token
 from app.config import get_settings
 from app.core.sync_engine import ContentFingerprint
 from app.database import get_db
@@ -25,7 +25,10 @@ from app.models.user import User
 from app.services.todoist_oauth import TodoistOAuthService
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/todoist", tags=["todoist"])
+# Todoist OAuth/setup is dashboard-only; block long-lived agent tokens.
+router = APIRouter(
+    prefix="/todoist", tags=["todoist"], dependencies=[Depends(reject_agent_token)]
+)
 
 _OAUTH_STATE_EXPIRY_SECONDS = 600  # 10 minutes
 
