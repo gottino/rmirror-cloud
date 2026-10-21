@@ -18,8 +18,11 @@ from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
 from app.models.user import User
-from app.services.notebook_pdf import rebuild_combined_pdf, rebuild_dirty_notebook_pdfs
-
+from app.services.notebook_pdf import (
+    PDF_REBUILD_CLAIM_SECONDS,
+    rebuild_combined_pdf,
+    rebuild_dirty_notebook_pdfs,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -30,6 +33,7 @@ def _make_storage() -> MagicMock:
     storage = MagicMock()
     storage.download_file = AsyncMock(return_value=b"%PDF-1.4 page")
     storage.upload_file = AsyncMock(return_value=True)
+    storage.delete_file = AsyncMock(return_value=True)
     return storage
 
 
@@ -203,3 +207,99 @@ async def test_burst_of_uploads_collapses_to_a_single_rebuild(db, user):
     storage.upload_file.assert_awaited_once()
     db.refresh(nb)
     assert nb.pdf_dirty_at is None
+
+
+# ---------------------------------------------------------------------------
+# Concurrency and failure handling
+# ---------------------------------------------------------------------------
+
+COMBINE = "app.services.notebook_pdf.PDFService.combine_page_pdfs"
+BUILD = "app.services.notebook_pdf._build_and_upload_off_loop"
+
+
+@pytest.mark.asyncio
+async def test_page_uploaded_during_rebuild_keeps_notebook_dirty(db, user):
+    """An upload landing mid-rebuild must not be wiped by clearing the flag."""
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    nb = _create_notebook(db, user, pdf_dirty_at=now - timedelta(seconds=120))
+    _add_page(db, nb, 1)
+    upload_time = now + timedelta(seconds=2)
+
+    async def build_while_a_page_arrives(storage, page_keys, dest_key):
+        # What processing.py does when another page is uploaded meanwhile
+        db.query(Notebook).filter(Notebook.id == nb.id).update({Notebook.pdf_dirty_at: upload_time})
+        db.commit()
+        return len(page_keys)
+
+    with patch(BUILD, side_effect=build_while_a_page_arrives):
+        count = await rebuild_dirty_notebook_pdfs(db, _make_storage(), debounce_seconds=60, now=now)
+
+    assert count == 1
+    db.refresh(nb)
+    assert nb.pdf_dirty_at == upload_time  # still dirty: rebuilt again on a later sweep
+
+
+@pytest.mark.asyncio
+async def test_failed_rebuild_backs_off_instead_of_retrying_every_poll(db, user):
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    nb = _create_notebook(db, user, pdf_dirty_at=now - timedelta(seconds=120))
+    _add_page(db, nb, 1)
+    storage = _make_storage()
+    storage.upload_file = AsyncMock(side_effect=RuntimeError("S3 unavailable"))
+
+    with patch(COMBINE, return_value=b"%PDF combined"):
+        assert await rebuild_dirty_notebook_pdfs(db, storage, debounce_seconds=60, now=now) == 0
+        assert storage.upload_file.await_count == 1
+
+        # The next polls skip it while the claim is outstanding...
+        soon = now + timedelta(seconds=5)
+        assert await rebuild_dirty_notebook_pdfs(db, storage, debounce_seconds=60, now=soon) == 0
+        assert storage.upload_file.await_count == 1
+
+        # ...and it is retried once the claim has expired.
+        storage.upload_file = AsyncMock(return_value=True)
+        later = now + timedelta(seconds=PDF_REBUILD_CLAIM_SECONDS + 61)
+        assert await rebuild_dirty_notebook_pdfs(db, storage, debounce_seconds=60, now=later) == 1
+
+    db.refresh(nb)
+    assert nb.pdf_dirty_at is None
+
+
+@pytest.mark.asyncio
+async def test_missing_page_pdf_is_left_out_not_fatal(db, user):
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    nb = _create_notebook(db, user, pdf_dirty_at=now - timedelta(seconds=120))
+    for n in (1, 2, 3):
+        _add_page(db, nb, n, pdf_s3_key=f"pages/{n}.pdf")
+    storage = _make_storage()
+    storage.download_file = AsyncMock(side_effect=[b"%PDF 1", FileNotFoundError("pages/2.pdf"), b"%PDF 3"])
+
+    with patch(COMBINE, return_value=b"%PDF combined") as combine:
+        count = await rebuild_dirty_notebook_pdfs(db, storage, debounce_seconds=60, now=now)
+
+    assert count == 1
+    combine.assert_called_once_with([b"%PDF 1", b"%PDF 3"])
+    db.refresh(nb)
+    assert nb.pdf_dirty_at is None
+
+
+@pytest.mark.asyncio
+async def test_notebook_deleted_during_rebuild_does_not_orphan_its_pdf(db, user):
+    now = datetime(2026, 6, 5, 12, 0, 0)
+    nb = _create_notebook(db, user, pdf_dirty_at=now - timedelta(seconds=120))
+    _add_page(db, nb, 1)
+    nb_id = nb.id
+    expected_key = f"users/{user.id}/notebooks/{nb.notebook_uuid}/notebook.pdf"
+    storage = _make_storage()
+
+    async def build_then_notebook_is_deleted(storage, page_keys, dest_key):
+        db.query(NotebookPage).filter(NotebookPage.notebook_id == nb_id).delete()
+        db.query(Notebook).filter(Notebook.id == nb_id).delete()
+        db.commit()
+        return len(page_keys)
+
+    with patch(BUILD, side_effect=build_then_notebook_is_deleted):
+        count = await rebuild_dirty_notebook_pdfs(db, storage, debounce_seconds=60, now=now)
+
+    assert count == 0
+    storage.delete_file.assert_awaited_once_with(expected_key)

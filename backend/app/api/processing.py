@@ -371,8 +371,9 @@ async def process_rm_file(
         # every page (O(N^2) S3 round-trips for an N-page sync). The background
         # worker debounces this and rebuilds once the notebook goes quiet. See
         # app/services/notebook_pdf.py.
-        notebook.pdf_dirty_at = datetime.utcnow()
-        db.commit()
+        if pdf_bytes:  # only a new page PDF changes the combined PDF
+            notebook.pdf_dirty_at = datetime.utcnow()
+            db.commit()
 
         # Clean up temp file
         temp_rm_path.unlink(missing_ok=True)
