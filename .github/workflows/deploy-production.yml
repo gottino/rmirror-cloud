@@ -41,12 +41,46 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # The dashboard is built here, not on the server: npm ci + next build on the
+      # server ran it out of memory and took production down (2026-10-21).
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Build dashboard
+        working-directory: dashboard
+        env:
+          NEXT_OUTPUT: standalone
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: ${{ secrets.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL }}
+          NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: ${{ secrets.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL }}
+          NEXT_PUBLIC_API_URL: https://rmirror.io/api/v1
+          NEXT_PUBLIC_ADMIN_USER_IDS: ${{ vars.NEXT_PUBLIC_ADMIN_USER_IDS }}
+          NEXT_PUBLIC_UMAMI_URL: ${{ secrets.NEXT_PUBLIC_UMAMI_URL }}
+          NEXT_PUBLIC_UMAMI_WEBSITE_ID: ${{ secrets.NEXT_PUBLIC_UMAMI_WEBSITE_ID }}
+        run: |
+          npm ci
+          npm run build
+          ./deploy/package-standalone.sh "$RUNNER_TEMP/dashboard.tgz"
+
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p ${{ secrets.SERVER_PORT }} ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Upload dashboard build
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          scp -i ~/.ssh/deploy_key -P $SERVER_PORT "$RUNNER_TEMP/dashboard.tgz" \
+            $SERVER_USER@$SERVER_HOST:/tmp/dashboard-production.tgz
 
       - name: Create backup
         env:

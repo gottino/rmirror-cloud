@@ -269,7 +269,9 @@ psql -U rmirror -d rmirror
 cat /var/www/rmirror-cloud/backend/.env | grep DATABASE_URL
 ```
 
-**CI/CD**: Push to `main` branch triggers GitHub Actions deployment
+**CI/CD**: Push to `main` deploys to **staging** (`staging.rmirror.io`, `deploy-staging.yml`). Production is deployed by running the "Deploy to Production" workflow by hand; it requires a healthy staging. Staging and production share one server.
+
+**Dashboard builds run in GitHub Actions, never on the server**: `npm ci` + `next build` there ran the 4 GB box out of memory (2026-10-21). The deploy workflows build a Next.js standalone server (`NEXT_OUTPUT=standalone`), upload it, and `dashboard/deploy/install-release.sh` installs it under pm2 from `~/rmirror-releases/`, rolling back if it doesn't come up.
 
 ## Design System
 
