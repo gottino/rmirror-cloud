@@ -158,8 +158,23 @@ if [ -d "$DASHBOARD_DIR" ]; then
         exit 1
     fi
 
-    # Install Node.js dependencies
-    if [ -f "package.json" ]; then
+    # Make pm2/node from nvm reachable even without an nvm default alias
+    export PATH="$NVM_DIR/versions/node/$(ls "$NVM_DIR/versions/node" 2>/dev/null | tail -1)/bin:$PATH"
+
+    DASHBOARD_TARBALL="/tmp/dashboard-production.tgz"
+    if [ -f "$DASHBOARD_TARBALL" ]; then
+        # Prebuilt in GitHub Actions (deploy-production.yml). Building here runs
+        # the server out of memory.
+        echo -e "${BLUE}   Installing prebuilt dashboard...${NC}"
+        "$DASHBOARD_DIR/deploy/install-release.sh" "$DASHBOARD_TARBALL" \
+            "$HOME/rmirror-releases/dashboard-production" \
+            "$DASHBOARD_DIR/.env" \
+            rmirror-dashboard 3000 \
+            "$DASHBOARD_DIR"
+        echo -e "${GREEN}✅ Dashboard deployed${NC}"
+    elif [ -f "package.json" ]; then
+        echo -e "${YELLOW}⚠️  No prebuilt dashboard at $DASHBOARD_TARBALL; building on the server.${NC}"
+        echo -e "${YELLOW}   This needs ~1.5 GB free memory; prefer the GitHub Actions deploy.${NC}"
         echo -e "${BLUE}   Installing npm dependencies...${NC}"
         npm install
 
@@ -167,16 +182,13 @@ if [ -d "$DASHBOARD_DIR" ]; then
         echo -e "${BLUE}   Building Next.js app...${NC}"
         npm run build
 
-        # Check if PM2 is running the dashboard, restart it
-        if pm2 list | grep -q "rmirror-dashboard"; then
-            echo -e "${BLUE}   Restarting dashboard with PM2...${NC}"
-            pm2 restart rmirror-dashboard
-        else
-            echo -e "${BLUE}   Starting dashboard with PM2...${NC}"
-            cd "$DASHBOARD_DIR"
-            pm2 start npm --name "rmirror-dashboard" -- start
-            pm2 save
-        fi
+        # Replace rather than restart: the running process may be a prebuilt
+        # standalone release, which a restart would bring back instead of this build
+        echo -e "${BLUE}   Starting dashboard with PM2...${NC}"
+        pm2 delete rmirror-dashboard 2>/dev/null || true
+        cd "$DASHBOARD_DIR"
+        pm2 start npm --name "rmirror-dashboard" -- start
+        pm2 save
 
         echo -e "${GREEN}✅ Dashboard deployed${NC}"
     else
