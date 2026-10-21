@@ -5,7 +5,7 @@ from typing import Annotated, Optional
 
 import jwt
 from clerk_backend_sdk import ApiClient, ClientsApi, Configuration
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 from sqlalchemy.orm import Session
@@ -79,6 +79,7 @@ def get_clerk_client() -> ClientsApi:
 
 
 async def get_clerk_user(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
     db: Annotated[Session, Depends(get_db)],
 ) -> User:
@@ -86,6 +87,7 @@ async def get_clerk_user(
     Get the current authenticated user from Clerk JWT token.
 
     Args:
+        request: Incoming request (used to record the token kind)
         credentials: HTTP Bearer credentials containing Clerk session token
         db: Database session
 
@@ -145,6 +147,11 @@ async def get_clerk_user(
                     token,
                     options={"verify_signature": False, "verify_exp": True},
                 )
+
+        # Record the token kind so downstream guards can restrict long-lived
+        # agent tokens. Only tokens explicitly minted as agent tokens carry
+        # ``type == "agent"``; Clerk sessions and legacy password tokens do not.
+        request.state.is_agent_token = bool(decoded.get("type") == "agent")
 
         # Extract user ID from the token (could be Clerk ID or regular user ID)
         sub = decoded.get("sub")
@@ -207,3 +214,53 @@ async def get_clerk_active_user(
         )
 
     return current_user
+
+
+# Detail message shared by the agent-token guards below.
+_AGENT_TOKEN_FORBIDDEN = (
+    "Agent tokens cannot access this endpoint. Sign in to the dashboard."
+)
+
+
+def _is_agent_request(request: Request) -> bool:
+    """True when the current request was authenticated with an agent token."""
+    return bool(getattr(request.state, "is_agent_token", False))
+
+
+async def get_clerk_session_user(
+    request: Request,
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
+) -> User:
+    """
+    Like ``get_clerk_active_user`` but rejects long-lived agent tokens.
+
+    Use on destructive or account-management endpoints (delete, export,
+    integration management, token minting) that the Mac agent never calls, so a
+    leaked agent token cannot perform them. The agent is limited to
+    upload/sync/read endpoints, which keep using ``get_clerk_active_user``.
+    """
+    if _is_agent_request(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_AGENT_TOKEN_FORBIDDEN,
+        )
+    return current_user
+
+
+async def reject_agent_token(
+    request: Request,
+    _current_user: Annotated[User, Depends(get_clerk_active_user)],
+) -> None:
+    """
+    Router-level guard that 403s agent tokens after authenticating the request.
+
+    Apply via ``APIRouter(dependencies=[Depends(reject_agent_token)])`` to
+    routers the agent never calls (integrations, notion, todoist, account).
+    Depending on ``get_clerk_active_user`` guarantees auth runs first, so
+    ``request.state.is_agent_token`` is populated before the check.
+    """
+    if _is_agent_request(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_AGENT_TOKEN_FORBIDDEN,
+        )

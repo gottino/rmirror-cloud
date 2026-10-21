@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
 from app.database import get_db
 from app.models.user import User
 from app.schemas.user import User as UserSchema
@@ -52,7 +52,7 @@ async def get_legal_status(
 
 @router.post("/accept-terms", response_model=LegalStatusResponse)
 async def accept_terms(
-    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_session_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Record acceptance of the current ToS and Privacy Policy."""
