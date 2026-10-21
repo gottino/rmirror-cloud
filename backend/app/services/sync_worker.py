@@ -161,6 +161,9 @@ class SyncWorker:
                 # Process pending items
                 await self._process_pending_items()
 
+                # Rebuild combined notebook PDFs that have gone quiet (debounced)
+                await self._process_dirty_notebook_pdfs()
+
                 # Check drip emails every hour
                 if self._last_drip_check is None or (time.time() - self._last_drip_check) > 3600:
                     try:
@@ -261,6 +264,27 @@ class SyncWorker:
                             extra={"event": "sync.fail_unrecorded", "queue_id": queue_item.id},
                         )
 
+        finally:
+            db.close()
+
+    async def _process_dirty_notebook_pdfs(self):
+        """Rebuild combined notebook PDFs for notebooks that have gone quiet.
+
+        Page uploads mark a notebook dirty (``pdf_dirty_at``) instead of
+        rebuilding the combined PDF inline; this debounced sweep rebuilds once
+        per burst. Failures are logged and isolated per notebook.
+        """
+        from app.dependencies import get_storage_service
+        from app.services.notebook_pdf import rebuild_dirty_notebook_pdfs
+
+        db: Session = SessionLocal()
+        try:
+            storage = get_storage_service()
+            rebuilt = await rebuild_dirty_notebook_pdfs(db, storage)
+            if rebuilt:
+                logger.info("Rebuilt %d combined notebook PDF(s)", rebuilt)
+        except Exception as e:
+            logger.error(f"Error rebuilding dirty notebook PDFs: {e}", exc_info=True)
         finally:
             db.close()
 

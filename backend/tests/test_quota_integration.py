@@ -73,12 +73,14 @@ def mock_rm_converter():
 
 @pytest.fixture
 def mock_pdf_service():
-    """Mock PDF service."""
-    with patch("app.api.processing.PDFService") as mock_class:
-        pdf_mock = MagicMock()
-        pdf_mock.combine_pdfs.return_value = b"combined_pdf_bytes"
-        mock_class.return_value = pdf_mock
-        yield pdf_mock
+    """No-op: the upload endpoint no longer combines PDFs inline.
+
+    Combined-notebook-PDF rebuilds were moved out of the request path into the
+    debounced background worker (app/services/notebook_pdf.py), so the upload
+    flow no longer touches PDFService. Kept as a fixture so the existing tests
+    that request it need no signature changes.
+    """
+    yield MagicMock()
 
 
 @pytest.fixture
