@@ -172,3 +172,114 @@ def test_legacy_session_token_allowed_on_legacy_router_guard(legacy_client, scop
     token = _make_token(scoped_user.id, token_type=None)
     resp = legacy_client.get("/legacy-blocked", headers=_auth(token))
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# The real application: guards are wired onto the routes that need them
+# ---------------------------------------------------------------------------
+#
+# The tests above prove the guard functions work on synthetic routes. These
+# check the production routing table, so removing a guard from a real router or
+# endpoint fails a test.
+
+API = f"/{get_settings().api_version}"
+
+# Routes an agent token must not reach.
+AGENT_BLOCKED_ROUTES = [
+    ("POST", f"{API}/integrations/"),
+    ("DELETE", f"{API}/integrations/{{target_name}}"),
+    ("GET", f"{API}/integrations/notion/databases"),
+    ("DELETE", f"{API}/integrations/todoist/disconnect"),
+    ("POST", f"{API}/integrations/obsidian/regenerate-key"),
+    ("POST", f"{API}/account/export"),
+    ("DELETE", f"{API}/account"),
+    ("GET", f"{API}/todos/"),
+    ("DELETE", f"{API}/todos/{{todo_id}}"),
+    ("DELETE", f"{API}/notebooks/{{notebook_id}}"),
+    ("GET", f"{API}/notebooks/{{notebook_id}}/export"),
+    ("POST", f"{API}/auth/agent-token"),
+    ("GET", f"{API}/admin/users"),
+    ("GET", f"{API}/waitlist/admin"),
+    ("POST", f"{API}/waitlist/admin/{{entry_id}}/approve"),
+    ("POST", f"{API}/users/accept-terms"),
+    ("POST", f"{API}/sync/trigger"),
+    ("POST", f"{API}/sync/process-queue"),
+    ("POST", f"{API}/processing/metadata/rebuild-paths"),
+]
+
+# Routes the Mac agent calls; guarding any of them would break sync.
+AGENT_ALLOWED_ROUTES = [
+    ("GET", f"{API}/users/me"),
+    ("GET", f"{API}/sync/stats"),
+    ("POST", f"{API}/sync/metadata"),
+    ("POST", f"{API}/processing/rm-file"),
+    ("GET", f"{API}/quota/status"),
+    ("POST", f"{API}/agents/register"),
+]
+
+
+def _find_route(method: str, path: str):
+    from fastapi.routing import APIRoute
+
+    from app.main import app
+
+    for route in app.routes:
+        if isinstance(route, APIRoute) and route.path == path and method in route.methods:
+            return route
+    raise AssertionError(f"No route {method} {path} in app.main.app")
+
+
+def _dependency_calls(dependant) -> set:
+    calls = set()
+    for sub in dependant.dependencies:
+        calls.add(sub.call)
+        calls |= _dependency_calls(sub)
+    return calls
+
+
+def _is_agent_guarded(route) -> bool:
+    from app.auth.clerk import get_clerk_session_user, reject_agent_token
+    from app.auth.dependencies import reject_agent_token_legacy
+
+    guards = {get_clerk_session_user, reject_agent_token, reject_agent_token_legacy}
+    return bool(_dependency_calls(route.dependant) & guards)
+
+
+@pytest.mark.parametrize("method,path", AGENT_BLOCKED_ROUTES)
+def test_real_route_rejects_agent_tokens(method, path):
+    assert _is_agent_guarded(_find_route(method, path)), f"{method} {path} is not agent-guarded"
+
+
+@pytest.mark.parametrize("method,path", AGENT_ALLOWED_ROUTES)
+def test_real_agent_route_stays_open_to_agent_tokens(method, path):
+    assert not _is_agent_guarded(_find_route(method, path)), f"{method} {path} would block the agent"
+
+
+@pytest.fixture
+def real_client(db: Session) -> Generator[TestClient, None, None]:
+    """The production app with only the database swapped for the test session."""
+    from app.main import app
+
+    def _get_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = _get_db
+    try:
+        # No ``with`` block: the lifespan (sync worker) must not start.
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("GET", f"{API}/admin/users"),
+        ("DELETE", f"{API}/notebooks/999999"),
+    ],
+)
+def test_agent_token_gets_403_from_real_app(real_client, scoped_user, method, path):
+    token = _make_token(scoped_user.id, token_type="agent")
+    resp = real_client.request(method, path, headers=_auth(token))
+    assert resp.status_code == 403
+    assert "Agent tokens" in resp.json()["detail"]

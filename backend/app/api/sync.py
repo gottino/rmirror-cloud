@@ -11,7 +11,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
 from app.core.sync_engine import SyncItem
 from app.core.unified_sync_manager import UnifiedSyncManager
 from app.database import get_db
@@ -283,7 +283,7 @@ async def sync_metadata(
 async def trigger_sync(
     request: SyncRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_clerk_active_user),
+    current_user: User = Depends(get_clerk_session_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -524,7 +524,7 @@ async def get_sync_status(
 @router.post("/process-queue")
 async def process_sync_queue(
     limit: int = 10,
-    current_user: User = Depends(get_clerk_active_user),
+    current_user: User = Depends(get_clerk_session_user),
     db: Session = Depends(get_db),
 ):
     """
