@@ -22,6 +22,7 @@ from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
 from app.models.sync_record import IntegrationConfig, SyncItemType, SyncQueue, SyncRecord
 from app.models.user import User
+from app.services.sync_worker import apply_sync_failure, apply_sync_result
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["sync"])
@@ -540,9 +541,12 @@ async def process_sync_queue(
             .filter(
                 SyncQueue.user_id == current_user.id,
                 SyncQueue.status == 'pending',
+                # Items in retry backoff wait for their turn, as in the worker
+                SyncQueue.scheduled_at <= datetime.utcnow(),
             )
             .order_by(SyncQueue.priority, SyncQueue.created_at)
             .limit(limit)
+            .with_for_update(skip_locked=True)
             .all()
         )
 
@@ -563,7 +567,6 @@ async def process_sync_queue(
             try:
                 # Mark as processing
                 queue_item.status = 'processing'
-                queue_item.retry_count += 1
                 queue_item.started_at = datetime.utcnow()
                 db.commit()
 
@@ -661,10 +664,13 @@ async def process_sync_queue(
 
                         logger.info(f"Successfully synced page {page.id} to {queue_item.target_name}")
                     else:
-                        queue_item.status = 'failed'
-                        queue_item.error_message = result.error_message
-                        failed += 1
-                        logger.error(f"Failed to sync page {page.id}: {result.error_message}")
+                        # Same skip/retry/permanent rules as the background worker
+                        outcome = apply_sync_result(queue_item, result)
+                        if outcome == "skipped":
+                            processed += 1
+                        else:
+                            failed += 1
+                            logger.error(f"Failed to sync page {page.id} ({outcome}): {result.error_message}")
 
                     db.commit()
                 else:
@@ -676,8 +682,8 @@ async def process_sync_queue(
 
             except Exception as e:
                 logger.error(f"Error processing queue item {queue_item.id}: {e}", exc_info=True)
-                queue_item.status = 'failed'
-                queue_item.error_message = str(e)
+                db.rollback()
+                apply_sync_failure(queue_item, str(e))
                 failed += 1
                 db.commit()
 

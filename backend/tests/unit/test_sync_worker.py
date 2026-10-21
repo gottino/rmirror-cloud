@@ -9,15 +9,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
+from app.core.sync_engine import SyncResult
 from app.models.notebook import Notebook
 from app.models.page import Page
-from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
+from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord, SyncStatus
 from app.services.sync_worker import (
     MAX_SYNC_RETRIES,
     RETRY_BASE_DELAY_SECONDS,
     RETRY_MAX_DELAY_SECONDS,
     SyncWorker,
     apply_sync_failure,
+    apply_sync_result,
     compute_retry_delay,
 )
 from tests.conftest import create_user_with_quota
@@ -409,3 +411,108 @@ class TestRetryPolicy:
         assert retried is False
         assert item.retry_count == MAX_SYNC_RETRIES
         assert item.status == "failed"
+
+
+class TestSyncResultStatus:
+    """The worker follows the status the sync target reports."""
+
+    NOW = datetime(2026, 6, 7, 12, 0, 0)
+
+    def _item(self, retry_count=0):
+        return SyncQueue(status="processing", retry_count=retry_count)
+
+    def test_skipped_completes_without_retry(self):
+        item = self._item()
+        outcome = apply_sync_result(item, SyncResult(status=SyncStatus.SKIPPED), now=self.NOW)
+
+        assert outcome == "skipped"
+        assert item.status == "completed"
+        assert item.completed_at == self.NOW
+        assert item.retry_count == 0
+
+    def test_retry_status_reschedules(self):
+        item = self._item()
+        result = SyncResult(status=SyncStatus.RETRY, error_message="Rate limited by Todoist")
+        outcome = apply_sync_result(item, result, now=self.NOW)
+
+        assert outcome == "retry"
+        assert item.status == "pending"
+        assert item.retry_count == 1
+        assert item.scheduled_at == self.NOW + timedelta(seconds=RETRY_BASE_DELAY_SECONDS)
+
+    def test_retry_after_is_honoured(self):
+        item = self._item()
+        later = self.NOW + timedelta(minutes=30)
+        result = SyncResult(status=SyncStatus.RETRY, error_message="rate limited", retry_after=later)
+        apply_sync_result(item, result, now=self.NOW)
+
+        assert item.scheduled_at == later
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Can't edit block that is archived. You must unarchive the block before editing.",
+            "Client error '401 Unauthorized' for url 'https://api.todoist.com/api/v1/tasks'",
+            "Could not find block with ID: abc",
+        ],
+    )
+    def test_permanent_failure_is_not_retried(self, message):
+        item = self._item()
+        result = SyncResult(status=SyncStatus.FAILED, error_message=message)
+        outcome = apply_sync_result(item, result, now=self.NOW)
+
+        assert outcome == "failed"
+        assert item.status == "failed"
+        assert item.retry_count == 0
+        assert item.error_message == message
+
+    @pytest.mark.parametrize(
+        "message",
+        ["Server error '503 Service Unavailable'", "Connection refused", "Read timed out"],
+    )
+    def test_transient_failure_is_retried(self, message):
+        item = self._item()
+        result = SyncResult(status=SyncStatus.FAILED, error_message=message)
+        outcome = apply_sync_result(item, result, now=self.NOW)
+
+        assert outcome == "retry"
+        assert item.status == "pending"
+        assert item.retry_count == 1
+
+    def test_transient_failure_dead_letters_at_cap(self):
+        item = self._item(retry_count=MAX_SYNC_RETRIES - 1)
+        result = SyncResult(status=SyncStatus.RETRY, error_message="rate limited")
+        outcome = apply_sync_result(item, result, now=self.NOW)
+
+        assert outcome == "failed"
+        assert item.status == "failed"
+
+    def test_backoff_reaches_the_cap_before_dead_lettering(self):
+        """The 1h cap is reachable within MAX_SYNC_RETRIES, so outages up to ~2h survive."""
+        assert compute_retry_delay(MAX_SYNC_RETRIES - 1) == timedelta(seconds=RETRY_MAX_DELAY_SECONDS)
+
+
+class TestFailureRecovery:
+    @pytest.mark.asyncio
+    async def test_db_error_during_sync_is_rolled_back_and_rescheduled(
+        self, db, user, queue_item, notion_config, page
+    ):
+        """A DB error mid-sync must not leave the item stuck in 'processing'."""
+        from sqlalchemy.exc import IntegrityError
+
+        worker = SyncWorker()
+        item_id = queue_item.id
+
+        async def failing_process(session, item):
+            item.error_message = "partial write that must be discarded"
+            raise IntegrityError("INSERT INTO sync_records", {}, Exception("UNIQUE constraint failed"))
+
+        with patch("app.services.sync_worker.SessionLocal", return_value=db), \
+             patch.object(db, "close"), \
+             patch.object(SyncWorker, "_process_queue_item", side_effect=failing_process):
+            await worker._process_pending_items()
+
+        result = db.query(SyncQueue).filter(SyncQueue.id == item_id).first()
+        assert result.status == "pending"
+        assert result.retry_count == 1
+        assert "UNIQUE constraint failed" in result.error_message
