@@ -85,6 +85,11 @@ def queue_sync(
             if existing_queue.content_hash != content_hash:
                 existing_queue.content_hash = content_hash
                 existing_queue.updated_at = datetime.utcnow()
+                if existing_queue.status == 'pending' and existing_queue.retry_count:
+                    # New content deserves a fresh attempt, not the tail end of
+                    # the old content's backoff.
+                    existing_queue.retry_count = 0
+                    existing_queue.scheduled_at = datetime.utcnow()
                 db.commit()
             return existing_queue
 

@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ security = HTTPBearer()
 
 
 async def get_current_user(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
     db: Annotated[Session, Depends(get_db)],
 ) -> User:
@@ -22,6 +23,7 @@ async def get_current_user(
     Get the current authenticated user from JWT token.
 
     Args:
+        request: Incoming request (used to record the token kind)
         credentials: HTTP Bearer credentials
         db: Database session
 
@@ -42,6 +44,10 @@ async def get_current_user(
 
     if payload is None:
         raise credentials_exception
+
+    # Record the token kind so agent-scope guards can restrict agent tokens
+    # reaching the legacy auth chain (e.g. the todos router).
+    request.state.is_agent_token = bool(payload.get("type") == "agent")
 
     user_id_str: str | None = payload.get("sub")
     if user_id_str is None:
@@ -78,6 +84,25 @@ async def get_current_active_user(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
 
     return current_user
+
+
+async def reject_agent_token_legacy(
+    request: Request,
+    _current_user: Annotated[User, Depends(get_current_active_user)],
+) -> None:
+    """
+    Router-level guard (legacy auth chain) that 403s agent tokens.
+
+    Mirrors ``app.auth.clerk.reject_agent_token`` for routers that still use the
+    legacy ``get_current_active_user`` dependency (e.g. todos). Depends on
+    ``get_current_active_user`` so authentication runs first and populates
+    ``request.state.is_agent_token`` before the check.
+    """
+    if bool(getattr(request.state, "is_agent_token", False)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Agent tokens cannot access this endpoint. Sign in to the dashboard.",
+        )
 
 
 async def get_obsidian_user(

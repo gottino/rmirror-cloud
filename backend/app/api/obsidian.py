@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_session_user
 from app.auth.dependencies import get_obsidian_user
 from app.database import get_db
 from app.models.notebook import Notebook
@@ -251,7 +251,7 @@ def _get_changed_notebooks(
 
 @router.post("/obsidian/enable", response_model=ObsidianEnableResponse)
 async def enable_obsidian(
-    current_user: User = Depends(get_clerk_active_user),
+    current_user: User = Depends(get_clerk_session_user),
     db: Session = Depends(get_db),
 ):
     """Enable Obsidian integration and return API key."""
@@ -260,7 +260,7 @@ async def enable_obsidian(
 
 @router.post("/obsidian/regenerate-key", response_model=ObsidianEnableResponse)
 async def regenerate_obsidian_key(
-    current_user: User = Depends(get_clerk_active_user),
+    current_user: User = Depends(get_clerk_session_user),
     db: Session = Depends(get_db),
 ):
     """Regenerate Obsidian API key."""
@@ -269,7 +269,7 @@ async def regenerate_obsidian_key(
 
 @router.post("/obsidian/disable")
 async def disable_obsidian(
-    current_user: User = Depends(get_clerk_active_user),
+    current_user: User = Depends(get_clerk_session_user),
     db: Session = Depends(get_db),
 ):
     """Disable Obsidian integration."""
@@ -278,7 +278,7 @@ async def disable_obsidian(
 
 @router.get("/obsidian/status", response_model=ObsidianStatusResponse)
 async def obsidian_status(
-    current_user: User = Depends(get_clerk_active_user),
+    current_user: User = Depends(get_clerk_session_user),
     db: Session = Depends(get_db),
 ):
     """Get Obsidian integration status and sync stats."""

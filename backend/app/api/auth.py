@@ -9,7 +9,7 @@ from slowapi import Limiter
 from sqlalchemy.orm import Session
 
 from app.auth import get_password_hash, verify_password
-from app.auth.clerk import get_clerk_user
+from app.auth.clerk import get_clerk_session_user
 from app.auth.jwt import create_access_token
 from app.database import get_db
 from app.middleware.rate_limit import AUTH_ENDPOINT_LIMIT, get_rate_limit_key
@@ -121,7 +121,7 @@ async def login(
 @limiter.limit(AUTH_ENDPOINT_LIMIT)
 async def create_agent_token(
     request: Request,
-    user: User = Depends(get_clerk_user),
+    user: User = Depends(get_clerk_session_user),
 ) -> Token:
     """
     Exchange a Clerk session token for a long-lived agent JWT.
@@ -131,8 +131,10 @@ async def create_agent_token(
     the agent stores in the system keychain.
 
     Security:
-    - Requires valid Clerk session token (verified by get_clerk_user)
-    - Issued token includes 'type': 'agent' claim for audit purposes
+    - Requires a valid Clerk session token (get_clerk_session_user); agent
+      tokens are rejected so a leaked agent token cannot mint fresh ones
+    - Issued token includes 'type': 'agent' claim, enforced by the agent-scope
+      guards to limit agent tokens to upload/sync/read endpoints
     - Token is bound to user ID, not Clerk session
     - All issuances are logged for audit
     """

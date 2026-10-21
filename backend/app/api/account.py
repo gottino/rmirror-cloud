@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_active_user, reject_agent_token
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_storage_service
@@ -20,7 +20,8 @@ from app.utils.umami import track_event
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+# Account data export / deletion is dashboard-only; block long-lived agent tokens.
+router = APIRouter(dependencies=[Depends(reject_agent_token)])
 
 
 class DeleteAccountRequest(BaseModel):

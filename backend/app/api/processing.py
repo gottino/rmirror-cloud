@@ -14,7 +14,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
 from app.core.notebook_metadata_service import NotebookMetadataService
 from app.core.ocr_service import OCRService
 from app.core.rm_converter import RMConverter
@@ -702,7 +702,7 @@ async def update_notebook_metadata(
 
 @router.post("/metadata/rebuild-paths")
 async def rebuild_all_paths(
-    current_user: User = Depends(get_clerk_active_user),
+    current_user: User = Depends(get_clerk_session_user),
     db: Session = Depends(get_db),
 ):
     """
