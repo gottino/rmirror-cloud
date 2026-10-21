@@ -28,7 +28,7 @@ def call_anthropic(pdf_bytes: bytes, prompt: str, model: str) -> dict:
     start = time.monotonic()
     message = client.messages.create(
         model=model,
-        max_tokens=4096,
+        max_tokens=16000,  # thinking counts toward max_tokens on newer models
         messages=[
             {
                 "role": "user",
@@ -48,8 +48,14 @@ def call_anthropic(pdf_bytes: bytes, prompt: str, model: str) -> dict:
     )
     duration_ms = round((time.monotonic() - start) * 1000)
 
+    if message.stop_reason == "refusal":
+        raise RuntimeError(f"Model refused the request: {message.stop_details}")
+
+    # Responses can start with a thinking block, so select text blocks by type
+    text = "".join(block.text for block in message.content if block.type == "text")
+
     return {
-        "text": message.content[0].text if message.content else "",
+        "text": text,
         "input_tokens": message.usage.input_tokens,
         "output_tokens": message.usage.output_tokens,
         "duration_ms": duration_ms,
@@ -133,7 +139,7 @@ PROVIDERS = {
 # Approximate cost per page for dry-run estimates
 COST_PER_PAGE = {
     "claude-haiku": 0.007,
-    "claude-sonnet": 0.030,
+    "claude-sonnet": 0.020,
     "gpt-4.1-mini": 0.005,
     "gemini-flash": 0.003,
     "gemini-pro": 0.015,

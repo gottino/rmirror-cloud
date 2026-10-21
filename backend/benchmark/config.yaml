@@ -22,7 +22,7 @@ models:
 
   claude-sonnet:
     provider: anthropic
-    model: claude-sonnet-4-6-20250514
+    model: claude-sonnet-5-5
     env_key: CLAUDE_API_KEY
 
   gpt-4.1-mini:

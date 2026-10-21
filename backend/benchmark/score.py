@@ -17,7 +17,7 @@ WEIGHT_STRUCTURE = 0.3
 # Approximate cost per page for report
 COST_PER_PAGE = {
     "claude-haiku": 0.007,
-    "claude-sonnet": 0.030,
+    "claude-sonnet": 0.020,
     "gpt-4.1-mini": 0.005,
     "gemini-flash": 0.003,
     "gemini-pro": 0.015,
