@@ -1,5 +1,6 @@
 """OCR service using Google Gemini Vision API for handwritten text extraction."""
 
+import asyncio
 import logging
 import re
 import time
@@ -83,7 +84,10 @@ class OCRService:
         """
         logger.info(f"Extracting text from PDF ({len(pdf_bytes)} bytes)")
 
-        return self._call_vision_api(
+        # The Gemini SDK call is synchronous; run it on a worker thread so a
+        # multi-second OCR call does not stall the event loop.
+        return await asyncio.to_thread(
+            self._call_vision_api,
             content_part=types.Part.from_bytes(
                 data=pdf_bytes, mime_type="application/pdf"
             ),
@@ -110,7 +114,8 @@ class OCRService:
         """
         logger.info(f"Extracting text from image ({media_type}, {len(image_bytes)} bytes)")
 
-        return self._call_vision_api(
+        return await asyncio.to_thread(
+            self._call_vision_api,
             content_part=types.Part.from_bytes(
                 data=image_bytes, mime_type=media_type
             ),

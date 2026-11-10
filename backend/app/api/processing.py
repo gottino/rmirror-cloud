@@ -1,5 +1,6 @@
 """Processing endpoints for notebook OCR and handwriting extraction."""
 
+import asyncio
 import json
 import logging
 import uuid
@@ -188,7 +189,7 @@ async def process_rm_file(
         ocr_service = OCRService()
 
         # Check if file has content
-        if not converter.has_content(temp_rm_path):
+        if not await asyncio.to_thread(converter.has_content, temp_rm_path):
             logger.warning(f"File {rm_file.filename} has no content")
             temp_rm_path.unlink(missing_ok=True)
             return ProcessRMFileResponse(
@@ -222,7 +223,7 @@ async def process_rm_file(
         if needs_processing:
             # Convert .rm to PDF (always, regardless of quota)
             logger.info(f"Converting {rm_file.filename} to PDF (file hash changed or new file)")
-            pdf_bytes = converter.rm_to_pdf_bytes(temp_rm_path)
+            pdf_bytes = await asyncio.to_thread(converter.rm_to_pdf_bytes, temp_rm_path)
 
             # Check quota BEFORE OCR (not before upload)
             has_quota = quota_service.check_quota(db, current_user.id)
@@ -283,7 +284,7 @@ async def process_rm_file(
             # Still need to convert to PDF for storage if it doesn't exist
             if not page.pdf_s3_key:
                 logger.info(f"Converting {rm_file.filename} to PDF (missing PDF)")
-                pdf_bytes = converter.rm_to_pdf_bytes(temp_rm_path)
+                pdf_bytes = await asyncio.to_thread(converter.rm_to_pdf_bytes, temp_rm_path)
 
         # Store .rm file in storage
         storage_key = f"users/{current_user.id}/notebooks/{notebook_uuid}/pages/{page_uuid}.rm"
