@@ -9,6 +9,7 @@ from notion_client import Client as NotionClient
 from app.core.sync_engine import SyncItem, SyncResult, SyncTarget
 from app.integrations.notion_markdown import MarkdownToNotionConverter
 from app.models.sync_record import SyncItemType, SyncStatus
+from app.utils.concurrency import run_off_loop
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class NotionSyncTarget(SyncTarget):
         self.markdown_converter = MarkdownToNotionConverter()
         self.logger.info(f"Initialized Notion sync target with database {database_id}")
 
+    @run_off_loop
     async def sync_item(self, item: SyncItem) -> SyncResult:
         """Sync a single item to Notion."""
         try:
@@ -513,6 +515,7 @@ class NotionSyncTarget(SyncTarget):
             self.logger.error(f"Error finding existing Notion page: {e}")
             return None
 
+    @run_off_loop
     async def _create_notion_page(
         self, notebook_uuid: str, title: str, pages: List[Dict], full_path: str,
         last_opened: Optional[str] = None, last_modified: Optional[str] = None
@@ -927,6 +930,7 @@ class NotionSyncTarget(SyncTarget):
         # Content hash checking is handled by the sync manager
         return None
 
+    @run_off_loop
     async def update_item(self, external_id: str, item: SyncItem) -> SyncResult:
         """Update an existing item in Notion."""
         try:
@@ -958,6 +962,7 @@ class NotionSyncTarget(SyncTarget):
         except Exception as e:
             return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
 
+    @run_off_loop
     async def delete_item(self, external_id: str) -> SyncResult:
         """Delete (archive) an item from Notion."""
         try:
@@ -973,6 +978,7 @@ class NotionSyncTarget(SyncTarget):
         except Exception as e:
             return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
 
+    @run_off_loop
     async def validate_connection(self) -> bool:
         """
         Validate connection to Notion.

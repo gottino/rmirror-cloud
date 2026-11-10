@@ -121,6 +121,13 @@ async def get_clerk_user(
                 settings.secret_key,
                 algorithms=[settings.algorithm],
             )
+            # The only HS256 tokens this API issues are scoped agent tokens.
+            # Anything else signed with SECRET_KEY (old password-login tokens,
+            # or tokens minted for another purpose) must not authenticate,
+            # because it would be treated as a full dashboard session.
+            if decoded.get("type") != "agent":
+                logger.warning("Rejected HS256 token without type=agent")
+                raise credentials_exception
         else:
             # Clerk token: verify with JWKS
             jwks_client = get_jwks_client()
@@ -150,10 +157,10 @@ async def get_clerk_user(
 
         # Record the token kind so downstream guards can restrict long-lived
         # agent tokens. Only tokens explicitly minted as agent tokens carry
-        # ``type == "agent"``; Clerk sessions and legacy password tokens do not.
+        # ``type == "agent"``; Clerk sessions do not.
         request.state.is_agent_token = bool(decoded.get("type") == "agent")
 
-        # Extract user ID from the token (could be Clerk ID or regular user ID)
+        # Extract user ID: a Clerk user ID, or our integer user ID for agent tokens
         sub = decoded.get("sub")
 
         if not sub:
@@ -162,7 +169,7 @@ async def get_clerk_user(
         # Try to find user by Clerk user ID first (for Clerk auth)
         user = db.query(User).filter(User.clerk_user_id == sub).first()
 
-        # If not found, try finding by regular user ID (for password auth)
+        # If not found, try our integer user ID (agent tokens)
         if user is None:
             try:
                 user_id = int(sub)

@@ -9,6 +9,7 @@ from notion_client import Client as NotionClient
 
 from app.core.sync_engine import SyncItem, SyncResult, SyncTarget
 from app.models.sync_record import SyncItemType, SyncStatus
+from app.utils.concurrency import run_off_loop
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class NotionTodosSyncTarget(SyncTarget):
             f"(use_status_property={use_status_property})"
         )
 
+    @run_off_loop
     async def sync_item(self, item: SyncItem) -> SyncResult:
         """Sync a single item to Notion todos database."""
         try:
@@ -176,6 +178,7 @@ class NotionTodosSyncTarget(SyncTarget):
         # For now, we'll let the sync manager handle this
         return None
 
+    @run_off_loop
     async def update_item(self, external_id: str, item: SyncItem) -> SyncResult:
         """Update an existing todo in Notion."""
         try:
@@ -241,6 +244,7 @@ class NotionTodosSyncTarget(SyncTarget):
             self.logger.error(f"Error updating todo: {e}")
             return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
 
+    @run_off_loop
     async def delete_item(self, external_id: str) -> SyncResult:
         """Delete (archive) a todo from Notion."""
         try:
@@ -256,6 +260,7 @@ class NotionTodosSyncTarget(SyncTarget):
         except Exception as e:
             return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
 
+    @run_off_loop
     async def validate_connection(self) -> bool:
         """
         Validate connection to Notion todos database.

@@ -8,6 +8,7 @@ import httpx
 from notion_client import Client as NotionClient
 
 from app.config import get_settings
+from app.utils.concurrency import run_off_loop
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,7 @@ class NotionOAuthService:
                 "owner": data.get("owner", {}),
             }
 
+    @run_off_loop
     async def list_databases(self, access_token: str) -> List[Dict[str, Any]]:
         """
         List all databases the integration has access to.
@@ -165,6 +167,7 @@ class NotionOAuthService:
             logger.error(f"Error listing Notion databases: {e}")
             return []
 
+    @run_off_loop
     async def list_pages(self, access_token: str) -> List[Dict[str, Any]]:
         """
         List all pages the integration has access to (for parent selection).
@@ -206,6 +209,7 @@ class NotionOAuthService:
             logger.error(f"Error listing Notion pages: {e}")
             return []
 
+    @run_off_loop
     async def create_rmirror_database(
         self,
         access_token: str,
@@ -353,6 +357,7 @@ class NotionOAuthService:
             logger.error(f"Error creating Notion database: {e}")
             raise Exception(f"Failed to create Notion database: {str(e)}")
 
+    @run_off_loop
     async def validate_database(
         self, access_token: str, database_id: str
     ) -> bool:
@@ -375,6 +380,7 @@ class NotionOAuthService:
             logger.error(f"Database validation failed: {e}")
             return False
 
+    @run_off_loop
     async def get_database_info(
         self, access_token: str, database_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -414,6 +420,7 @@ class NotionOAuthService:
             logger.error(f"Error getting database info: {e}")
             return None
 
+    @run_off_loop
     async def add_database_properties(
         self,
         access_token: str,
