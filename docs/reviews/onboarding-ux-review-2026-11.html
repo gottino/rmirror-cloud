@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rMirror Onboarding Review</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: single reading column (max 860px) with a sticky section index on wide screens; findings are flat rows, not cards. */
+:root {
+  --bg: #fbfaf8;
+  --surface: #ffffff;
+  --sunken: #f3f0ec;
+  --fg: #2d2a2e;
+  --muted: #6b6661;
+  --line: #e4dfd8;
+  --accent: #b24a44;        /* rMirror terracotta, darkened for AA text */
+  --accent-soft: #f6e4e2;
+  --crit: #b3261e;  --crit-bg: #fbe5e3;
+  --high: #9a5b00;  --high-bg: #fbeed3;
+  --med:  #4a6a58;  --med-bg:  #e2ede6;
+  --ok:   #2f6b4a;  --ok-bg:   #dff0e5;
+  --font-display: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1c1a1b; --surface: #252223; --sunken: #2c292a; --fg: #ece7e1; --muted: #a9a29a; --line: #3a3637;
+    --accent: #e58a83; --accent-soft: #40282a;
+    --crit: #ff9a92; --crit-bg: #4a2422; --high: #f0c06a; --high-bg: #43341a;
+    --med: #a9cdb8; --med-bg: #26352d; --ok: #8fd1a8; --ok-bg: #20382b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1c1a1b; --surface: #252223; --sunken: #2c292a; --fg: #ece7e1; --muted: #a9a29a; --line: #3a3637;
+  --accent: #e58a83; --accent-soft: #40282a;
+  --crit: #ff9a92; --crit-bg: #4a2422; --high: #f0c06a; --high-bg: #43341a;
+  --med: #a9cdb8; --med-bg: #26352d; --ok: #8fd1a8; --ok-bg: #20382b;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 48px 96px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; grid-template-columns: minmax(0, 1fr); gap: 48px; }
+@media (min-width: 1000px) { .wrap { grid-template-columns: 200px minmax(0, 860px); } }
+nav.toc { display: none; }
+@media (min-width: 1000px) {
+  nav.toc { display: block; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 32px); align-self: start; font-size: 13.5px; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; border-left: 1px solid var(--line); }
+  nav.toc a { display: block; padding-left: 14px; color: var(--muted); text-decoration: none; }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); }
+}
+main { display: flex; flex-direction: column; gap: 64px; min-width: 0; }
+section { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(2rem, 5vw, 2.9rem); font-weight: 700; letter-spacing: -0.02em; }
+h2 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; }
+h3 { font-size: 1.12rem; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+ul, ol { margin: 0; padding-left: 1.2em; max-width: 68ch; display: flex; flex-direction: column; gap: 6px; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font-family: var(--font-mono); font-size: 0.84em; background: var(--sunken); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.eyebrow { font-size: 12.5px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.lede { font-size: 1.15rem; color: var(--fg); }
+.muted { color: var(--muted); }
+.small { font-size: 14px; }
+
+.verdict { border-top: 3px solid var(--accent); background: var(--surface); padding: 24px; display: flex; flex-direction: column; gap: 14px; border-radius: 0 0 10px 10px; }
+.verdict p { max-width: none; }
+
+.pill { display: inline-block; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 9px; border-radius: 99px; white-space: nowrap; }
+.p-crit { color: var(--crit); background: var(--crit-bg); }
+.p-high { color: var(--high); background: var(--high-bg); }
+.p-med  { color: var(--med);  background: var(--med-bg); }
+.p-ok   { color: var(--ok);   background: var(--ok-bg); }
+
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th { text-align: left; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); }
+td { padding: 11px 12px 11px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.n { font-family: var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; width: 2.2em; }
+td.where { color: var(--muted); white-space: nowrap; }
+.journey { min-width: 640px; }
+
+.finding { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding-top: 24px; border-top: 1px solid var(--line); }
+.finding header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.finding header h3 { flex: 1 1 280px; min-width: 0; }
+.fid { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.fix { background: var(--accent-soft); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.fix > strong { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+.fix p, .fix ul, .fix ol { max-width: none; }
+.evidence { font-size: 13.5px; color: var(--muted); }
+.evidence code { font-size: 0.9em; }
+
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.compare > div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.compare ol { max-width: none; font-size: 14.5px; }
+.compare .now { border-style: dashed; }
+
+.mock { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 12px; max-width: 520px; }
+.mock .mock-title { font-family: var(--font-display); font-weight: 600; font-size: 1.05rem; }
+.mock .row { display: flex; justify-content: space-between; gap: 12px; font-size: 14.5px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.mock .row span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
+.mock .btn { background: var(--accent); color: var(--surface); text-align: center; padding: 10px; border-radius: 8px; font-weight: 600; font-size: 15px; }
+.mock .sub { font-size: 13px; color: var(--muted); text-align: center; }
+
+.roadmap { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
+.roadmap > div { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.roadmap ul { font-size: 14.5px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13.5px; }
+.sw { display: flex; align-items: center; gap: 10px; }
+.sw i { width: 108px; padding: 7px 0; text-align: center; border-radius: 6px; font-style: normal; font-size: 13px; border: 1px solid var(--line); }
+</style>
+</head>
+<body style="margin:0">
+
+<div class="wrap">
+<nav class="toc" aria-label="Sections">
+  <ol>
+    <li><a href="#verdict">Verdict</a></li>
+    <li><a href="#journey">The journey today</a></li>
+    <li><a href="#blockers">Conversion blockers</a></li>
+    <li><a href="#friction">High-friction areas</a></li>
+    <li><a href="#integrations">Connecting Notion</a></li>
+    <li><a href="#style">UI style</a></li>
+    <li><a href="#works">What already works</a></li>
+    <li><a href="#target">Proposed flow</a></li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#method">Method and limits</a></li>
+  </ol>
+</nav>
+
+<main>
+<section id="verdict">
+  <span class="eyebrow">Design review · sign-up to first synced notebook to first integration · 10 Nov 2026</span>
+  <h1>rMirror onboarding review</h1>
+  <p class="lede">The product has a calm, coherent look and a setup wizard that is better than most at this stage. But a first-time user has to cross about twelve steps and three different interfaces before seeing their handwriting as text, and the path to Notion is broken at its three most prominent entry points.</p>
+  <div class="verdict">
+    <p><strong>Getting the first notebook in: hard for a non-technical user.</strong> Sign-up is easy. The difficulty sits in the handoff to the Mac agent, where the user must find a menu-bar icon, understand "Initial Sync", "Save Selection" and "page limit", and gets told "You're All Set!" before anything has arrived.</p>
+    <p><strong>Connecting Notion: currently broken for new users on the guided path.</strong> The wizard, the onboarding checklist and the day-3 email all link to the database picker, which fails unless the user has already authorised Notion somewhere else. Users who find the Integrations page on their own get through, but face three decisions and no confirmation that anything is syncing.</p>
+    <p><strong>Biggest lever:</strong> fix the Notion link (hours of work), make the wizard wait for a real first notebook, and reduce the agent's first run to one screen with one button.</p>
+  </div>
+</section>
+
+<section id="journey">
+  <h2>The journey today</h2>
+  <p>Every step a new user takes, in order, with where it happens and how much it asks of them. Three surfaces are involved: the website, macOS itself, and the agent's local window.</p>
+  <div class="scroll">
+  <table class="journey">
+    <thead><tr><th></th><th>Step</th><th>Where</th><th>Friction</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1</td><td>Understand the offer</td><td class="where">Landing page</td><td><span class="pill p-high">High</span></td><td>Mac-only and "needs the reMarkable desktop app" are not stated near the button</td></tr>
+      <tr><td class="n">2</td><td>Create account</td><td class="where">Sign-up</td><td><span class="pill p-ok">Low</span></td><td>Standard Clerk form with Google sign-in</td></tr>
+      <tr><td class="n">3</td><td>Accept terms again</td><td class="where">Dashboard modal</td><td><span class="pill p-med">Medium</span></td><td>Blocking modal right after the sign-up page already said "you agree"</td></tr>
+      <tr><td class="n">4</td><td>Download the agent</td><td class="where">Wizard step 1</td><td><span class="pill p-ok">Low</span></td><td>One clear button</td></tr>
+      <tr><td class="n">5</td><td>Open DMG, drag, launch, pass Gatekeeper</td><td class="where">macOS</td><td><span class="pill p-med">Medium</span></td><td>Four manual actions; instructions are good but text-only</td></tr>
+      <tr><td class="n">6</td><td>Sign the agent in</td><td class="where">Browser bridge</td><td><span class="pill p-ok">Low</span></td><td>"Continue as…" is clear; wizard detects the connection by itself</td></tr>
+      <tr><td class="n">7</td><td>Find the agent window</td><td class="where">Menu bar</td><td><span class="pill p-high">High</span></td><td>User must locate a small icon and choose "Open Web UI"</td></tr>
+      <tr><td class="n">8</td><td>Pick notebooks, save, set limit, start sync</td><td class="where">Agent window</td><td><span class="pill p-crit">Very high</span></td><td>Four controls, three sync buttons, quota arithmetic left to the user</td></tr>
+      <tr><td class="n">9</td><td>Wait for the first notebook</td><td class="where">Wizard step 3–4</td><td><span class="pill p-crit">Very high</span></td><td>No progress shown; "You're All Set!" appears before any data</td></tr>
+      <tr><td class="n">10</td><td>Open a notebook and read the text</td><td class="where">Dashboard</td><td><span class="pill p-med">Medium</span></td><td>Checklist names the step but gives no link to it</td></tr>
+      <tr><td class="n">11</td><td>Connect Notion</td><td class="where">Wizard, checklist, email</td><td><span class="pill p-crit">Broken</span></td><td>Links skip authorisation and land on an error</td></tr>
+      <tr><td class="n">12</td><td>Choose or create a database</td><td class="where">Notion setup</td><td><span class="pill p-high">High</span></td><td>Database jargon, no success message, no link to the result</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="blockers">
+  <h2>Conversion blockers</h2>
+  <p>These five stop users outright or break trust at the moment of commitment. Fix them before any visual work.</p>
+
+  <article class="finding">
+    <header><span class="fid">B1</span><h3>"Connect Notion" leads to an error for anyone who has not connected yet</h3><span class="pill p-crit">Broken</span></header>
+    <p>The wizard's final screen, the onboarding checklist and the "Your notes + Notion = magic" email all link to <code>/integrations/notion/setup</code>. That page is the second half of the flow: it lists Notion databases. Without a prior authorisation the API answers "Notion integration not found. Please complete OAuth flow first", and the dashboard shows only "Failed to list databases". The one working entry point is the "Connect Notion" button on the Integrations page, which none of the guided paths point to.</p>
+    <p class="evidence">Evidence: <code>dashboard/app/dashboard/components/SetupWizard.tsx:341</code>, <code>dashboard/components/OnboardingChecklist.tsx:434</code>, <code>backend/app/utils/email.py:849</code>, <code>backend/app/api/notion_oauth.py:319</code>, <code>dashboard/lib/api.ts:314</code></p>
+    <div class="fix"><strong>Fix</strong>
+      <ul>
+        <li>Make the setup page check connection state first. If Notion is not authorised, show a single "Connect Notion" button that starts authorisation and returns to the same page.</li>
+        <li>Point all three entry points at that one page so there is a single front door.</li>
+        <li>Replace "Failed to list databases" with the cause and the action: "Notion isn't connected yet. Connect Notion".</li>
+      </ul>
+    </div>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">B2</span><h3>The wizard celebrates before anything has synced</h3><span class="pill p-crit">Blocker</span></header>
+    <p>Step 3 shows a screenshot of the agent and a "Continue" button that is always enabled. Step 4 says "You're All Set!" and offers "Go to Dashboard". That button only reloads the notebook list; while the list is empty the dashboard renders the wizard again, so the button appears to do nothing. A user who clicked through without syncing is stuck on a success screen with no notebooks and no explanation. The backend already records <code>first_notebook_synced_at</code>, but the wizard never reads it.</p>
+    <p class="evidence">Evidence: <code>SetupWizard.tsx:298</code>, <code>SetupWizard.tsx:324–337</code>, <code>dashboard/app/dashboard/page.tsx:932–943</code></p>
+    <div class="fix"><strong>Fix</strong>
+      <ul>
+        <li>Turn step 3 into a live waiting state, the same pattern step 2 already uses: "Waiting for your first notebook…", then "Meeting Notes · 4 of 12 pages uploaded".</li>
+        <li>Advance automatically when the first page arrives. Make the success screen show that page's transcribed text next to the handwriting. That is the moment the product proves itself.</li>
+        <li>If nothing arrives after two minutes, show targeted help: is the agent open, is a notebook selected, did you press the sync button.</li>
+      </ul>
+    </div>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">B3</span><h3>The first sync is the hardest step and has the least guidance</h3><span class="pill p-crit">Blocker</span></header>
+    <p>After signing in, the user must open the agent from the menu bar and work a screen built for power users: tick notebooks, press "Save Selection", optionally set "Limit pages per notebook", then choose between "Initial Sync", "Sync Now" and "Refresh Status". Nothing is preselected. Forgetting "Save Selection" or pressing "Sync Now" instead of "Initial Sync" are easy mistakes with no feedback. The dashboard wizard can only describe this screen with a static screenshot.</p>
+    <p class="evidence">Evidence: <code>agent/app/web/templates/index.html</code> (Notebook Selection and Actions panels), <code>dashboard/public/agent-sync-guide.png</code></p>
+    <div class="fix"><strong>Fix: a first-run mode in the agent</strong>
+      <p>Open the agent window automatically after sign-in, showing one screen with a sensible selection already made and one button.</p>
+      <div class="mock" aria-label="Sketch of proposed first-run screen">
+        <span class="mock-title">Start with your 3 most recent notebooks</span>
+        <div class="row"><span>☑ Meeting Notes</span><span>12 pages</span></div>
+        <div class="row"><span>☑ Book Club</span><span>8 pages</span></div>
+        <div class="row"><span>☑ Travel Journal</span><span>3 pages</span></div>
+        <div class="btn">Sync 3 notebooks (23 pages)</div>
+        <span class="sub">Uses 23 of your 200 pages this month · Choose different notebooks</span>
+      </div>
+      <ul>
+        <li>Merge "Save Selection" into the sync button. Selecting and syncing is one intent.</li>
+        <li>Hide "Sync Now", "Refresh Status" and the page limit behind "More options" until the first sync has finished.</li>
+        <li>Rename "Initial Sync" to what it does ("Sync selected notebooks") and "Quota Impact" to "Pages this will use".</li>
+      </ul>
+    </div>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">B4</span><h3>Requirements are hidden until after sign-up</h3><span class="pill p-crit">Blocker</span></header>
+    <p>rMirror needs a Mac and the reMarkable desktop app, already installed and synced. The landing page mentions "your Mac" once in a step description and confirms macOS-only in the fourth FAQ answer. The desktop-app requirement appears nowhere on the website; a user discovers it as a "reMarkable Folder Not Found" error inside the agent. Windows users, and anyone who signs up on a phone, create an account and then meet a single "Download for macOS" button labelled "Choose your platform".</p>
+    <p class="evidence">Evidence: <code>dashboard/app/page.tsx:753–754</code> (FAQ), <code>SetupWizard.tsx:136–159</code>, <code>agent/app/web/templates/index.html</code> (folder-not-found panel)</p>
+    <div class="fix"><strong>Fix</strong>
+      <ul>
+        <li>Put one line under the main button: "Needs a Mac with the reMarkable desktop app. Windows is on the way."</li>
+        <li>For Windows visitors, swap the button for "Tell me when Windows is ready" and collect the email. That is a lead rather than a churned account.</li>
+        <li>On a phone, replace the download step with "Email me the download link for my Mac".</li>
+        <li>Add a pre-flight line in wizard step 1: "Have the reMarkable desktop app open and synced" with a link to get it.</li>
+      </ul>
+    </div>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">B5</span><h3>The numbers contradict each other</h3><span class="pill p-high">Trust</span></header>
+    <p>The same user sees different allowances and prices depending on the screen:</p>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>Where</th><th>What it says</th></tr></thead>
+      <tbody>
+        <tr><td>Landing hero and pricing</td><td>Beta: 200 pages a month (30 struck through)</td></tr>
+        <tr><td>Wizard step 3</td><td>"Your free tier includes <strong>30 pages</strong>", shown to every user including beta</td></tr>
+        <tr><td>Landing pricing, Pro</td><td>"Unlimited OCR pages" for $9</td></tr>
+        <tr><td>In-app Pro card and billing</td><td>500 pages a month, "16x more!", launching "March 2026"</td></tr>
+        <tr><td>Landing features</td><td>"Readwise highlights" with a tick; the app lists Readwise as Coming Soon</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>The wizard figure does the most damage: it tells a beta user to limit their first sync to 5–10 pages when they have 200, which makes the first impression smaller than it needs to be.</p>
+    <p class="evidence">Evidence: <code>dashboard/app/page.tsx:196</code>, <code>:492</code>, <code>:673</code>; <code>SetupWizard.tsx:291</code>; <code>dashboard/lib/constants.ts:17–27</code></p>
+    <div class="fix"><strong>Fix</strong>
+      <p>Read the allowance from the quota API everywhere it is shown, wizard included. Decide what Pro is and state it once in <code>constants.ts</code>, then have the landing page use the same constants. Remove the past launch date and any feature that is not live.</p>
+    </div>
+  </article>
+</section>
+
+<section id="friction">
+  <h2>High-friction areas</h2>
+
+  <article class="finding">
+    <header><span class="fid">F1</span><h3>Landing page: the proof is missing and the exits are prominent</h3><span class="pill p-high">High</span></header>
+    <ul>
+      <li><strong>No sign-in link.</strong> The page has no header at all. A returning user who lands here has no visible way in.</li>
+      <li><strong>"View on GitHub" sits beside "Sign Up Free" at equal size.</strong> For a non-technical visitor it is the wrong door, and it takes them off the site.</li>
+      <li><strong>The hero never shows handwriting becoming text.</strong> The lead image is a dashboard of notebook cards. The one thing a reMarkable owner wants to see, their kind of scrawl next to clean text, is five sections down and labelled "Powerful OCR Search".</li>
+      <li><strong>The scroll animation moves the layout.</strong> After 250px the hero re-centres, the screenshot scales to 170% and 850px of padding is added. It delays the content and shifts the page under the reader.</li>
+      <li><strong>The pain points are written as questions</strong> ("No automatic transcription to text?"), which reads as uncertain. State them.</li>
+      <li><strong>Screenshots are out of date.</strong> The integrations image shows Todoist as "Coming Soon" and a Billing menu item, both no longer true, and a Next.js development badge overlaps the agent status.</li>
+      <li><strong>"How It Works" starts with "Download Agent"</strong> while every button says "Sign Up". The steps and the action disagree about what comes first.</li>
+    </ul>
+    <p class="evidence">Evidence: <code>dashboard/app/page.tsx:40–46</code>, <code>:76–88</code>, <code>:170–184</code>, <code>:382–399</code>; <code>dashboard/public/integrations-screenshot.png</code></p>
+    <div class="fix"><strong>Fix</strong>
+      <ul>
+        <li>Add a slim header: logo, Pricing, FAQ, Sign in, Sign up.</li>
+        <li>Make the hero a split image: a real handwritten page on the left, its transcription on the right, a Notion page below. Remove the scroll transform.</li>
+        <li>Demote GitHub to a text link ("Open source on GitHub") under the button.</li>
+        <li>Reorder to: hero with proof, three steps beginning with "Create your account", integrations, pricing, FAQ. Cut "Everything You Need"; its content repeats the rest.</li>
+      </ul>
+    </div>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">F2</span><h3>Consent is asked twice</h3><span class="pill p-med">Medium</span></header>
+    <p>The sign-up page states that creating an account means agreeing to the terms. The first thing the new user then sees is a blocking modal asking them to tick a box and agree again, before the welcome screen. It is the first interaction with the product and it is legal paperwork.</p>
+    <p class="evidence">Evidence: <code>dashboard/app/sign-up/[[...sign-up]]/page.tsx:30</code>, <code>dashboard/app/dashboard/page.tsx:1269</code>, <code>dashboard/components/TermsAcceptanceModal.tsx</code></p>
+    <div class="fix"><strong>Fix</strong><p>Collect consent once, as a required checkbox in the sign-up form (Clerk supports a legal-consent field), and record it from the sign-up webhook. Keep the modal only for existing users when the terms change.</p></div>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">F3</span><h3>Wizard details that cost confidence</h3><span class="pill p-med">Medium</span></header>
+    <ul>
+      <li>The four progress dots have no labels, so the user cannot tell how much is left or what is coming. Label them: Download, Connect, Sync, Done.</li>
+      <li>Clicking Download moves to the next step after one second whether or not the download started (a blocked pop-up goes unnoticed). Keep the download link visible on step 2 as "Download didn't start?".</li>
+      <li>Steps 1 and 2 can be one screen. The install instructions are useful while the file downloads, not after another click.</li>
+      <li>The Gatekeeper reassurance is in small type inside step 3 of the list. It is the one moment of fear in the install; give it a small illustration of the actual dialog.</li>
+      <li>The project notes say the agent needs Full Disk Access to read the reMarkable folder. Neither the wizard nor the agent mentions it. Test on a clean Mac; if macOS prompts or silently blocks, this needs its own guided step.</li>
+    </ul>
+    <p class="evidence">Evidence: <code>SetupWizard.tsx:79–88</code>, <code>:97–116</code>, <code>:198–230</code></p>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">F4</span><h3>The agent speaks developer</h3><span class="pill p-med">Medium</span></header>
+    <ul>
+      <li>The menu offers "Open Web UI" and "Settings", which open the same window. Use one item: "Open rMirror".</li>
+      <li>Settings shows Environment (Production, Staging, Custom), API URL, and an email and password form next to the browser sign-in. Move these to a hidden developer section.</li>
+      <li>The sign-in bridge narrates "Exchanging for agent token…". Say "Connecting your Mac…".</li>
+      <li>After sign-in the result page offers "Close Window" and "Return to Dashboard", where "Dashboard" means the agent, not the website the user just came from. Go straight into the first-run screen from B3.</li>
+    </ul>
+    <p class="evidence">Evidence: <code>agent/app/tray/menu_bar.py:39–41</code>, <code>agent/app/web/templates/index.html</code> (Account Settings), <code>dashboard/app/agent/page.tsx:51</code>, <code>agent/app/web/templates/auth_result.html:76–83</code></p>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">F5</span><h3>After the first sync, the dashboard stops guiding</h3><span class="pill p-med">Medium</span></header>
+    <ul>
+      <li>The checklist's first item, "See your handwriting as text", has no button. Link it to the newest notebook that has finished transcription.</li>
+      <li>The sidebar always reads "Last sync: a few moments ago". The text is fixed, not measured. A user whose agent stopped a week ago is told everything is fine. Show the real time, and turn amber after a day of silence.</li>
+      <li>When no agent is connected the sidebar says "No Agent" with nothing to click. Make it "Set up the Mac app" and link to the wizard.</li>
+      <li>Page status is shown raw: "Awaiting Quota", "pending", "OCR Pending - Quota Exhausted". Use plain states: "Transcribing…", "Waiting for next month's pages (resets 1 Dec)".</li>
+      <li>A notebook page offers Export and Delete only. There is no sign of whether it reached Notion and no way to send it there, so the integration's value is invisible where the user spends their time.</li>
+    </ul>
+    <p class="evidence">Evidence: <code>dashboard/components/OnboardingChecklist.tsx:415–423</code>, <code>dashboard/components/Sidebar.tsx:206–211</code>, <code>dashboard/app/notebooks/[id]/page.tsx:201</code>, <code>:222</code></p>
+  </article>
+</section>
+
+<section id="integrations">
+  <h2>Connecting Notion and other destinations</h2>
+  <p>Leaving aside the broken link in B1, here is what a user who reaches the Integrations page experiences.</p>
+
+  <article class="finding">
+    <header><span class="fid">I1</span><h3>Three decisions where one would do</h3><span class="pill p-high">High</span></header>
+    <p>After authorising in Notion the user waits on a two-second "Successfully Connected!" screen, then must choose between "Select Existing Database" and "Create New Database", and if creating, name it and pick an optional parent page. Most first-time users have no existing database that fits and do not know what a parent page is for.</p>
+    <p class="evidence">Evidence: <code>dashboard/app/integrations/notion/callback/page.tsx:46–49</code>, <code>dashboard/app/integrations/notion/setup/page.tsx:189–321</code></p>
+    <div class="fix"><strong>Fix</strong><p>After authorisation, create "rMirror Notebooks" automatically and start syncing. Show one confirmation screen with the result and a quiet link, "Use a database I already have", for the few who need it.</p></div>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">I2</span><h3>No confirmation and no way to see the result</h3><span class="pill p-high">High</span></header>
+    <p>Choosing a database redirects to <code>/integrations?success=true</code>, but the Integrations page does not read that parameter, so nothing acknowledges the setup. The backend starts an initial sync of existing notebooks in the background and exposes its status, yet the screen shows only "Status: Connected". There is no link to the Notion database. The user has to open Notion and search to find out whether it worked.</p>
+    <p class="evidence">Evidence: <code>notion/setup/page.tsx:93</code>, <code>:121</code>; <code>dashboard/app/integrations/page.tsx:332–339</code>; <code>backend/app/api/notion_oauth.py</code> (initial sync status endpoint)</p>
+    <div class="fix"><strong>Fix</strong><p>End the flow on a result: "Sending 3 notebooks to Notion… 14 of 23 pages" with a prominent "Open in Notion" button. Keep that link permanently on the Notion row.</p></div>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">I3</span><h3>The page is organised by data type, not by destination</h3><span class="pill p-med">Medium</span></header>
+    <ul>
+      <li>Notion appears twice, as "Notion" under Notebooks and "Notion Todos" under Todos, each with its own setup. Show one Notion row with two switches: Notebooks and To-dos.</li>
+      <li>Obsidian's connect button produces an API key and the instruction to paste it into "the rMirror Obsidian plugin", with no link to the plugin and no install steps. Add both, numbered.</li>
+      <li>Services are shown as coloured letter tiles (N, O, T, R). Real logos are recognised faster and signal that the integration is real.</li>
+      <li>"Test Connection" is a debugging tool. Replace it with an automatic health state: "Working · last sent 2 hours ago" or "Needs reconnecting".</li>
+      <li>Disconnecting uses the browser's native confirm box, which looks unlike the rest of the product. Use the modal style already built for notebook deletion.</li>
+      <li>Integrations sits at the bottom of the sidebar under a spacer. For a product whose promise is "your notes in your tools", it deserves the second position.</li>
+    </ul>
+    <p class="evidence">Evidence: <code>dashboard/app/integrations/page.tsx:119</code>, <code>:322–634</code>; <code>dashboard/components/Sidebar.tsx:139–152</code></p>
+  </article>
+</section>
+
+<section id="style">
+  <h2>UI style</h2>
+  <p>The warm paper palette suits the subject and is applied consistently across dashboard, agent and email. It reads as a considered product, not a template. The weaknesses are legibility, hierarchy and a few inconsistencies.</p>
+
+  <article class="finding">
+    <header><span class="fid">S1</span><h3>Secondary text and buttons fall below contrast guidelines</h3><span class="pill p-high">High</span></header>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>Pairing</th><th>Used for</th><th>Ratio</th><th>WCAG AA (4.5 for text)</th></tr></thead>
+      <tbody>
+        <tr><td>Warm gray <code>#8b8680</code> on cream <code>#faf8f5</code></td><td>All descriptions, hints, dates, wizard instructions</td><td>3.4</td><td><span class="pill p-crit">Fails</span></td></tr>
+        <tr><td>Warm gray on white cards</td><td>Card body text</td><td>3.6</td><td><span class="pill p-crit">Fails</span></td></tr>
+        <tr><td>White on terracotta <code>#c85a54</code></td><td>Primary buttons, active nav</td><td>4.2</td><td><span class="pill p-high">Fails for small text</span></td></tr>
+        <tr><td>Sage green <code>#7a9c89</code> on white</td><td>"Connected", success text</td><td>3.0</td><td><span class="pill p-crit">Fails</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>The instructions a new user most needs to read are set in the faintest colour. Darken warm gray to about <code>#6b6661</code> and terracotta to about <code>#b24a44</code>; the character of the palette is unchanged. This report uses those two values.</p>
+    <p class="evidence">Evidence: <code>dashboard/app/globals.css:12–17</code></p>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">S2</span><h3>One colour does three jobs</h3><span class="pill p-med">Medium</span></header>
+    <p>Terracotta marks the current page in the sidebar, the selected view toggle and the primary action. On the dashboard that puts two or three solid terracotta blocks on screen, none of which is the thing to do next. Keep solid terracotta for the single main action on a screen. Show selection with a tinted background and dark text. The black "Connect Notion" button is a fourth style; give all connect buttons the standard primary look with the service logo inside.</p>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">S3</span><h3>Notebook cards are mostly empty</h3><span class="pill p-med">Medium</span></header>
+    <p>In grid view each card is a tall rectangle with three lines of text at the top and blank space below. Show the actual first-page thumbnail (a PDF is already generated for every page) with the title beneath. Handwriting thumbnails make notebooks recognisable at a glance and make the dashboard feel like the user's own notes.</p>
+  </article>
+
+  <article class="finding">
+    <header><span class="fid">S4</span><h3>Styling by hand produces small inconsistencies</h3><span class="pill p-med">Medium</span></header>
+    <p>Most styling is inline, with hover states set through mouse-event handlers (86 inline style blocks on the dashboard page alone). The consequences are visible to users: hover effects that do not respond to keyboard focus, no visible focus ring on most buttons, and sizes that drift between screens. A small set of shared Button, Card and StatusBadge components would fix this and make the changes in this report cheaper to ship.</p>
+    <p class="evidence">Evidence: <code>dashboard/app/dashboard/page.tsx</code>, <code>dashboard/components/OnboardingChecklist.tsx:78–121</code></p>
+  </article>
+</section>
+
+<section id="works">
+  <h2>What already works</h2>
+  <p>Keep these; several are the pattern to extend elsewhere.</p>
+  <ul>
+    <li><strong>The wizard detects the agent by itself.</strong> Step 2 polls every five seconds and advances with a short confirmation. Step 3 should behave the same way.</li>
+    <li><strong>The wizard resumes where the user left off</strong> after a refresh, using server-side progress.</li>
+    <li><strong>Agent sign-in happens in the browser</strong> with a "Continue as…" confirmation, so there is no password to type into an unfamiliar app.</li>
+    <li><strong>Running out of pages does not block uploads.</strong> Notebooks still arrive and are transcribed when the allowance resets. That is generous and well explained in the FAQ.</li>
+    <li><strong>The agent's "folder not found" screen</strong> tells the user exactly what to install and do.</li>
+    <li><strong>Lifecycle emails follow real progress</strong> (set-up reminder, first sync, first transcription, Notion, feedback) instead of a fixed calendar.</li>
+    <li><strong>"Start small" is the right advice</strong> for a metered product. It only needs the correct number.</li>
+  </ul>
+</section>
+
+<section id="target">
+  <h2>Proposed flow</h2>
+  <p>The aim is one continuous path with the product doing the detecting and choosing, and with each step ending on visible proof.</p>
+  <div class="compare">
+    <div class="now">
+      <span class="eyebrow">Today · about 12 steps, 3 interfaces</span>
+      <ol>
+        <li>Sign up</li>
+        <li>Accept terms in a modal</li>
+        <li>Download</li>
+        <li>Read install steps on a second screen</li>
+        <li>Install, launch, sign in</li>
+        <li>Find the menu-bar icon, open the window</li>
+        <li>Tick notebooks, Save Selection</li>
+        <li>Set a page limit, press Initial Sync</li>
+        <li>Click Continue, then Go to Dashboard</li>
+        <li>Wait, refresh, open a notebook</li>
+        <li>Find Integrations, connect Notion</li>
+        <li>Choose or create a database, then look in Notion</li>
+      </ol>
+    </div>
+    <div>
+      <span class="eyebrow">Proposed · 6 steps, each ends on proof</span>
+      <ol>
+        <li><strong>Sign up</strong> with consent as a checkbox in the form. Requirements stated beside the button.</li>
+        <li><strong>Download and install</strong> on one screen, instructions visible while the file downloads. The page waits and confirms "Mac connected".</li>
+        <li><strong>One button in the agent:</strong> "Sync 3 notebooks (23 pages)", opened automatically after sign-in.</li>
+        <li><strong>Watch it arrive.</strong> The website shows pages uploading, then opens the first transcribed page beside the handwriting.</li>
+        <li><strong>"Send this to Notion"</strong> offered on that page. One authorisation; the database is created automatically.</li>
+        <li><strong>"Open in Notion"</strong> shows the same note there. Setup is complete; mention To-dos, Obsidian and Todoist as next options.</li>
+      </ol>
+    </div>
+  </div>
+  <p>Placing the Notion prompt on the first transcribed page matters more than its wording. At that moment the user has just seen the product work and the next question in their head is "can I get this into my tools?".</p>
+</section>
+
+<section id="roadmap">
+  <h2>Roadmap</h2>
+  <div class="roadmap">
+    <div>
+      <h3>This week</h3>
+      <span class="small muted">Small changes, mostly copy and links</span>
+      <ul>
+        <li>Fix the three Notion links (B1)</li>
+        <li>Correct the wizard's 30-page message; align Pro details (B5)</li>
+        <li>Requirements line under the landing button (B4)</li>
+        <li>Sign-in link and header on landing (F1)</li>
+        <li>Remove the fixed "a few moments ago" (F5)</li>
+        <li>Darken gray and terracotta tokens (S1)</li>
+        <li>Replace stale landing screenshots (F1)</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Next 2–4 weeks</h3>
+      <span class="small muted">The core of the conversion gain</span>
+      <ul>
+        <li>Wizard waits for the first notebook and shows progress (B2)</li>
+        <li>Agent first-run screen with preselection and one button (B3)</li>
+        <li>Notion: auto-create database, progress, "Open in Notion" (I1, I2)</li>
+        <li>Single consent at sign-up (F2)</li>
+        <li>Merge wizard steps 1 and 2; label progress (F3)</li>
+        <li>New hero with handwriting-to-text proof (F1)</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Later</h3>
+      <span class="small muted">Retention and polish</span>
+      <ul>
+        <li>Per-notebook destination status and "Send to Notion" (F5)</li>
+        <li>Integrations page by destination, real logos (I3)</li>
+        <li>Page thumbnails on notebook cards (S3)</li>
+        <li>Shared Button, Card, StatusBadge components (S4)</li>
+        <li>Windows waitlist capture; email-me-the-link on mobile (B4)</li>
+        <li>Hide developer settings in the agent (F4)</li>
+      </ul>
+    </div>
+  </div>
+  <h3>How to tell whether it worked</h3>
+  <p>The product already records most of the events needed (<code>account_created</code>, <code>agent_downloaded</code>, <code>onboarding_step</code>, <code>integration_setup_started</code>, <code>integration_connected</code>, <code>notion_database_configured</code>). Build one funnel in Umami from them and add the two that are missing: agent connected and first notebook received. Track three numbers before and after: the share of sign-ups who get a first notebook within 24 hours, the median time from sign-up to first transcribed page, and the share of users with a notebook who connect a destination within seven days.</p>
+</section>
+
+<section id="method">
+  <h2>Method and limits</h2>
+  <p>This is an expert review of the code and shipped assets on the <code>main</code> branch: the landing page, sign-up, setup wizard, dashboard, notebook view, integrations and Notion setup, the Mac agent's menu and local window, the sign-in bridge, and the onboarding emails. Screens were assessed from their source and from the screenshots in <code>dashboard/public</code>.</p>
+  <ul>
+    <li>I did not run the live product or install the agent on a Mac, so timing, macOS permission prompts and the real Notion authorisation screen were not observed. The Full Disk Access point in F3 needs a clean-machine test.</li>
+    <li>No analytics data was available. Severity ratings are judgement based on the flow, not measured drop-off. The funnel above will show which step loses the most people.</li>
+    <li>No user sessions were observed. Five moderated first-run sessions with reMarkable owners who have not seen the product would confirm or reorder these priorities quickly.</li>
+    <li>Contrast ratios in S1 are calculated from the colour values in <code>globals.css</code>.</li>
+  </ul>
+</section>
+</main>
+</div>
+</body>
+</html>
