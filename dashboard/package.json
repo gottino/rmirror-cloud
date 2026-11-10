@@ -14,10 +14,10 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@clerk/nextjs": "^6.35.4",
+    "@clerk/nextjs": "^6.39.8",
     "@tailwindcss/typography": "^0.5.19",
     "lucide-react": "^0.555.0",
-    "next": "^15.0.0",
+    "next": "^15.5.29",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
