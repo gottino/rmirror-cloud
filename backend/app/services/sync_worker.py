@@ -127,6 +127,8 @@ class SyncWorker:
         self.running = False
         self._task: Optional[asyncio.Task] = None
         self._last_drip_check: Optional[float] = None
+        # Round-robin cursor (last user id handled) for retroactive OCR
+        self._pending_quota_cursor = 0
 
     async def start(self):
         """Start the background worker."""
@@ -163,6 +165,9 @@ class SyncWorker:
 
                 # Rebuild combined notebook PDFs that have gone quiet (debounced)
                 await self._process_dirty_notebook_pdfs()
+
+                # OCR pages left PENDING_QUOTA once their owner's quota has room again
+                await self._process_pending_quota_pages()
 
                 # Check drip emails every hour
                 if self._last_drip_check is None or (time.time() - self._last_drip_check) > 3600:
@@ -285,6 +290,29 @@ class SyncWorker:
                 logger.info("Rebuilt %d combined notebook PDF(s)", rebuilt)
         except Exception as e:
             logger.error(f"Error rebuilding dirty notebook PDFs: {e}", exc_info=True)
+        finally:
+            db.close()
+
+    async def _process_pending_quota_pages(self):
+        """Retroactive OCR for pages uploaded while their owner's quota was exhausted.
+
+        Quota resets happen lazily in request code, which must not start
+        background work; instead each poll looks for users that have
+        ``PENDING_QUOTA`` pages and quota room again, and OCRs a bounded batch
+        of their pages, newest first. Users are claimed per worker process, so
+        running several uvicorn workers is safe.
+        """
+        from app.jobs.process_pending_pages import process_pending_quota_pages
+
+        db: Session = SessionLocal()
+        try:
+            processed, self._pending_quota_cursor = await process_pending_quota_pages(
+                db, after_user_id=self._pending_quota_cursor
+            )
+            if processed:
+                logger.info("Retroactively OCR'd %d pending-quota page(s)", processed)
+        except Exception as e:
+            logger.error(f"Error processing pending-quota pages: {e}", exc_info=True)
         finally:
             db.close()
 

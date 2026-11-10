@@ -78,9 +78,7 @@ async def reset_quota_and_process(email: str, trigger_processing: bool = True) -
 
         # Reset quota
         print("\n🔄 Resetting quota...")
-        quota = quota_service.reset_quota(
-            db, user.id, trigger_retroactive_processing=False  # We'll do it manually
-        )
+        quota = quota_service.reset_quota(db, user.id)
         print(f"   ✅ Quota reset to {quota.used}/{quota.limit}")
         print(f"   New period: {quota.period_start.date()} to {quota.reset_at.date()}")
 

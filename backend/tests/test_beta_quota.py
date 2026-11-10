@@ -92,7 +92,7 @@ def test_beta_user_quota_reset_preserves_200_limit(db: Session):
     db.commit()
 
     # Reset quota
-    quota = reset_quota(db, user.id, trigger_retroactive_processing=False)
+    quota = reset_quota(db, user.id)
 
     assert quota.used == 0
     assert quota.limit == 200
