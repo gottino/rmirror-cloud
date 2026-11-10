@@ -146,20 +146,27 @@ echo -e "${YELLOW}8/10 Deploying Next.js dashboard...${NC}"
 if [ -d "$DASHBOARD_DIR" ]; then
     cd "$DASHBOARD_DIR" || { echo -e "${RED}❌ Failed to cd to $DASHBOARD_DIR${NC}"; exit 1; }
 
-    # Load nvm (Node Version Manager)
+    # Load nvm (Node Version Manager). --no-use: when nvm's `default` alias
+    # points at a version that isn't installed, sourcing nvm.sh returns 3 and
+    # `set -e` silently aborted the deploy here (2026-11-10). Use the newest
+    # installed Node directly instead.
     export NVM_DIR="$HOME/.nvm"
     if [ -s "$NVM_DIR/nvm.sh" ]; then
-        \. "$NVM_DIR/nvm.sh"
-        echo -e "${BLUE}   Using Node.js $(node --version) and npm $(npm --version)${NC}"
+        \. "$NVM_DIR/nvm.sh" --no-use || true
     else
         echo -e "${RED}❌ nvm not found! Install it first:${NC}"
         echo -e "${RED}   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash${NC}"
         echo -e "${RED}   Then run: nvm install --lts${NC}"
         exit 1
     fi
-
-    # Make pm2/node from nvm reachable even without an nvm default alias
-    export PATH="$NVM_DIR/versions/node/$(ls "$NVM_DIR/versions/node" 2>/dev/null | tail -1)/bin:$PATH"
+    export PATH="$NVM_DIR/versions/node/$(ls "$NVM_DIR/versions/node" 2>/dev/null | sort -V | tail -1)/bin:$PATH"
+    for cmd in node npm pm2; do
+        if ! command -v "$cmd" > /dev/null; then
+            echo -e "${RED}❌ $cmd not found in $NVM_DIR/versions/node/*/bin${NC}"
+            exit 1
+        fi
+    done
+    echo -e "${BLUE}   Using Node.js $(node --version), npm $(npm --version), pm2 $(pm2 --version 2>/dev/null | tail -1)${NC}"
 
     DASHBOARD_TARBALL="/tmp/dashboard-production.tgz"
     if [ -f "$DASHBOARD_TARBALL" ]; then
