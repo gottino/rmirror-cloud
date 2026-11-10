@@ -159,7 +159,9 @@ jobs:
   # Run E2E tests against staging after deployment
   e2e-tests:
     needs: [deploy]
-    runs-on: ubuntu-latest
+    # Pinned: Playwright 1.58 cannot install Chromium on ubuntu-latest (26.04).
+    # Move back to ubuntu-latest once Playwright is upgraded.
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
