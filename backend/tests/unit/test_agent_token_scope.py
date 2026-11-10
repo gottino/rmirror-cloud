@@ -118,60 +118,28 @@ def test_agent_token_allowed_on_agent_endpoint(scoped_client, scoped_user):
 
 
 # ---------------------------------------------------------------------------
-# Non-agent tokens (dashboard / legacy sessions) keep full access
+# HS256 tokens that are not agent tokens must not authenticate at all.
+# Before this was enforced, a token from the old /auth/login endpoint (no
+# ``type`` claim) was treated as a full dashboard session.
 # ---------------------------------------------------------------------------
 
 
-def test_session_token_allowed_on_session_only_endpoint(scoped_client, scoped_user):
-    token = _make_token(scoped_user.id, token_type=None)
-    resp = scoped_client.get("/session-only", headers=_auth(token))
-    assert resp.status_code == 200
-    assert resp.json()["user_id"] == scoped_user.id
+@pytest.mark.parametrize("token_type", [None, "access", "session", "invite"])
+@pytest.mark.parametrize("path", ["/agent-allowed", "/session-only", "/router-blocked"])
+def test_non_agent_hs256_token_is_rejected(scoped_client, scoped_user, token_type, path):
+    token = _make_token(scoped_user.id, token_type=token_type)
+    resp = scoped_client.get(path, headers=_auth(token))
+    assert resp.status_code == 401
 
 
-def test_session_token_allowed_on_router_level_guard(scoped_client, scoped_user):
-    token = _make_token(scoped_user.id, token_type=None)
-    resp = scoped_client.get("/router-blocked", headers=_auth(token))
-    assert resp.status_code == 200
-
-
-# ---------------------------------------------------------------------------
-# Legacy auth chain (decode_access_token) — used by todos/users routers
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def legacy_client(db: Session) -> Generator[TestClient, None, None]:
-    """App mounting the real legacy-auth agent-scope guard on a test endpoint."""
-    from app.auth.dependencies import get_current_active_user, reject_agent_token_legacy
-
-    app = FastAPI()
-
-    @app.get("/legacy-allowed")
-    async def legacy_allowed(user: User = Depends(get_current_active_user)):
-        return {"user_id": user.id}
-
-    @app.get("/legacy-blocked", dependencies=[Depends(reject_agent_token_legacy)])
-    async def legacy_blocked():
-        return {"ok": True}
-
-    def _get_db() -> Generator[Session, None, None]:
-        yield db
-
-    app.dependency_overrides[get_db] = _get_db
-    yield TestClient(app)
-
-
-def test_agent_token_blocked_on_legacy_router_guard(legacy_client, scoped_user):
-    token = _make_token(scoped_user.id, token_type="agent")
-    resp = legacy_client.get("/legacy-blocked", headers=_auth(token))
-    assert resp.status_code == 403
-
-
-def test_legacy_session_token_allowed_on_legacy_router_guard(legacy_client, scoped_user):
-    token = _make_token(scoped_user.id, token_type=None)
-    resp = legacy_client.get("/legacy-blocked", headers=_auth(token))
-    assert resp.status_code == 200
+def test_hs256_token_signed_with_wrong_key_is_rejected(scoped_client, scoped_user):
+    token = jwt.encode(
+        {"sub": str(scoped_user.id), "type": "agent", "exp": datetime.utcnow() + timedelta(days=1)},
+        "not-the-server-secret",
+        algorithm="HS256",
+    )
+    resp = scoped_client.get("/agent-allowed", headers=_auth(token))
+    assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -239,9 +207,8 @@ def _dependency_calls(dependant) -> set:
 
 def _is_agent_guarded(route) -> bool:
     from app.auth.clerk import get_clerk_session_user, reject_agent_token
-    from app.auth.dependencies import reject_agent_token_legacy
 
-    guards = {get_clerk_session_user, reject_agent_token, reject_agent_token_legacy}
+    guards = {get_clerk_session_user, reject_agent_token}
     return bool(_dependency_calls(route.dependant) & guards)
 
 
@@ -276,6 +243,7 @@ def real_client(db: Session) -> Generator[TestClient, None, None]:
     [
         ("GET", f"{API}/admin/users"),
         ("DELETE", f"{API}/notebooks/999999"),
+        ("GET", f"{API}/todos/"),
     ],
 )
 def test_agent_token_gets_403_from_real_app(real_client, scoped_user, method, path):
@@ -283,3 +251,9 @@ def test_agent_token_gets_403_from_real_app(real_client, scoped_user, method, pa
     resp = real_client.request(method, path, headers=_auth(token))
     assert resp.status_code == 403
     assert "Agent tokens" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize("path", [f"{API}/auth/register", f"{API}/auth/login"])
+def test_password_auth_endpoints_are_gone(real_client, path):
+    resp = real_client.post(path, json={"email": "someone@example.com", "password": "hunter22"})
+    assert resp.status_code == 404

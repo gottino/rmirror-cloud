@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_active_user, reject_agent_token_legacy
+from app.auth.clerk import get_clerk_active_user, reject_agent_token
 from app.database import get_db
 from app.models.notebook import Notebook
 from app.models.todo import Todo
@@ -17,7 +17,7 @@ from app.processors.todo_extractor import process_notebook_todos
 
 logger = logging.getLogger(__name__)
 # Todos are dashboard-only; the Mac agent never calls them, so block agent tokens.
-router = APIRouter(tags=["todos"], dependencies=[Depends(reject_agent_token_legacy)])
+router = APIRouter(tags=["todos"], dependencies=[Depends(reject_agent_token)])
 
 
 # Schemas
@@ -76,7 +76,7 @@ class TodoStatsResponse(BaseModel):
 # Endpoints
 @router.get("/", response_model=list[TodoSchema])
 async def list_todos(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
     notebook_id: Optional[int] = Query(None, description="Filter by notebook ID"),
     completed: Optional[bool] = Query(None, description="Filter by completion status"),
@@ -125,7 +125,7 @@ async def list_todos(
 @router.get("/{todo_id}", response_model=TodoSchema)
 async def get_todo(
     todo_id: int,
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Get a specific todo by ID."""
@@ -160,7 +160,7 @@ async def get_todo(
 async def update_todo(
     todo_id: int,
     request: TodoUpdateRequest,
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Update a todo (e.g., mark as completed)."""
@@ -205,7 +205,7 @@ async def update_todo(
 @router.delete("/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_todo(
     todo_id: int,
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Delete a todo."""
@@ -228,7 +228,7 @@ async def delete_todo(
 async def extract_todos(
     request: TodoExtractionRequest,
     background_tasks: BackgroundTasks,
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
@@ -295,7 +295,7 @@ async def _run_todo_extraction(
 
 @router.get("/stats/summary", response_model=TodoStatsResponse)
 async def get_todo_stats(
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Get todo statistics for the current user."""
