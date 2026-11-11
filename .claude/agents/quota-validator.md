@@ -14,11 +14,11 @@ Validate quota system changes to ensure correct enforcement, graceful degradatio
 ## Quota System Architecture
 
 ### Phase 1 Implementation (Current)
-- **Free tier**: 30 pages/month (OCR quota)
+- **Free tier**: 30 pages/month (OCR quota); beta users on the free tier get 200; pro 500; enterprise unlimited (`QUOTA_LIMITS` in `backend/app/services/quota_service.py`)
 - **Tables**: `subscriptions`, `quota_usage`
-- **Enforcement**: Backend checks quota before OCR
+- **Enforcement**: Backend checks quota before OCR (`POST /processing/rm-file`)
 - **Graceful degradation**: Accept uploads when exhausted, skip OCR, set `PENDING_QUOTA` status
-- **Retroactive processing**: When quota resets, process newest pages first
+- **Retroactive processing**: When quota resets, the sync worker (`app/jobs/process_pending_pages.py`) processes newest pages first, a few users and pages per poll
 - **Email notifications**: 90% warning, 100% exceeded
 - **Frontend**: Quota display in agent + dashboard, upgrade CTAs, `QuotaExceededModal` on 402
 
@@ -30,7 +30,7 @@ current_period_start, current_period_end,
 stripe_customer_id (nullable, Phase 2)
 
 -- quota_usage table
-user_id, quota_type (ocr_pages), limit, used,
+user_id, quota_type (ocr), limit (-1 = unlimited), used,
 reset_at, period_start
 ```
 
@@ -38,15 +38,13 @@ reset_at, period_start
 
 ### 1. Quota Enforcement Flow
 - [ ] Check quota BEFORE consuming resources (OCR, integration sync)
-- [ ] Return HTTP 402 when quota exhausted
-- [ ] HTTP 402 response includes quota details:
+- [ ] Uploads are not rejected: OCR is skipped and the page is stored as `PENDING_QUOTA`; at 100 pending pages the upload gets HTTP 429 (`pending_quota_limit`)
+- [ ] HTTP 402 is returned where a feature needs quota (notebook export) and includes quota details:
   ```json
   {
-    "detail": "OCR quota exceeded",
-    "quota": {
-      "used": 30,
-      "limit": 30,
-      "reset_at": "2026-02-01T00:00:00Z"
+    "detail": {
+      "message": "Quota exceeded - export unavailable",
+      "quota": {"used": 30, "limit": 30, "reset_at": "2026-02-01T00:00:00Z"}
     }
   }
   ```
@@ -64,9 +62,10 @@ reset_at, period_start
 ### 3. Retroactive OCR Processing
 - [ ] When quota resets, process `PENDING_QUOTA` pages
 - [ ] Process newest pages first (ORDER BY created_at DESC)
+- [ ] Runs in the sync worker, claimed per user via a Postgres advisory lock; request code (e.g. `reset_quota()`) never spawns background tasks
 - [ ] Respect new quota limits during retroactive processing
 - [ ] Update page status to `COMPLETED` after OCR
-- [ ] Trigger integration syncs after retroactive OCR
+- [ ] Integration syncs after retroactive OCR: `app/jobs/process_pending_pages.py` does not queue them today; flag it if a change assumes it does
 
 ### 4. Email Notifications
 - [ ] 90% warning sent once per period
@@ -77,7 +76,7 @@ reset_at, period_start
 
 ### 5. Frontend Integration
 - [ ] Agent shows quota display (used/limit)
-- [ ] Color-coded status (green/amber/red)
+- [ ] Color-coded status (green/amber/red; thresholds 67% and 91%, see `QUOTA_THRESHOLDS` in `dashboard/lib/constants.ts`)
 - [ ] Dashboard quota UI with usage bars
 - [ ] HTTP 402 triggers `QuotaExceededModal`
 - [ ] Modal shows quota details and upgrade CTA
@@ -85,15 +84,16 @@ reset_at, period_start
 
 ### 6. Database Integrity
 - [ ] UNIQUE constraint on `subscriptions.user_id`
-- [ ] Composite index on `quota_usage(user_id, quota_type)`
+- [ ] Composite UNIQUE index `idx_quota_user_type` on `quota_usage(user_id, quota_type)` (migration `2d86de0d1c3c`)
 - [ ] Foreign key constraints maintained
-- [ ] Quota resets respect `period_start` and `period_end`
+- [ ] Quota resets respect `period_start` and `reset_at`
 
 ### 7. QuotaService Implementation
-- [ ] `check_quota(user_id, quota_type, amount)` - raises HTTPException 402
-- [ ] `consume_quota(user_id, quota_type, amount)` - increments used
-- [ ] `get_quota_status(user_id, quota_type)` - returns usage details
-- [ ] Thread-safe (async or proper locking)
+- [ ] Module-level functions in `quota_service.py` (no `QuotaService` class), all take `db` first
+- [ ] `check_quota(db, user_id, quota_type, amount)` - returns bool, never raises
+- [ ] `consume_quota(db, user_id, quota_type, amount)` - increments used, raises `QuotaExceededError`
+- [ ] `get_quota_status(db, user_id, quota_type)` - returns usage details
+- [ ] Safe under concurrent workers (row locking or proper claim)
 - [ ] Handles missing quota records gracefully
 
 ## Validation Process
@@ -104,8 +104,9 @@ reset_at, period_start
    ```
 
 2. **Check enforcement points**:
-   - OCR endpoint: backend/app/api/ocr.py
-   - Integration sync: backend/app/services/integrations/
+   - OCR on upload: backend/app/api/processing.py (`/processing/rm-file`)
+   - Retroactive OCR: backend/app/jobs/process_pending_pages.py
+   - Integration sync: backend/app/integrations/, backend/app/services/sync_worker.py
    - QuotaService: backend/app/services/quota_service.py
 
 3. **Verify database schema**:
@@ -115,18 +116,18 @@ reset_at, period_start
 
 4. **Test quota flow** (if changes are testable):
    ```bash
-   cd backend && poetry run pytest tests/test_quota.py -v
+   cd backend && poetry run pytest tests/test_quota_service.py tests/test_quota_integration.py tests/unit/test_pending_quota_worker.py -v
    ```
 
 5. **Validate frontend handling**:
-   - Check dashboard/app/components/QuotaExceededModal.tsx
-   - Check agent/app/ui/quota_display.py
+   - Check dashboard/components/QuotaExceededModal.tsx
+   - Check the quota card in agent/app/web/templates/index.html and `CloudSync.format_quota_display()` in agent/app/sync/cloud_sync.py
 
 ## Common Quota System Bugs to Catch
 
 ### Critical
 - Consuming quota before operation succeeds (leads to incorrect counts)
-- Not returning HTTP 402 (frontend won't show quota modal)
+- Not returning HTTP 402 where a feature needs quota (frontend won't show quota modal)
 - Integration syncs not blocked when quota exhausted
 - Retroactive processing not respecting new quota limits
 
@@ -147,16 +148,17 @@ reset_at, period_start
 ## Quota System Validation
 
 ### ✅ Enforcement Flow
-- Quota checked before OCR in `/api/ocr/process` endpoint
-- HTTP 402 returned with proper quota details
+- Quota checked before OCR in `/processing/rm-file`
+- Page stored as PENDING_QUOTA when exhausted; 402 with quota details on export
 - Consume quota after successful OCR
 
 ### ⚠️ Graceful Degradation
 - **Issue**: Integration sync not blocked when quota exhausted
-- **Location**: backend/app/services/integrations/notion_sync.py:123
-- **Fix**: Add quota check before sync:
+- **Location**: backend/app/api/processing.py:123
+- **Fix**: Add quota check before queueing the sync:
   ```python
-  await quota_service.check_quota(user_id, "ocr_pages", 0)
+  if not quota_service.check_quota(db, user_id):
+      return  # skip integration sync
   ```
 
 ### ✅ Retroactive Processing
