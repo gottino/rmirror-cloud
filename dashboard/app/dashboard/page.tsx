@@ -17,6 +17,7 @@ import { OnboardingChecklist, getDefaultOnboardingSteps } from '@/components/Onb
 import { TermsAcceptanceModal } from '@/components/TermsAcceptanceModal';
 import { DeleteNotebookModal } from '@/components/DeleteNotebookModal';
 import { trackEvent } from '@/lib/analytics';
+import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import { Skeleton } from '@/components/Skeleton';
 import { memo } from 'react';
 
@@ -170,7 +171,8 @@ const SidebarLogo = memo(function SidebarLogo({ onClose }: { onClose?: () => voi
 });
 
 function DashboardContent() {
-  const { getToken, isSignedIn, userId } = useAuth();
+  const { isSignedIn, userId } = useAuth();
+  const getToken = useApiToken();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tree, setTree] = useState<NotebookTreeNode[]>([]);
@@ -224,16 +226,14 @@ function DashboardContent() {
   }, []);
 
   // Development mode bypass
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  const isDevelopmentMode = isDevAuthMode();
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
   const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
   const isAdmin = isDevelopmentMode || (userId && ADMIN_USER_IDS.includes(userId));
 
   const handleDownloadClick = async () => {
     if (effectiveIsSignedIn) {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (token) {
         await trackAgentDownload(token);
       }
@@ -253,9 +253,7 @@ function DashboardContent() {
     try {
       setError(null);
       // In dev mode, get JWT token from env var or localStorage
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) {
         throw new Error('Failed to get authentication token');
       }
@@ -279,20 +277,11 @@ function DashboardContent() {
     setDeleteModalOpen(true);
   };
 
-  const getAuthToken = async (): Promise<string | null> => {
-    if (isDevelopmentMode) {
-      return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
-    }
-    return await getToken();
-  };
-
   const fetchAgentStatus = async () => {
     if (!effectiveIsSignedIn) return;
 
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const status = await getAgentStatus(token);
@@ -306,9 +295,7 @@ function DashboardContent() {
     if (!effectiveIsSignedIn) return;
 
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const quotaData = await getQuotaStatus(token);
@@ -322,9 +309,7 @@ function DashboardContent() {
     if (!effectiveIsSignedIn) return;
 
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const data = await getOnboardingProgress(token);
@@ -338,9 +323,7 @@ function DashboardContent() {
     if (!effectiveIsSignedIn) return;
 
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const data = await getLegalStatus(token);
@@ -351,9 +334,7 @@ function DashboardContent() {
   };
 
   const handleAcceptTerms = async () => {
-    const token = isDevelopmentMode
-      ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-      : await getToken();
+    const token = await getToken();
     if (!token) return;
 
     const data = await acceptTerms(token);
@@ -364,9 +345,7 @@ function DashboardContent() {
     setOnboarding(prev => prev ? { ...prev, onboarding_dismissed: true } : null);
     trackEvent({ name: 'onboarding_dismissed' });
     if (effectiveIsSignedIn) {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (token) {
         await dismissOnboarding(token);
       }
@@ -392,9 +371,7 @@ function DashboardContent() {
     setIsSearchMode(true);
 
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
 
       if (!token) {
         console.error('No auth token available');
@@ -429,7 +406,7 @@ function DashboardContent() {
     } finally {
       setSearchLoading(false);
     }
-  }, [isDevelopmentMode, getToken, currentFolderPath, dateRange, getDateFromRange]);
+  }, [getToken, currentFolderPath, dateRange, getDateFromRange]);
 
   // Fetch the next page of search results (same query, folder and date filter)
   const loadMoreSearchResults = useCallback(async () => {
@@ -439,9 +416,7 @@ function DashboardContent() {
     const generation = searchGeneration.current;
     setSearchLoadingMore(true);
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const more = await searchNotebooks(token, params.query, {
@@ -463,7 +438,7 @@ function DashboardContent() {
     } finally {
       if (generation === searchGeneration.current) setSearchLoadingMore(false);
     }
-  }, [isDevelopmentMode, getToken, searchResults, searchLoadingMore]);
+  }, [getToken, searchResults, searchLoadingMore]);
 
   const handleSearch = async (query: string) => {
     // Clear previous timer
@@ -984,13 +959,7 @@ function DashboardContent() {
             />
           ) : notebooks.length === 0 ? (
             <SetupWizard
-              getToken={async () => {
-                if (isDevelopmentMode) {
-                  return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
-                }
-                return await getToken();
-              }}
-              isDevelopmentMode={isDevelopmentMode}
+              getToken={getToken}
               onComplete={() => {
                 fetchNotebooks();
               }}
@@ -1329,7 +1298,7 @@ function DashboardContent() {
           onClose={() => setDeleteModalOpen(false)}
           notebook={deleteTarget}
           hasNotion={onboarding?.has_notion ?? false}
-          getToken={getAuthToken}
+          getToken={getToken}
           onDeleted={() => fetchNotebooks()}
         />
       </div>

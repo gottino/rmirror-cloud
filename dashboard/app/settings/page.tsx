@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Settings, Download, Trash2, AlertTriangle, Menu, Loader2 } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
+import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import { trackEvent } from '@/lib/analytics';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
@@ -20,7 +21,8 @@ interface DataSummary {
 }
 
 export default function SettingsPage() {
-  const { getToken, isSignedIn, signOut } = useAuth();
+  const { isSignedIn, signOut } = useAuth();
+  const getToken = useApiToken();
   const { user: clerkUser } = useUser();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -33,16 +35,13 @@ export default function SettingsPage() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
 
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  const isDevelopmentMode = isDevAuthMode();
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
 
   const getAuthToken = async (): Promise<string> => {
-    if (isDevelopmentMode) {
-      return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
-    }
     const token = await getToken();
-    if (!token) throw new Error('Failed to get authentication token');
-    return token;
+    if (!token && !isDevelopmentMode) throw new Error('Failed to get authentication token');
+    return token ?? '';
   };
 
   useEffect(() => {

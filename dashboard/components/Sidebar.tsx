@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import Image from 'next/image';
 import { HomeIcon, Puzzle, X, MessageSquare, Mail, Shield } from 'lucide-react';
 import { useAuth } from '@clerk/nextjs';
+import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import { useEffect, useState } from 'react';
 import { getAgentStatus, type AgentStatus } from '@/lib/api';
 
@@ -17,11 +18,12 @@ const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',')
 
 export default function Sidebar({ open = true, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { getToken, isSignedIn, userId } = useAuth();
+  const { isSignedIn, userId } = useAuth();
+  const getToken = useApiToken();
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
 
   // Development mode bypass — only works on localhost, backend still enforces auth
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
+  const isDevelopmentMode = isDevAuthMode()
     && typeof window !== 'undefined' && window.location.hostname === 'localhost';
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
 
@@ -29,9 +31,7 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
     if (!effectiveIsSignedIn) return;
 
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
 
       if (!token) return;
 

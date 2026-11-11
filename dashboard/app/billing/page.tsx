@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth } from '@clerk/nextjs';
+import { isDevAuthMode } from '@/lib/useApiToken';
 import UserMenu from '@/components/UserMenu';
 import { useEffect } from 'react';
 import { CheckCircle, Menu } from 'lucide-react';
@@ -16,7 +17,7 @@ export default function BillingPage() {
   const { quota, loading } = useQuota();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  const isDevelopmentMode = isDevAuthMode();
 
   useEffect(() => {
     trackEvent({ name: 'billing_page_viewed' });

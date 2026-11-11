@@ -10,6 +10,7 @@ import UserMenu from '@/components/UserMenu';
 import { getNotebook, getNotebookPages, getIntegrations, QuotaExceededError, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
 import { useNotebookPages, useLoadMoreSentinel, type FetchPagesWindow } from '@/lib/useNotebookPages';
 import { useObjectUrl } from '@/lib/useObjectUrl';
+import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
@@ -364,7 +365,8 @@ function NotebookPageContent() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { getToken, isSignedIn } = useAuth();
+  const { isSignedIn } = useAuth();
+  const getToken = useApiToken();
   const [notebook, setNotebook] = useState<NotebookWithPages | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -396,19 +398,17 @@ function NotebookPageContent() {
   const searchDebounceTimer = useRef<NodeJS.Timeout>();
 
   // Development mode: use JWT token from localStorage
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  const isDevelopmentMode = isDevAuthMode();
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
 
   // Always fetch a fresh token at the point of use (Clerk tokens are short-lived)
   const getFreshToken = useCallback(async (): Promise<string> => {
-    const token = isDevelopmentMode
-      ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-      : await getToken();
+    const token = await getToken();
     if (!token) {
       throw new Error('Failed to get authentication token');
     }
     return token;
-  }, [isDevelopmentMode, getToken]);
+  }, [getToken]);
 
   useEffect(() => {
     if (!effectiveIsSignedIn) {
@@ -617,9 +617,7 @@ function NotebookPageContent() {
       setIsNotebookSearchMode(true);
 
       try {
-        const token = isDevelopmentMode
-          ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-          : await getToken();
+        const token = await getToken();
 
         if (!token || !notebook) return;
 
@@ -635,7 +633,7 @@ function NotebookPageContent() {
         setNotebookSearchLoading(false);
       }
     }, 300);
-  }, [isDevelopmentMode, getToken, notebook]);
+  }, [getToken, notebook]);
 
   const clearNotebookSearch = () => {
     setNotebookSearchQuery('');
@@ -1153,11 +1151,7 @@ function NotebookPageContent() {
           page_count: totalPages,
         } : null}
         hasNotion={hasNotion}
-        getToken={async () => {
-          const isDev = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
-          if (isDev) return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
-          return await getToken();
-        }}
+        getToken={getToken}
         onDeleted={() => router.push('/dashboard')}
       />
     </div>
