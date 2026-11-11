@@ -636,6 +636,51 @@ class TestBatchLeaseAndShutdown:
         assert seen[second.id] > datetime.utcnow() - timedelta(minutes=1)
 
     @pytest.mark.asyncio
+    async def test_lease_renewal_is_committed_before_item_runs(self, db, user, queue_item):
+        """The renewed started_at must be durable (visible to other sessions, no row
+        lock held) while the item runs. The shared in-memory connection hides
+        uncommitted writes from a second session, so discard the open transaction
+        and read back: only a committed renewal survives. Time is shifted +1h after
+        the claim commit so the renewal value differs from the claim value."""
+        import app.services.sync_worker as sw
+
+        offset = {"hours": 0}
+        real_datetime = datetime
+
+        class ShiftedDatetime(real_datetime):
+            @classmethod
+            def utcnow(cls):
+                return real_datetime.utcnow() + timedelta(hours=offset["hours"])
+
+        real_commit = db.commit
+        commits = []
+
+        def counting_commit():
+            real_commit()
+            commits.append(1)
+            if len(commits) == 2:  # reclaim, then the batch claim
+                offset["hours"] = 1
+
+        seen = {}
+
+        async def fake_process(session, item):
+            session.rollback()
+            seen["started_at"] = (
+                session.query(SyncQueue.started_at).filter(SyncQueue.id == item.id).scalar()
+            )
+            item.status = "completed"
+            real_commit()
+
+        with patch("app.services.sync_worker.SessionLocal", return_value=db), \
+             patch.object(db, "close"), \
+             patch.object(db, "commit", side_effect=counting_commit), \
+             patch.object(sw, "datetime", ShiftedDatetime), \
+             patch.object(SyncWorker, "_process_queue_item", side_effect=fake_process):
+            await SyncWorker()._process_pending_items()
+
+        assert seen["started_at"] > real_datetime.utcnow() + timedelta(minutes=30)
+
+    @pytest.mark.asyncio
     async def test_item_reclaimed_elsewhere_is_not_run(self, db, user, queue_item):
         first, second = self._two_items(db, user, queue_item)
         ran = []
