@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from app.models.page import OcrStatus, Page
 from app.models.sync_record import IntegrationConfig, SyncItemType, SyncQueue, SyncRecord
 from app.models.user import User
 from app.services.sync_worker import apply_sync_failure, apply_sync_result
+from app.utils.files import parse_uuid
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["sync"])
@@ -79,6 +80,16 @@ class NotebookMetadataItem(BaseModel):
     version: Optional[int] = None
     last_opened: Optional[str] = None
     last_opened_page: Optional[int] = None
+
+    @field_validator("uuid")
+    @classmethod
+    def _validate_uuid(cls, v: str) -> str:
+        return parse_uuid(v)
+
+    @field_validator("pages")
+    @classmethod
+    def _validate_pages(cls, v: List[str]) -> List[str]:
+        return [parse_uuid(p) for p in v]
 
 
 class MetadataSyncRequest(BaseModel):

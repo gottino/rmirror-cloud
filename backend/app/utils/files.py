@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+import re
 from typing import BinaryIO, Optional
 
 from fastapi import HTTPException, UploadFile, status
@@ -19,6 +20,33 @@ except ImportError:
         "python-magic not available (libmagic not installed). "
         "MIME type validation will be skipped."
     )
+
+
+_UUID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+
+
+def parse_uuid(value: str) -> str:
+    """Return the lowercase form of a standard 8-4-4-4-12 hex UUID.
+
+    Raises ValueError for anything else, so client-supplied identifiers never
+    reach file paths or storage keys unchecked.
+    """
+    if not isinstance(value, str) or not _UUID_RE.fullmatch(value.lower()):
+        raise ValueError("Expected a UUID (8-4-4-4-12 hex digits)")
+    return value.lower()
+
+
+def require_uuid(value: str, what: str) -> str:
+    """Like parse_uuid, but raise HTTP 400 naming what was invalid."""
+    try:
+        return parse_uuid(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid {what}: expected a UUID.",
+        )
 
 
 def calculate_file_hash(file: BinaryIO) -> str:

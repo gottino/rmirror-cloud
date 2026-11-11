@@ -104,7 +104,7 @@ def mock_metadata_parser():
 def test_rm_file():
     """Create a fake .rm file for testing."""
     content = b"fake_remarkable_file_content_with_drawing_data"
-    return ("test_page.rm", io.BytesIO(content), "application/octet-stream")
+    return ("11111111-2222-4333-8444-555555555555.rm", io.BytesIO(content), "application/octet-stream")
 
 
 @pytest.fixture
@@ -378,7 +378,7 @@ async def test_rate_limiting(
         for i in range(11):
             # Create unique file for each upload
             test_file = (
-                f"test_page_{i}.rm",
+                f"00000000-0000-4000-8000-{i:012d}.rm",
                 io.BytesIO(f"fake_rm_content_{i}".encode()),
                 "application/octet-stream",
             )
@@ -551,8 +551,8 @@ async def test_content_hash_deduplication(
     db.commit()
 
     # Use a consistent page UUID for both uploads (from filename)
-    page_uuid = "dedup-test-page-uuid"
-    notebook_uuid = "dedup-test-notebook-uuid"
+    page_uuid = "3f2b8c1e-5a47-4d90-8e12-6b7a9c0d1e2f"
+    notebook_uuid = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
 
     # Create metadata file with consistent notebook UUID
     import json
@@ -627,7 +627,7 @@ async def test_content_hash_changed_consumes_quota(
 
     # First upload
     test_file_1 = (
-        "page_v1.rm",
+        "7e6d5c4b-3a29-4817-8605-f4e3d2c1b0a9.rm",
         io.BytesIO(b"original_content_version_1"),
         "application/octet-stream",
     )
@@ -641,7 +641,7 @@ async def test_content_hash_changed_consumes_quota(
 
     # Second upload (DIFFERENT content, different hash)
     test_file_2 = (
-        "page_v1.rm",  # Same filename
+        "7e6d5c4b-3a29-4817-8605-f4e3d2c1b0a9.rm",  # Same filename
         io.BytesIO(b"modified_content_version_2"),  # Different content!
         "application/octet-stream",
     )

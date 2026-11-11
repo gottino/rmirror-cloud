@@ -28,7 +28,7 @@ from app.schemas.notebook import Notebook as NotebookSchema
 from app.schemas.notebook import NotebookUploadResponse, NotebookWithPages
 from app.services import quota_service
 from app.storage import StorageService
-from app.utils.files import calculate_file_hash, get_document_type, validate_file_type
+from app.utils.files import calculate_file_hash, get_document_type, require_uuid, validate_file_type
 
 logger = logging.getLogger(__name__)
 
@@ -796,6 +796,8 @@ async def upload_content_file(
     Returns:
         Success message with page count
     """
+    notebook_uuid = require_uuid(notebook_uuid, "notebook UUID")
+
     # Validate file type
     if not content_file.filename or not content_file.filename.endswith(".content"):
         raise HTTPException(
