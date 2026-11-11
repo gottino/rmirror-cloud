@@ -4,13 +4,14 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_session_user
 from app.auth.dependencies import get_obsidian_user
 from app.database import get_db
+from app.middleware.rate_limit import OBSIDIAN_SYNC_LIMIT, limiter
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
@@ -357,7 +358,9 @@ async def obsidian_status(
 
 
 @router.get("/obsidian/sync", response_model=SyncResponse)
+@limiter.limit(OBSIDIAN_SYNC_LIMIT)  # per user (get_obsidian_user records it)
 async def sync_notebooks(
+    request: Request,
     current_user: User = Depends(get_obsidian_user),
     db: Session = Depends(get_db),
     limit: int = Query(default=50, ge=1, le=200),

@@ -458,7 +458,7 @@ Lightweight metadata-only sync for notebooks. Updates Notion properties without 
 - ~100ms response time (vs ~5s for full sync)
 - No OCR processing
 - No quota consumption
-- Higher rate limit (100/minute vs 10/minute for content sync)
+- Rate limit 100/minute (uploads: 120/minute)
 
 ### Trigger OCR Processing
 
@@ -1117,28 +1117,27 @@ API endpoints are subject to rate limiting to ensure fair usage and system stabi
 
 **Rate Limits by Endpoint Type:**
 
-| Endpoint Type | Rate Limit | Scope |
-|--------------|------------|-------|
-| Authenticated requests (default) | 300/minute | Per user |
-| Unauthenticated requests | 30/minute | Per IP address |
-| Authentication endpoints (`/auth/*`) | 10/minute | Per IP address |
-| Processing endpoints (`/processing/rm-file`) | 10/minute | Per user |
-| Metadata sync (`/processing/metadata/update`) | 100/minute | Per user |
-| OCR processing (`/processing/notebooks/*/ocr`) | 10/minute | Per user |
+| Endpoint | Rate Limit | Scope | Setting |
+|----------|------------|-------|---------|
+| Default (every route without its own limit) | 300/minute | Per IP address, per endpoint | `RATE_LIMIT_DEFAULT` |
+| Upload (`/processing/rm-file`) | 120/minute | Per user | `RATE_LIMIT_UPLOAD` |
+| Metadata sync (`/sync/metadata`) | 100/minute | Per user | - |
+| Obsidian pull (`/integrations/obsidian/sync`) | 60/minute | Per user | `RATE_LIMIT_OBSIDIAN_SYNC` |
+| Agent token (`/auth/agent-token`) | 10/minute | Per user | - |
+| Waitlist sign-up and invite check (`/waitlist`, `/waitlist/validate-invite`) | 10/minute | Per IP address | `RATE_LIMIT_UNAUTHENTICATED` |
+| Clerk webhook (`/webhooks/clerk`) | 60/minute | Per IP address | `RATE_LIMIT_WEBHOOK` |
 
-**Rate Limit Headers:**
+The upload limit is sized for an initial sync, where the agent uploads every
+page of every notebook back to back (120/minute is two pages a second).
 
-All responses include rate limit information in headers:
+"Per user" limits are keyed by the user the request authenticated as (Clerk
+session or agent token for the same account share one budget), so users
+behind the same IP address do not share them. The default limit is checked
+before authentication and is therefore keyed by IP address.
 
-```
-X-RateLimit-Limit: 300
-X-RateLimit-Remaining: 295
-X-RateLimit-Reset: 1737475200
-```
-
-- `X-RateLimit-Limit`: Maximum requests allowed in the time window
-- `X-RateLimit-Remaining`: Requests remaining in current window
-- `X-RateLimit-Reset`: Unix timestamp when the rate limit resets
+Counters are kept in memory in each API worker process
+(`RATE_LIMIT_STORAGE_URI=memory://`), so with several workers the effective
+limit can be up to that many times the number above.
 
 **Rate Limit Exceeded Response:**
 
@@ -1146,13 +1145,12 @@ When rate limit is exceeded, the API returns HTTP 429:
 
 ```json
 {
-  "detail": "Rate limit exceeded. Try again in 45 seconds."
+  "error": "Rate limit exceeded: 120 per 1 minute"
 }
 ```
 
 **Best Practices:**
 - Implement exponential backoff when receiving 429 responses
-- Monitor `X-RateLimit-Remaining` header to avoid hitting limits
 - Use metadata sync endpoint for frequent updates (higher limit)
 - Batch operations when possible to reduce request count
 

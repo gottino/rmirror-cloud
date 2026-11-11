@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import Column, DateTime, Integer, String, func
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.auth.clerk import get_clerk_session_user
 from app.config import get_settings
 from app.database import Base, get_db
+from app.middleware.rate_limit import UNAUTHENTICATED_LIMIT, limiter
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -148,7 +149,9 @@ async def get_admin_user(
 
 
 @router.post("", response_model=WaitlistResponse, status_code=201)
+@limiter.limit(UNAUTHENTICATED_LIMIT)  # public: per IP
 async def join_waitlist(
+    request: Request,
     data: WaitlistCreate,
     db: Session = Depends(get_db),
 ) -> WaitlistEntry:
@@ -202,7 +205,9 @@ async def join_waitlist(
 
 
 @router.get("/validate-invite", response_model=InviteValidationResponse)
+@limiter.limit(UNAUTHENTICATED_LIMIT)  # public: per IP
 async def validate_invite(
+    request: Request,
     token: str,
     db: Session = Depends(get_db),
 ):
