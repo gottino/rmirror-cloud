@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_session_user
 from app.database import get_db
 from app.dependencies import get_storage_service
 from app.models.page import Page
@@ -20,7 +20,7 @@ router = APIRouter()
 @router.get("/{page_id}/pdf")
 async def get_page_pdf(
     page_id: int,
-    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_session_user)],
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageService, Depends(get_storage_service)],
 ):
