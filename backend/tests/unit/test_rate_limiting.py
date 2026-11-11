@@ -210,7 +210,7 @@ def test_waitlist_signup_has_strict_limit(client):
     with patch("app.utils.email.get_email_service"):
         for i in range(allowed):
             resp = client.post("/v1/waitlist", json=body)
-            assert resp.status_code == 201, f"request {i}: {resp.status_code} {resp.text}"
+            assert resp.status_code == 202, f"request {i}: {resp.status_code} {resp.text}"
         assert client.post("/v1/waitlist", json=body).status_code == 429
 
 
