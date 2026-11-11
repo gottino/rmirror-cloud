@@ -200,6 +200,13 @@ class Settings(BaseSettings):
     # work through a large library without stalling while still capping abuse.
     rate_limit_upload: str = "120/minute"
 
+    # Sync queue retention. The sync worker deletes finished sync_queue rows
+    # older than these many days, in small batches, about once an hour.
+    # Pending and processing rows, sync_records, pages and notebooks are never
+    # pruned. 0 or less disables pruning for that status.
+    sync_queue_completed_retention_days: int = 30
+    sync_queue_failed_retention_days: int = 90
+
     def default_authorized_parties(self) -> list[str]:
         """Origins expected as ``azp``: CORS origins plus the DASHBOARD_URL origin.
 

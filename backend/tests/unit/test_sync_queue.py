@@ -142,7 +142,7 @@ class TestQueueSync:
         assert entry1.content_hash == "new_hash"
 
     def test_queue_sync_skips_already_synced(self, db, user):
-        """If already synced with same content_hash, return completed entry."""
+        """If already synced with same content_hash, queue nothing and write no row."""
         from app.services.sync_queue import queue_sync
 
         # Create a successful sync record
@@ -169,7 +169,8 @@ class TestQueueSync:
             target_name="notion",
             page_uuid="page-uuid-synced",
         )
-        assert entry.status == "completed"
+        assert entry is None
+        assert db.query(SyncQueue).count() == 0
 
     def test_queue_sync_dedup_by_content_hash_for_non_page(self, db, user):
         """Non-page_text items should dedup by content_hash."""

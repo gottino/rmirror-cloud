@@ -129,6 +129,7 @@ class SyncWorker:
         self._last_drip_check: Optional[float] = None
         # Round-robin cursor (last user id handled) for retroactive OCR
         self._pending_quota_cursor = 0
+        self._last_queue_prune: Optional[float] = None
 
     async def start(self):
         """Start the background worker."""
@@ -168,6 +169,9 @@ class SyncWorker:
 
                 # OCR pages left PENDING_QUOTA once their owner's quota has room again
                 await self._process_pending_quota_pages()
+
+                # Delete old finished queue rows (about hourly, small batches)
+                self._prune_sync_queue()
 
                 # Check drip emails every hour
                 if self._last_drip_check is None or (time.time() - self._last_drip_check) > 3600:
@@ -316,6 +320,38 @@ class SyncWorker:
         finally:
             db.close()
 
+    def _prune_sync_queue(self, interval_seconds: int = 3600):
+        """Delete finished sync_queue rows past their retention, about once an hour.
+
+        Retention comes from the SYNC_QUEUE_*_RETENTION_DAYS settings. Only
+        completed and failed queue rows are deleted, in bounded batches (see
+        ``prune_sync_queue``); sync_records and content are never touched.
+        """
+        if self._last_queue_prune is not None and (
+            time.time() - self._last_queue_prune
+        ) < interval_seconds:
+            return
+        self._last_queue_prune = time.time()
+
+        from app.config import get_settings
+        from app.services.sync_queue import prune_sync_queue
+
+        settings = get_settings()
+        db: Session = SessionLocal()
+        try:
+            deleted = prune_sync_queue(
+                db,
+                completed_days=settings.sync_queue_completed_retention_days,
+                failed_days=settings.sync_queue_failed_retention_days,
+            )
+            if deleted:
+                logger.info("Pruned %d finished sync_queue row(s)", deleted)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error pruning sync queue: {e}", exc_info=True)
+        finally:
+            db.close()
+
     async def _process_queue_item(self, db: Session, queue_item: SyncQueue):
         """
         Process a single queue item.
@@ -367,6 +403,9 @@ class SyncWorker:
             await self._process_page_sync(db, queue_item, config, _item_start)
         elif queue_item.item_type == 'todo':
             await self._process_todo_sync(db, queue_item, config, _item_start)
+        elif queue_item.item_type == 'notebook_metadata':
+            from app.services.notebook_metadata_sync import process_notebook_metadata_item
+            await process_notebook_metadata_item(db, queue_item, config)
         else:
             logger.warning(f"Unsupported item type: {queue_item.item_type}")
             queue_item.status = 'failed'

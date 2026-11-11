@@ -88,6 +88,21 @@ async def root():
     }
 
 
+# /health reports sync_queue counts up to this value; larger counts show as the cap.
+HEALTH_QUEUE_COUNT_CAP = 1000
+
+
+def _capped_queue_count(db: Session, status: str) -> int:
+    """Number of sync_queue rows with this status, counted up to the cap."""
+    return db.execute(
+        text(
+            "SELECT COUNT(*) FROM "
+            "(SELECT 1 FROM sync_queue WHERE status = :status LIMIT :cap) AS capped"
+        ),
+        {"status": status, "cap": HEALTH_QUEUE_COUNT_CAP},
+    ).scalar_one()
+
+
 @app.get("/health")
 async def health(db: Session = Depends(get_db)):
     """Health check endpoint with database and queue status."""
@@ -101,11 +116,11 @@ async def health(db: Session = Depends(get_db)):
         checks["status"] = "degraded"
 
     try:
-        from app.models.sync_record import SyncQueue
-
-        pending = db.query(SyncQueue).filter(SyncQueue.status == "pending").count()
-        failed = db.query(SyncQueue).filter(SyncQueue.status == "failed").count()
-        checks["sync_queue"] = {"pending": pending, "failed": failed}
+        # Bounded counts: each reads at most HEALTH_QUEUE_COUNT_CAP index
+        # entries, so a probe stays cheap however large the queue grows.
+        checks["sync_queue"] = {
+            status: _capped_queue_count(db, status) for status in ("pending", "failed")
+        }
     except Exception:
         checks["sync_queue"] = "error"
 

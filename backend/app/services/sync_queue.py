@@ -3,9 +3,10 @@
 Provides functions to queue sync operations when OCR completes or catch-up sync is needed.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
@@ -24,7 +25,7 @@ def queue_sync(
     page_number: Optional[int] = None,
     priority: int = 5,
     metadata: Optional[dict] = None,
-) -> SyncQueue:
+) -> Optional[SyncQueue]:
     """
     Queue an item for sync to an external service.
 
@@ -48,7 +49,8 @@ def queue_sync(
         metadata: Optional metadata dict
 
     Returns:
-        Created SyncQueue entry
+        The pending or processing SyncQueue entry for this item, or None when
+        the item is already synced with this content (nothing is queued).
 
     Example:
         >>> queue_entry = queue_sync(
@@ -105,27 +107,9 @@ def queue_sync(
         )
 
         if existing_sync and existing_sync.content_hash == content_hash:
-            # Already synced successfully with same content, no need to queue
-            # Create a completed queue entry for tracking
-            queue_entry = SyncQueue(
-                user_id=user_id,
-                item_type=item_type,
-                item_id=item_id,
-                content_hash=content_hash,
-                page_uuid=page_uuid,
-                notebook_uuid=notebook_uuid,
-                page_number=page_number,
-                target_name=target_name,
-                status='completed',
-                priority=priority,
-                metadata_json=json.dumps(metadata) if metadata else None,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-                completed_at=existing_sync.synced_at,
-            )
-            db.add(queue_entry)
-            db.commit()
-            return queue_entry
+            # Already synced with the same content: nothing to queue, and no
+            # row is written (the sync record already says it is in sync).
+            return None
         # If existing_sync exists but content_hash is different, we'll queue it for update
     else:
         # For other item types, use content_hash for deduplication
@@ -157,27 +141,8 @@ def queue_sync(
         )
 
         if existing_sync:
-            # Already synced successfully, no need to queue
-            # Create a completed queue entry for tracking
-            queue_entry = SyncQueue(
-                user_id=user_id,
-                item_type=item_type,
-                item_id=item_id,
-                content_hash=content_hash,
-                page_uuid=page_uuid,
-                notebook_uuid=notebook_uuid,
-                page_number=page_number,
-                target_name=target_name,
-                status='completed',
-                priority=priority,
-                metadata_json=json.dumps(metadata) if metadata else None,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-                completed_at=existing_sync.synced_at,
-            )
-            db.add(queue_entry)
-            db.commit()
-            return queue_entry
+            # Already synced successfully: nothing to queue, no row written.
+            return None
 
     # Create new queue entry
     queue_entry = SyncQueue(
@@ -273,7 +238,8 @@ def queue_page_sync(
             page_number=page_number,
             priority=3,  # Higher priority for fresh content
         )
-        queued_entries.append(queue_entry)
+        if queue_entry is not None:
+            queued_entries.append(queue_entry)
 
     return queued_entries
 
@@ -337,7 +303,8 @@ def queue_todo_sync(
             page_number=page_number,
             priority=2,  # Higher priority for todos
         )
-        queued_entries.append(queue_entry)
+        if queue_entry is not None:
+            queued_entries.append(queue_entry)
 
     return queued_entries
 
@@ -397,7 +364,8 @@ def queue_highlight_sync(
             page_number=page_num,
             priority=4,  # Normal priority
         )
-        queued_entries.append(queue_entry)
+        if queue_entry is not None:
+            queued_entries.append(queue_entry)
 
     return queued_entries
 
@@ -437,3 +405,58 @@ def get_next_sync_items(db: Session, limit: int = 10) -> list[SyncQueue]:
         .limit(limit)
         .all()
     )
+
+
+def prune_sync_queue(
+    db: Session,
+    *,
+    completed_days: int,
+    failed_days: int,
+    now: Optional[datetime] = None,
+    batch_size: int = 500,
+    max_batches: int = 10,
+) -> int:
+    """Delete finished queue rows older than their retention period.
+
+    Only 'completed' rows (by ``completed_at``, falling back to
+    ``updated_at``) and 'failed' rows (by ``updated_at``) are deleted; pending
+    and processing rows are never touched. Deletes at most
+    ``batch_size * max_batches`` rows per call, committing after each batch,
+    so one run never holds a long lock. A retention of 0 or less disables
+    pruning for that status.
+
+    Returns the number of rows deleted.
+    """
+    now = now or datetime.utcnow()
+    conditions = []
+    if completed_days > 0:
+        conditions.append(
+            and_(
+                SyncQueue.status == 'completed',
+                func.coalesce(SyncQueue.completed_at, SyncQueue.updated_at)
+                < now - timedelta(days=completed_days),
+            )
+        )
+    if failed_days > 0:
+        conditions.append(
+            and_(
+                SyncQueue.status == 'failed',
+                SyncQueue.updated_at < now - timedelta(days=failed_days),
+            )
+        )
+
+    deleted = 0
+    for condition in conditions:
+        for _ in range(max_batches):
+            ids = [
+                row.id
+                for row in db.query(SyncQueue.id).filter(condition).limit(batch_size).all()
+            ]
+            if not ids:
+                break
+            db.query(SyncQueue).filter(SyncQueue.id.in_(ids)).delete(synchronize_session=False)
+            db.commit()
+            deleted += len(ids)
+            if len(ids) < batch_size:
+                break
+    return deleted

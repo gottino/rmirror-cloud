@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -80,6 +80,16 @@ class SyncRecord(Base):
         Index('idx_sync_content_target_item', 'content_hash', 'target_name', 'item_id'),
         Index('idx_sync_page_uuid', 'page_uuid', 'target_name', 'user_id', unique=True),
         Index('idx_sync_notebook_page', 'notebook_uuid', 'page_number'),
+        # One metadata-sync record per notebook and target (migration b4e7d2a9c1f3).
+        Index(
+            'uq_sync_notebook_metadata',
+            'user_id',
+            'target_name',
+            'notebook_uuid',
+            unique=True,
+            postgresql_where=text("item_type = 'notebook_metadata'"),
+            sqlite_where=text("item_type = 'notebook_metadata'"),
+        ),
     )
 
     def __repr__(self) -> str:
