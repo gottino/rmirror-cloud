@@ -28,9 +28,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Verify staging is healthy
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
         run: |
-          if curl -sf https://staging.rmirror.io/api/health; then
+          if body=$(curl -sf https://staging.rmirror.io/api/health); then
+            echo "$body"
             echo "Staging is healthy - proceeding with production deployment"
+            # Informational for now: a mismatch is logged, not fatal.
+            staging_commit=$(echo "$body" | jq -r '.commit // "unknown"')
+            echo "Staging runs commit:    $staging_commit"
+            echo "Production will deploy: $DEPLOY_SHA"
+            if [ "$staging_commit" != "$DEPLOY_SHA" ]; then
+              echo "::warning::Staging runs $staging_commit, production will deploy $DEPLOY_SHA"
+            fi
           else
             echo "::error::Staging is not healthy. Deploy to staging first, or use skip_staging_check for emergencies."
             exit 1
@@ -123,6 +133,7 @@ jobs:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          DEPLOY_SHA: ${{ github.sha }}
           DEBUG: ${{ vars.DEBUG }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           CLERK_WEBHOOK_SECRET: ${{ secrets.CLERK_WEBHOOK_SECRET }}
@@ -154,10 +165,6 @@ jobs:
               $SERVER_USER@$SERVER_HOST \
               "cd /var/www/rmirror-cloud && \
                git fetch origin && \
-               git checkout main && \
-               git merge --abort 2>/dev/null || true && \
-               git reset --hard origin/main && \
-               git clean -fd && \
 
                # Helper function to update or add env variable
                update_env() {
@@ -204,19 +211,31 @@ jobs:
                update_env backend/.env UMAMI_WEBSITE_ID \"$NEXT_PUBLIC_UMAMI_WEBSITE_ID\" && \
                update_env backend/.env GOOGLE_AI_API_KEY \"$GOOGLE_AI_API_KEY\" && \
 
-               # Run deploy script
-               ./backend/scripts/deploy.sh main"
+               # Run deploy.sh as it is in the commit being deployed; it checks
+               # that commit out itself (after the config check) and rolls back
+               # to the current one on failure.
+               deploy_script=\$(mktemp) && \
+               git show $DEPLOY_SHA:backend/scripts/deploy.sh > \"\$deploy_script\" && \
+               bash \"\$deploy_script\" $DEPLOY_SHA; \
+               status=\$?; rm -f \"\$deploy_script\"; exit \$status"
 
       - name: Health check
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
         run: |
-          echo "Waiting for services to start..."
-          sleep 15
-          if curl -sf https://rmirror.io/api/health; then
-            echo "Production deployment verified!"
-          else
-            echo "::error::Production health check failed"
-            exit 1
-          fi
+          echo "Waiting for services to start (up to 60s)..."
+          for i in $(seq 1 12); do
+            if body=$(curl -sf https://rmirror.io/api/health); then
+              echo "$body"
+              echo "Production runs commit: $(echo "$body" | jq -r '.commit // "unknown"') (deployed $DEPLOY_SHA)"
+              echo "Production deployment verified!"
+              exit 0
+            fi
+            echo "Attempt $i/12 failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "::error::Production health check failed"
+          exit 1
 
       - name: Deployment success
         if: success()
