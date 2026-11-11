@@ -1,7 +1,11 @@
 """Main FastAPI application."""
 
 import logging
+import os
+import re
 from contextlib import asynccontextmanager
+from functools import lru_cache
+from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +27,22 @@ settings = get_settings()
 # Configure structured JSON logging before anything else
 configure_logging(debug=settings.debug)
 logger = logging.getLogger(__name__)
+
+# Written by scripts/deploy.sh before it restarts the service.
+DEPLOY_COMMIT_FILE = Path(__file__).resolve().parent.parent / ".deploy-commit"
+
+
+@lru_cache
+def deployed_commit() -> str:
+    """Git commit this process was deployed from (DEPLOY_COMMIT env, else the file)."""
+    value = os.environ.get("DEPLOY_COMMIT", "").strip()
+    if not value:
+        try:
+            value = DEPLOY_COMMIT_FILE.read_text().strip()
+        except OSError:
+            value = ""
+    return value if re.fullmatch(r"[0-9a-f]{7,40}", value) else "unknown"
+
 
 # Rate limiter setup - uses user ID for authenticated requests, IP for unauthenticated
 limiter = Limiter(key_func=get_rate_limit_key)
@@ -92,7 +112,7 @@ async def root():
 @app.get("/health")
 async def health(db: Session = Depends(get_db)):
     """Health check endpoint with database and queue status."""
-    checks: dict = {"status": "healthy"}
+    checks: dict = {"status": "healthy", "commit": deployed_commit()}
 
     try:
         db.execute(text("SELECT 1"))
