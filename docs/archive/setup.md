@@ -58,11 +58,11 @@ backend/
 
 ### 1. Start Infrastructure Services
 
-You'll need Docker installed. Start PostgreSQL, Redis, and MinIO:
+You'll need Docker installed. Start PostgreSQL and MinIO (optional; SQLite is the default):
 
 ```bash
-cd /Users/gabriele/Documents/Development/rmirror-cloud
-docker compose up -d postgres redis minio
+cd ~/Documents/Development/rmirror-cloud
+docker compose up -d
 ```
 
 Verify services are running:
@@ -148,7 +148,7 @@ curl -X GET "http://localhost:8000/v1/users/me" \
 The `.env` file has been created with development defaults:
 
 ```env
-# Database (matches docker-compose.yml)
+# Database (matches docker-compose.yml; the default is SQLite)
 POSTGRES_USER=rmirror
 POSTGRES_PASSWORD=rmirror_dev_password
 POSTGRES_HOST=localhost
