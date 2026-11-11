@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy import bindparam, func, insert, select, update
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
@@ -119,6 +120,214 @@ class MetadataSyncResponse(BaseModel):
     message: str
 
 
+# Rows per IN (...) list, well below the bind-parameter limits of SQLite and PostgreSQL.
+_IN_CHUNK = 1000
+
+# Notebook columns the metadata sync updates only when the agent sent a value.
+_OPTIONAL_NOTEBOOK_FIELDS = ("pinned", "deleted", "version", "last_opened", "last_opened_page", "content_json")
+
+
+def _chunks(values: list, size: int = _IN_CHUNK):
+    for i in range(0, len(values), size):
+        yield values[i : i + size]
+
+
+def _parse_last_opened(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int, int, int, int]:
+    """Upsert notebooks, page stubs and page order for a metadata sync in bulk.
+
+    ``entries`` is a list of ``(notebook_uuid, NotebookMetadataItem, page_uuids)``
+    with validated, lowercase UUIDs. Reads existing rows with a few IN queries
+    and writes with multi-row INSERTs and executemany UPDATEs, so the number of
+    statements does not grow with the number of notebooks or pages (apart from
+    one extra statement per 1,000 ids in an IN list).
+
+    Semantics match the former row-by-row version: a notebook or page seen
+    again (in the database or earlier in the same request) is updated, pages
+    that already have content are left alone, and pages without content that
+    are not completed/pending/processing are reset to NOT_SYNCED.
+
+    Returns (notebooks_created, notebooks_updated, pages_registered, pages_already_synced).
+    """
+    notebooks_created = notebooks_updated = pages_registered = pages_already_synced = 0
+    now = datetime.utcnow()
+
+    # 1. Existing notebooks (lowest id wins if a uuid is duplicated).
+    notebook_ids: dict[str, int] = {}
+    uuids = list(dict.fromkeys(nb_uuid for nb_uuid, _, _ in entries))
+    for chunk in _chunks(uuids):
+        rows = db.execute(
+            select(Notebook.id, Notebook.notebook_uuid)
+            .where(Notebook.user_id == user_id, Notebook.notebook_uuid.in_(chunk))
+            .order_by(Notebook.id)
+        ).all()
+        for nb_id, nb_uuid in rows:
+            notebook_ids.setdefault(nb_uuid, nb_id)
+    existing_notebook_ids = list(notebook_ids.values())
+
+    # 2. Fold the request into one insert row or one update per notebook.
+    new_notebooks: dict[str, dict] = {}
+    notebook_updates: dict[int, dict] = {}
+    for nb_uuid, nb_data, page_uuids in entries:
+        values = {
+            "pinned": nb_data.pinned,
+            "deleted": nb_data.deleted,
+            "version": nb_data.version,
+            "last_opened": _parse_last_opened(nb_data.last_opened),
+            "last_opened_page": nb_data.last_opened_page,
+            # Store page UUIDs in content_json for reference
+            "content_json": (
+                json.dumps({"pages": page_uuids, "pageCount": len(page_uuids)}) if page_uuids else None
+            ),
+        }
+        if nb_uuid in notebook_ids or nb_uuid in new_notebooks:
+            target = new_notebooks.get(nb_uuid)
+            if target is None:
+                target = notebook_updates.setdefault(
+                    notebook_ids[nb_uuid], dict.fromkeys(_OPTIONAL_NOTEBOOK_FIELDS)
+                )
+            target["visible_name"] = nb_data.visible_name
+            target["parent_uuid"] = nb_data.parent_uuid
+            target["last_synced_at"] = now
+            for field in _OPTIONAL_NOTEBOOK_FIELDS:
+                if values[field] is not None:
+                    target[field] = values[field]
+            notebooks_updated += 1
+            logger.debug(f"Updated notebook: {nb_data.visible_name} ({nb_uuid})")
+        else:
+            values["pinned"] = nb_data.pinned or False
+            values["deleted"] = nb_data.deleted or False
+            new_notebooks[nb_uuid] = {
+                "user_id": user_id,
+                "notebook_uuid": nb_uuid,
+                "visible_name": nb_data.visible_name,
+                "parent_uuid": nb_data.parent_uuid,
+                "document_type": nb_data.document_type,
+                "last_synced_at": now,
+                **values,
+            }
+            notebooks_created += 1
+            logger.debug(f"Created notebook: {nb_data.visible_name} ({nb_uuid})")
+
+    if new_notebooks:
+        result = db.execute(
+            insert(Notebook).returning(Notebook.id, Notebook.notebook_uuid),
+            list(new_notebooks.values()),
+        )
+        for nb_id, nb_uuid in result:
+            notebook_ids[nb_uuid] = nb_id
+
+    if notebook_updates:
+        table = Notebook.__table__
+        optional = {
+            field: func.coalesce(bindparam(f"b_{field}", type_=table.c[field].type), table.c[field])
+            for field in _OPTIONAL_NOTEBOOK_FIELDS
+        }
+        db.execute(
+            update(table)
+            .where(table.c.id == bindparam("b_id"))
+            .values(
+                visible_name=bindparam("b_visible_name"),
+                parent_uuid=bindparam("b_parent_uuid"),
+                last_synced_at=bindparam("b_last_synced_at"),
+                **optional,
+            ),
+            [
+                {"b_id": nb_id, **{f"b_{key}": value for key, value in values.items()}}
+                for nb_id, values in notebook_updates.items()
+            ],
+        )
+
+    # 3. Existing pages and page-order mappings of the existing notebooks.
+    pages: dict[tuple[int, str], tuple[int, str | None, str]] = {}
+    mappings: dict[tuple[int, int], tuple[int, int]] = {}
+    for chunk in _chunks(existing_notebook_ids):
+        page_rows = db.execute(
+            select(Page.id, Page.notebook_id, Page.page_uuid, Page.s3_key, Page.ocr_status)
+            .where(Page.notebook_id.in_(chunk))
+            .order_by(Page.id)
+        ).all()
+        for page_id, nb_id, page_uuid, s3_key, ocr_status in page_rows:
+            pages.setdefault((nb_id, page_uuid), (page_id, s3_key, ocr_status))
+        mapping_rows = db.execute(
+            select(NotebookPage.id, NotebookPage.notebook_id, NotebookPage.page_id, NotebookPage.page_number)
+            .where(NotebookPage.notebook_id.in_(chunk))
+            .order_by(NotebookPage.id)
+        ).all()
+        for mapping_id, nb_id, page_id, page_number in mapping_rows:
+            mappings.setdefault((nb_id, page_id), (mapping_id, page_number))
+
+    # 4. Page stubs: which to create, which to reset, and the wanted page order
+    # (the last position wins if a page is listed twice).
+    new_pages: dict[tuple[int, str], None] = {}
+    reset_page_ids: set[int] = set()
+    page_numbers: dict[tuple[int, str], int] = {}
+    for nb_uuid, _, page_uuids in entries:
+        nb_id = notebook_ids[nb_uuid]
+        for page_idx, page_uuid in enumerate(page_uuids):
+            key = (nb_id, page_uuid)
+            page_numbers[key] = page_idx + 1  # 1-indexed
+            page = pages.get(key)
+            if page and page[1]:
+                # Page already has content uploaded - don't reset it
+                pages_already_synced += 1
+            elif page:
+                # Page exists but no content - ensure NOT_SYNCED status
+                if page[2] not in (
+                    OcrStatus.COMPLETED,
+                    OcrStatus.PENDING,
+                    OcrStatus.PROCESSING,
+                    OcrStatus.NOT_SYNCED,
+                ):
+                    reset_page_ids.add(page[0])
+                pages_registered += 1
+            else:
+                new_pages[key] = None
+                pages_registered += 1
+
+    if new_pages:
+        result = db.execute(
+            insert(Page).returning(Page.id, Page.notebook_id, Page.page_uuid),
+            [
+                {"notebook_id": nb_id, "page_uuid": page_uuid, "ocr_status": OcrStatus.NOT_SYNCED.value}
+                for nb_id, page_uuid in new_pages
+            ],
+        )
+        for page_id, nb_id, page_uuid in result:
+            pages[(nb_id, page_uuid)] = (page_id, None, OcrStatus.NOT_SYNCED.value)
+
+    for chunk in _chunks(sorted(reset_page_ids)):
+        db.execute(
+            update(Page).where(Page.id.in_(chunk)).values(ocr_status=OcrStatus.NOT_SYNCED.value),
+            execution_options={"synchronize_session": False},
+        )
+
+    # 5. Create or update NotebookPage mappings.
+    new_mappings = []
+    mapping_updates = []
+    for (nb_id, page_uuid), page_number in page_numbers.items():
+        page_id = pages[(nb_id, page_uuid)][0]
+        mapping = mappings.get((nb_id, page_id))
+        if mapping is None:
+            new_mappings.append({"notebook_id": nb_id, "page_id": page_id, "page_number": page_number})
+        elif mapping[1] != page_number:
+            mapping_updates.append({"id": mapping[0], "page_number": page_number})
+    if mapping_updates:
+        db.execute(update(NotebookPage), mapping_updates)
+    if new_mappings:
+        db.execute(insert(NotebookPage), new_mappings)
+
+    return notebooks_created, notebooks_updated, pages_registered, pages_already_synced
+
+
 @router.post("/metadata", response_model=MetadataSyncResponse)
 @limiter.limit("100/minute")  # Higher limit for lightweight metadata sync
 async def sync_metadata(
@@ -161,6 +370,7 @@ async def sync_metadata(
     skipped = 0
 
     try:
+        entries = []
         for nb_data in sync_request.notebooks:
             # Ids become storage keys later: skip anything that is not a UUID
             # instead of failing the whole batch. Never log the raw value.
@@ -184,111 +394,10 @@ async def sync_metadata(
                         f"for user {current_user.id}"
                     )
                     skipped += 1
+            entries.append((nb_uuid, nb_data, page_uuids))
 
-            # Find or create notebook
-            notebook = db.query(Notebook).filter(
-                Notebook.user_id == current_user.id,
-                Notebook.notebook_uuid == nb_uuid
-            ).first()
-
-            if notebook:
-                # Update existing notebook metadata
-                notebook.visible_name = nb_data.visible_name
-                notebook.parent_uuid = nb_data.parent_uuid
-                if nb_data.pinned is not None:
-                    notebook.pinned = nb_data.pinned
-                if nb_data.deleted is not None:
-                    notebook.deleted = nb_data.deleted
-                if nb_data.version is not None:
-                    notebook.version = nb_data.version
-                if nb_data.last_opened:
-                    try:
-                        notebook.last_opened = datetime.fromisoformat(nb_data.last_opened.replace("Z", "+00:00"))
-                    except ValueError:
-                        pass
-                if nb_data.last_opened_page is not None:
-                    notebook.last_opened_page = nb_data.last_opened_page
-                notebook.last_synced_at = datetime.utcnow()
-                notebooks_updated += 1
-                logger.debug(f"Updated notebook: {nb_data.visible_name} ({nb_uuid})")
-            else:
-                # Create new notebook
-                notebook = Notebook(
-                    user_id=current_user.id,
-                    notebook_uuid=nb_uuid,
-                    visible_name=nb_data.visible_name,
-                    parent_uuid=nb_data.parent_uuid,
-                    document_type=nb_data.document_type,
-                    pinned=nb_data.pinned or False,
-                    deleted=nb_data.deleted or False,
-                    version=nb_data.version,
-                    last_synced_at=datetime.utcnow(),
-                )
-                if nb_data.last_opened:
-                    try:
-                        notebook.last_opened = datetime.fromisoformat(nb_data.last_opened.replace("Z", "+00:00"))
-                    except ValueError:
-                        pass
-                if nb_data.last_opened_page is not None:
-                    notebook.last_opened_page = nb_data.last_opened_page
-                db.add(notebook)
-                db.flush()  # Get the notebook ID
-                notebooks_created += 1
-                logger.debug(f"Created notebook: {nb_data.visible_name} ({nb_uuid})")
-
-            # Store page UUIDs in content_json for reference
-            if page_uuids:
-                content_data = {
-                    "pages": page_uuids,
-                    "pageCount": len(page_uuids),
-                }
-                notebook.content_json = json.dumps(content_data)
-
-            # Process page stubs
-            for page_idx, page_uuid in enumerate(page_uuids):
-                # Find existing page
-                page = db.query(Page).filter(
-                    Page.notebook_id == notebook.id,
-                    Page.page_uuid == page_uuid
-                ).first()
-
-                if page and page.s3_key:
-                    # Page already has content uploaded - don't reset it
-                    pages_already_synced += 1
-                elif page:
-                    # Page exists but no content - ensure NOT_SYNCED status
-                    if page.ocr_status not in [OcrStatus.COMPLETED, OcrStatus.PENDING, OcrStatus.PROCESSING]:
-                        page.ocr_status = OcrStatus.NOT_SYNCED
-                    pages_registered += 1
-                else:
-                    # Create new page stub
-                    page = Page(
-                        notebook_id=notebook.id,
-                        page_uuid=page_uuid,
-                        ocr_status=OcrStatus.NOT_SYNCED,
-                    )
-                    db.add(page)
-                    db.flush()  # Get the page ID
-                    pages_registered += 1
-
-                # Create or update NotebookPage mapping
-                page_number = page_idx + 1  # 1-indexed
-                notebook_page = db.query(NotebookPage).filter(
-                    NotebookPage.notebook_id == notebook.id,
-                    NotebookPage.page_id == page.id
-                ).first()
-
-                if notebook_page:
-                    # Update page order if changed
-                    notebook_page.page_number = page_number
-                else:
-                    # Create new mapping
-                    notebook_page = NotebookPage(
-                        notebook_id=notebook.id,
-                        page_id=page.id,
-                        page_number=page_number,
-                    )
-                    db.add(notebook_page)
+        counts = _apply_metadata_sync(db, current_user.id, entries)
+        notebooks_created, notebooks_updated, pages_registered, pages_already_synced = counts
 
         db.commit()
 

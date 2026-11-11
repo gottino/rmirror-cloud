@@ -12,6 +12,7 @@ import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
@@ -190,61 +191,97 @@ async def get_notebooks_tree(
         if nb.parent_uuid:
             has_children.add(nb.parent_uuid)
 
-    # Get preview text and sync progress for each notebook
+    # Sync progress and preview text, computed for all notebooks at once: one
+    # grouped aggregate for the status counts and one query for the previews,
+    # so the number of queries does not grow with the number of notebooks.
     preview_map = {}
     sync_progress_map = {}
+
+    notebook_ids = (
+        select(Notebook.id)
+        .where(Notebook.user_id == current_user.id, Notebook.document_type == "notebook")
+        .scalar_subquery()
+    )
+
+    status_counts = db.execute(
+        select(
+            NotebookPage.notebook_id,
+            func.count(Page.id),
+            func.coalesce(func.sum(case((Page.ocr_status == "not_synced", 1), else_=0)), 0),
+            func.coalesce(func.sum(case((Page.ocr_status == "pending_quota", 1), else_=0)), 0),
+        )
+        .join(Page, NotebookPage.page_id == Page.id)
+        .where(NotebookPage.notebook_id.in_(notebook_ids))
+        .group_by(NotebookPage.notebook_id)
+    ).all()
+    counts_by_id = {row[0]: (row[1], row[2], row[3]) for row in status_counts}
+
+    # For every notebook: its highest-numbered page (rn_all == 1) and its
+    # highest-numbered page with OCR text (has_text == 1 and rn_text == 1).
+    has_text = case(
+        (and_(Page.ocr_text.isnot(None), Page.ocr_text != ""), 1), else_=0
+    ).label("has_text")
+    ranked = (
+        select(
+            NotebookPage.notebook_id.label("notebook_id"),
+            Page.ocr_status.label("ocr_status"),
+            Page.ocr_text.label("ocr_text"),
+            has_text,
+            func.row_number()
+            .over(partition_by=NotebookPage.notebook_id, order_by=NotebookPage.page_number.desc())
+            .label("rn_all"),
+            func.row_number()
+            .over(
+                partition_by=(NotebookPage.notebook_id, has_text),
+                order_by=NotebookPage.page_number.desc(),
+            )
+            .label("rn_text"),
+        )
+        .join(Page, NotebookPage.page_id == Page.id)
+        .where(NotebookPage.notebook_id.in_(notebook_ids))
+        .subquery()
+    )
+    preview_rows = db.execute(
+        select(
+            ranked.c.notebook_id,
+            ranked.c.rn_all,
+            ranked.c.has_text,
+            ranked.c.rn_text,
+            ranked.c.ocr_status,
+            # Only the text row's OCR text is needed; skip the other row's.
+            case((ranked.c.has_text == 1, ranked.c.ocr_text), else_=None),
+        ).where(
+            or_(ranked.c.rn_all == 1, and_(ranked.c.has_text == 1, ranked.c.rn_text == 1))
+        )
+    ).all()
+    latest_status_by_id = {}
+    latest_text_by_id = {}
+    for nb_id, rn_all, row_has_text, rn_text, ocr_status, ocr_text in preview_rows:
+        if rn_all == 1:
+            latest_status_by_id[nb_id] = ocr_status
+        if row_has_text == 1 and rn_text == 1:
+            latest_text_by_id[nb_id] = ocr_text
+
     for nb in all_notebooks:
         if nb.document_type == "notebook":
-            # Get all pages for this notebook to calculate sync progress
-            all_pages = (
-                db.query(Page)
-                .join(NotebookPage, NotebookPage.page_id == Page.id)
-                .filter(NotebookPage.notebook_id == nb.id)
-                .all()
-            )
-
-            # Calculate sync progress
-            total_pages = len(all_pages)
-            not_synced_count = sum(1 for p in all_pages if p.ocr_status == "not_synced")
-            pending_quota_count = sum(1 for p in all_pages if p.ocr_status == "pending_quota")
-            synced_count = total_pages - not_synced_count
-
+            total_pages, not_synced_count, pending_quota_count = counts_by_id.get(nb.id, (0, 0, 0))
             sync_progress_map[nb.notebook_uuid] = {
                 "total_pages": total_pages,
-                "synced_pages": synced_count,
+                "synced_pages": total_pages - not_synced_count,
                 "not_synced_pages": not_synced_count,
                 "pending_quota_pages": pending_quota_count,
             }
 
-            # Get most recent page (regardless of OCR status)
-            most_recent_page = (
-                db.query(Page)
-                .join(NotebookPage, NotebookPage.page_id == Page.id)
-                .filter(NotebookPage.notebook_id == nb.id)
-                .order_by(NotebookPage.page_number.desc())
-                .first()
-            )
-
             # If most recent page is pending quota or not synced, don't show preview
             # (frontend will show "OCR Pending" or "Not synced" message)
-            if most_recent_page and most_recent_page.ocr_status in ["pending_quota", "not_synced"]:
+            if latest_status_by_id.get(nb.id) in ["pending_quota", "not_synced"]:
                 preview_map[nb.notebook_uuid] = None
             else:
-                # Get most recent page with OCR text
-                recent_page = (
-                    db.query(Page)
-                    .join(NotebookPage, NotebookPage.page_id == Page.id)
-                    .filter(
-                        NotebookPage.notebook_id == nb.id,
-                        Page.ocr_text.isnot(None),
-                        Page.ocr_text != "",
-                    )
-                    .order_by(NotebookPage.page_number.desc())
-                    .first()
-                )
-                if recent_page and recent_page.ocr_text:
+                # Most recent page with OCR text
+                ocr_text = latest_text_by_id.get(nb.id)
+                if ocr_text:
                     # Get first 100 characters
-                    preview_text = recent_page.ocr_text.strip()
+                    preview_text = ocr_text.strip()
                     preview_map[nb.notebook_uuid] = preview_text[:100] + ("..." if len(preview_text) > 100 else "")
 
     # Build tree structure
