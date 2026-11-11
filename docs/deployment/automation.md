@@ -2,11 +2,13 @@
 
 This guide covers the three ways to automate deployments to your production server after the initial setup.
 
+> **Current setup:** a push to `main` deploys **staging** (`staging.rmirror.io`, `.github/workflows/deploy-staging.yml`). **Production** is deployed only by running the "Deploy to Production" workflow by hand (`deploy-production.yml`; it requires green CI and a healthy staging). Where this guide says that a push to `main` deploys production, read "deploys staging".
+
 ## Quick Reference
 
 | Method | Trigger | Use Case | Setup Time |
 |--------|---------|----------|------------|
-| **GitHub Actions** | Push to `main` | Fully automated CI/CD | 5 min |
+| **GitHub Actions** | Push to `main` (staging); manual run (production) | Automated CI/CD | 5 min |
 | **Remote Script** | Manual command | Quick manual deploys | 2 min |
 | **Server Script** | SSH into server | On-server maintenance | 1 min |
 
@@ -14,7 +16,7 @@ This guide covers the three ways to automate deployments to your production serv
 
 ## Method 1: GitHub Actions (Recommended)
 
-**Fully automated deployment on every push to main branch.**
+**Automated deployment of staging on every push to `main`; production by running the workflow manually.**
 
 ### Setup (One-time)
 
@@ -34,7 +36,8 @@ Add to GitHub:
 2. Add these secrets:
    - `SERVER_HOST`: Your server IP (e.g., `95.217.123.45`)
    - `SERVER_USER`: `deploy`
-   - `SERVER_SSH_KEY`: The private key from above
+   - `SSH_PRIVATE_KEY`: The private key from above
+   - `SERVER_PORT`: The SSH port
 
 #### 2. Copy Deployment Script to Server
 
@@ -47,14 +50,14 @@ chmod +x deploy.sh
 
 #### 3. That's it!
 
-Now every push to `main` automatically deploys:
+Now every push to `main` automatically deploys to staging (production: run the "Deploy to Production" workflow):
 
 ```bash
 # On your local machine
 git add .
 git commit -m "Add new feature"
 git push origin main
-# 🚀 Automatic deployment starts!
+# 🚀 Staging deployment starts!
 ```
 
 Watch deployment progress:
@@ -233,7 +236,7 @@ git add .
 git commit -m "Add feature X"
 git push origin main
 
-# 🚀 GitHub Actions automatically deploys!
+# 🚀 GitHub Actions deploys staging; run "Deploy to Production" when staging is healthy
 # Watch: https://github.com/YOUR_USERNAME/rmirror-cloud/actions
 ```
 
@@ -450,7 +453,7 @@ Database backups are automatic, but also backup:
 
 | Method | Command | When to Use |
 |--------|---------|-------------|
-| **Automatic** | `git push origin main` | Daily development |
+| **Automatic (staging)** | `git push origin main` | Daily development |
 | **Manual (local)** | `./backend/scripts/deploy-remote.sh` | Quick hotfixes |
 | **Manual (server)** | `ssh deploy@server && cd /var/www/rmirror-cloud && ./deploy.sh` | Troubleshooting |
 

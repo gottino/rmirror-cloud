@@ -5,7 +5,7 @@
 Run the fully automated migration on your production server:
 
 ```bash
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 cd /var/www/rmirror-cloud/backend
 git pull
 sudo -E ./scripts/migrate_to_postgres.sh
