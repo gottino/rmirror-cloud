@@ -9,6 +9,13 @@ on:
       - '.github/workflows/deploy-staging.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
 jobs:
   # Run CI tests first - deployment requires all tests to pass
   ci:
