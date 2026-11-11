@@ -18,12 +18,12 @@ from app.api.processing import UpdateMetadataRequest, update_notebook_metadata
 from app.core.sync_engine import SyncResult
 from app.models.notebook import Notebook
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord, SyncStatus
-from app.services.notebook_metadata_sync import queue_notebook_metadata_sync
-from app.services.sync_queue import prune_sync_queue, queue_sync
+from app.services.sync_queue import prune_sync_queue, queue_notebook_metadata_sync, queue_sync
 from app.services.sync_worker import SyncWorker
 from tests.conftest import create_user_with_quota
 
 NOW = datetime(2026, 11, 1, 12, 0, 0)
+NB_UUID = "0b0b0b0b-0000-4000-8000-000000000001"
 NOTION_CONFIG = {"access_token": "test-token", "database_id": "db-123"}
 
 
@@ -48,7 +48,7 @@ def notion_config(db: Session, user):
 @pytest.fixture
 def notebook(db: Session, user):
     nb = Notebook(
-        notebook_uuid="nb-growth",
+        notebook_uuid=NB_UUID,
         user_id=user.id,
         visible_name="Growth",
         document_type="notebook",
@@ -175,7 +175,7 @@ def test_queue_sync_writes_no_row_for_synced_non_page_item(db, user):
 
 def _open_request(i: int) -> UpdateMetadataRequest:
     return UpdateMetadataRequest(
-        notebook_uuid="nb-growth",
+        notebook_uuid=NB_UUID,
         visible_name="Growth",
         document_type="notebook",
         last_opened=(NOW + timedelta(minutes=i)).isoformat() + "Z",
@@ -184,7 +184,8 @@ def _open_request(i: int) -> UpdateMetadataRequest:
 
 @pytest.mark.asyncio
 async def test_metadata_update_makes_no_notion_call_and_coalesces(db, user, notion_config):
-    with patch("app.integrations.notion_sync.NotionSyncTarget") as target_cls, \
+    with patch("app.integrations.registry.NotionSyncTarget") as target_cls, \
+         patch("app.integrations.notion_sync.NotionClient") as client_cls, \
          patch.object(IntegrationConfig, "get_config", return_value=NOTION_CONFIG):
         for i in range(10):
             response = await update_notebook_metadata(
@@ -193,32 +194,27 @@ async def test_metadata_update_makes_no_notion_call_and_coalesces(db, user, noti
             assert response.success
 
     target_cls.assert_not_called()
+    client_cls.assert_not_called()
     items = db.query(SyncQueue).all()
     assert len(items) == 1
     assert items[0].item_type == "notebook_metadata"
-    assert items[0].notebook_uuid == "nb-growth"
+    assert items[0].notebook_uuid == NB_UUID
     assert items[0].status == "pending"
 
 
 def test_queue_metadata_skips_users_without_notion(db, user, notebook):
-    assert queue_notebook_metadata_sync(db, user.id, notebook) == []
+    assert queue_notebook_metadata_sync(db, notebook) == []
     assert db.query(SyncQueue).count() == 0
 
 
-def _notebook_record(db, user, external_id="notion-page-1"):
-    db.add(
-        SyncRecord(
-            user_id=user.id,
-            target_name="notion",
-            item_type="notebook",
-            item_id="1",
-            content_hash="notebook",
-            external_id=external_id,
-            status="success",
-            notebook_uuid="nb-growth",
-        )
-    )
-    db.commit()
+def _target(result):
+    """A Notion target whose metadata write returns ``result``."""
+    target = MagicMock()
+    target.sync_item = AsyncMock(return_value=result)
+    return target
+
+
+SUCCESS = SyncResult(status=SyncStatus.SUCCESS, target_id="notion-page-1")
 
 
 async def _run_worker(db):
@@ -230,12 +226,9 @@ async def _run_worker(db):
 
 @pytest.mark.asyncio
 async def test_ten_opens_leave_one_metadata_record(db, user, notion_config):
-    _notebook_record(db, user)
-    target = MagicMock()
-    target._update_notion_page_properties = AsyncMock(return_value=True)
-    target.sync_item = AsyncMock()
+    target = _target(SUCCESS)
 
-    with patch("app.integrations.notion_sync.NotionSyncTarget", return_value=target), \
+    with patch("app.integrations.registry.NotionSyncTarget", return_value=target), \
          patch.object(IntegrationConfig, "get_config", return_value=NOTION_CONFIG):
         for i in range(10):
             await update_notebook_metadata(request=_open_request(i), current_user=user, db=db)
@@ -243,47 +236,99 @@ async def test_ten_opens_leave_one_metadata_record(db, user, notion_config):
 
     records = db.query(SyncRecord).filter(SyncRecord.item_type == "notebook_metadata").all()
     assert len(records) == 1
-    assert records[0].notebook_uuid == "nb-growth"
+    assert records[0].notebook_uuid == NB_UUID
     assert records[0].external_id == "notion-page-1"
     assert records[0].status == "success"
 
-    # Each open changed lastOpened, so each was pushed, using the stored page id.
-    assert target._update_notion_page_properties.await_count == 10
-    assert target._update_notion_page_properties.await_args.args[0] == "notion-page-1"
-    target.sync_item.assert_not_awaited()
+    # Each open changed lastOpened, so each was pushed.
+    assert target.sync_item.await_count == 10
     statuses = {q.status for q in db.query(SyncQueue)}
     assert statuses == {"completed"}
 
 
 @pytest.mark.asyncio
 async def test_unchanged_metadata_is_not_pushed_again(db, user, notion_config):
-    _notebook_record(db, user)
-    target = MagicMock()
-    target._update_notion_page_properties = AsyncMock(return_value=True)
+    target = _target(SUCCESS)
 
-    with patch("app.integrations.notion_sync.NotionSyncTarget", return_value=target), \
+    with patch("app.integrations.registry.NotionSyncTarget", return_value=target), \
          patch.object(IntegrationConfig, "get_config", return_value=NOTION_CONFIG):
         for _ in range(3):
             await update_notebook_metadata(request=_open_request(0), current_user=user, db=db)
             await _run_worker(db)
 
-    assert target._update_notion_page_properties.await_count == 1
+    assert target.sync_item.await_count == 1
+    assert db.query(SyncQueue).count() == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_skips_row_whose_metadata_is_already_written(db, user, notion_config, notebook):
+    """Two rows for one notebook (e.g. one queued while the other ran): the second
+    finds the record already holds this metadata and makes no call."""
+    target = _target(SUCCESS)
+    rows = [
+        SyncQueue(
+            user_id=user.id, item_type="notebook_metadata", item_id=NB_UUID,
+            notebook_uuid=NB_UUID, content_hash=f"queued-{i}", target_name="notion",
+            status="pending", priority=5, scheduled_at=NOW,
+        )
+        for i in range(2)
+    ]
+    db.add_all(rows)
+    db.commit()
+
+    with patch("app.integrations.registry.NotionSyncTarget", return_value=target), \
+         patch.object(IntegrationConfig, "get_config", return_value=NOTION_CONFIG):
+        await _run_worker(db)
+
+    assert target.sync_item.await_count == 1
+    assert {q.status for q in db.query(SyncQueue)} == {"completed"}
+    assert db.query(SyncRecord).filter(SyncRecord.item_type == "notebook_metadata").count() == 1
+
+
+@pytest.mark.asyncio
+async def test_record_written_meanwhile_by_another_worker_is_updated(db, user, notion_config, notebook):
+    """Another worker creates the notebook's record while this one calls Notion:
+    the upsert updates that record instead of violating uq_sync_notebook_metadata."""
+    async def other_worker_finishes_first(item):
+        db.add(
+            SyncRecord(
+                user_id=user.id, target_name="notion", item_type="notebook_metadata",
+                item_id=NB_UUID, notebook_uuid=NB_UUID, content_hash="older",
+                external_id="notion-page-1", status="success",
+            )
+        )
+        db.commit()
+        return SUCCESS
+
+    target = MagicMock()
+    target.sync_item = AsyncMock(side_effect=other_worker_finishes_first)
+    row = SyncQueue(
+        user_id=user.id, item_type="notebook_metadata", item_id=NB_UUID,
+        notebook_uuid=NB_UUID, content_hash="queued", target_name="notion",
+        status="pending", priority=5, scheduled_at=NOW,
+    )
+    db.add(row)
+    db.commit()
+
+    with patch("app.integrations.registry.NotionSyncTarget", return_value=target), \
+         patch.object(IntegrationConfig, "get_config", return_value=NOTION_CONFIG):
+        await _run_worker(db)
+
+    db.expire_all()
+    record = db.query(SyncRecord).filter(SyncRecord.item_type == "notebook_metadata").one()
+    assert record.content_hash == target.sync_item.await_args.args[0].content_hash
+    assert db.query(SyncQueue).one().status == "completed"
 
 
 @pytest.mark.asyncio
 async def test_notebook_not_in_notion_is_skipped_without_record(db, user, notion_config):
-    target = MagicMock()
-    target._update_notion_page_properties = AsyncMock()
-    target.sync_item = AsyncMock(
-        return_value=SyncResult(status=SyncStatus.SKIPPED, metadata={"reason": "not synced"})
-    )
+    target = _target(SyncResult(status=SyncStatus.SKIPPED, metadata={"reason": "not synced"}))
 
-    with patch("app.integrations.notion_sync.NotionSyncTarget", return_value=target), \
+    with patch("app.integrations.registry.NotionSyncTarget", return_value=target), \
          patch.object(IntegrationConfig, "get_config", return_value=NOTION_CONFIG):
         await update_notebook_metadata(request=_open_request(0), current_user=user, db=db)
         await _run_worker(db)
 
-    target._update_notion_page_properties.assert_not_awaited()
     target.sync_item.assert_awaited_once()
     assert db.query(SyncRecord).filter(SyncRecord.item_type == "notebook_metadata").count() == 0
     assert db.query(SyncQueue).one().status == "completed"
@@ -291,19 +336,27 @@ async def test_notebook_not_in_notion_is_skipped_without_record(db, user, notion
 
 @pytest.mark.asyncio
 async def test_failed_properties_update_is_retried(db, user, notion_config):
-    _notebook_record(db, user)
-    target = MagicMock()
-    target._update_notion_page_properties = AsyncMock(return_value=False)
+    target = _target(
+        SyncResult(status=SyncStatus.RETRY, error_message="Failed to update Notion page metadata")
+    )
 
-    with patch("app.integrations.notion_sync.NotionSyncTarget", return_value=target), \
+    with patch("app.integrations.registry.NotionSyncTarget", return_value=target), \
          patch.object(IntegrationConfig, "get_config", return_value=NOTION_CONFIG):
         await update_notebook_metadata(request=_open_request(0), current_user=user, db=db)
         await _run_worker(db)
 
+        item = db.query(SyncQueue).one()
+        assert item.status == "pending"
+        assert item.retry_count == 1
+        assert item.scheduled_at > datetime.utcnow()
+
+        # Another open while the row waits for its retry reuses it and keeps
+        # the backoff.
+        scheduled_at = item.scheduled_at
+        await update_notebook_metadata(request=_open_request(1), current_user=user, db=db)
+
     item = db.query(SyncQueue).one()
-    assert item.status == "pending"
-    assert item.retry_count == 1
-    assert item.scheduled_at > datetime.utcnow()
+    assert (item.status, item.retry_count, item.scheduled_at) == ("pending", 1, scheduled_at)
     assert db.query(SyncRecord).filter(SyncRecord.item_type == "notebook_metadata").count() == 0
 
 
@@ -385,3 +438,31 @@ def test_migration_adds_metadata_index_without_deleting_records():
     }
     run("upgrade")
     engine.dispose()
+
+
+# ------------------------------------------------------------------ queue_sync callers
+
+
+def test_enqueue_after_ocr_counts_nothing_when_page_already_in_sync(db, user, notion_config, notebook, caplog):
+    """queue_sync returns None for a page already synced with this text; the
+    upload/OCR follow-up must treat that as 'nothing to do', not as an error."""
+    from app.models.page import Page
+    from app.services.fingerprinting import fingerprint_page
+    from app.services.page_events import enqueue_integration_syncs
+
+    page_uuid = "0b0b0b0b-0000-4000-8000-0000000000aa"
+    page = Page(notebook_id=notebook.id, page_uuid=page_uuid, ocr_status="completed", ocr_text="hello")
+    db.add(page)
+    db.add(
+        SyncRecord(
+            user_id=user.id, target_name="notion", item_type="page_text", item_id="1",
+            page_uuid=page_uuid, notebook_uuid=NB_UUID, external_id="block",
+            content_hash=fingerprint_page(NB_UUID, 0, "hello", page_uuid), status="success",
+        )
+    )
+    db.commit()
+
+    with caplog.at_level("ERROR", logger="app.services.page_events"):
+        assert enqueue_integration_syncs(db, page, notebook) == 0
+    assert not caplog.records
+    assert db.query(SyncQueue).count() == 0

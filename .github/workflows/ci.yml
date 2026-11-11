@@ -91,7 +91,7 @@ jobs:
       - name: Concurrency tests on PostgreSQL
         run: |
           cd backend
-          TEST_POSTGRES_URL="$DATABASE_URL" poetry run pytest tests/unit/test_concurrent_upserts_postgres.py -v
+          TEST_POSTGRES_URL="$DATABASE_URL" poetry run pytest tests/unit/test_concurrent_upserts_postgres.py tests/unit/test_metadata_sync_postgres.py tests/unit/test_notebook_metadata_record_postgres.py -v
 
   dashboard-checks:
     runs-on: ubuntu-latest

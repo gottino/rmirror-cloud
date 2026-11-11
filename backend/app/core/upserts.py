@@ -17,18 +17,30 @@ from app.models.notebook import Notebook
 from app.models.page import Page
 
 
-def _insert_ignore_conflict(db: Session, model, values: dict[str, Any], keys: list[str]) -> bool:
-    """INSERT ... ON CONFLICT (keys) DO NOTHING. Returns True if a row was inserted."""
+def dialect_insert(db: Session, model):
+    """An ``INSERT`` for the session's dialect that supports ``ON CONFLICT``."""
     dialect = db.get_bind().dialect.name
     if dialect == "postgresql":
-        insert = postgresql.insert
-    elif dialect == "sqlite":
-        insert = sqlite.insert
-    else:  # pragma: no cover - only PostgreSQL and SQLite are supported
-        raise NotImplementedError(f"Unsupported database dialect: {dialect}")
+        return postgresql.insert(model.__table__)
+    if dialect == "sqlite":
+        return sqlite.insert(model.__table__)
+    # pragma: no cover - only PostgreSQL and SQLite are supported
+    raise NotImplementedError(f"Unsupported database dialect: {dialect}")
 
-    stmt = insert(model.__table__).values(**values).on_conflict_do_nothing(index_elements=keys)
-    result = db.execute(stmt)
+
+def insert_ignoring_conflicts(db: Session, model, keys: list[str] | None = None):
+    """``INSERT ... ON CONFLICT (keys) DO NOTHING`` for the session's dialect.
+
+    With ``keys=None`` any unique violation is ignored. Works with a single
+    ``.values(...)`` and with a list of parameter sets (``RETURNING`` then
+    yields only the rows actually inserted).
+    """
+    return dialect_insert(db, model).on_conflict_do_nothing(index_elements=keys)
+
+
+def _insert_ignore_conflict(db: Session, model, values: dict[str, Any], keys: list[str]) -> bool:
+    """INSERT ... ON CONFLICT (keys) DO NOTHING. Returns True if a row was inserted."""
+    result = db.execute(insert_ignoring_conflicts(db, model, keys).values(**values))
     return result.rowcount == 1
 
 

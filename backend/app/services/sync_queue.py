@@ -3,12 +3,16 @@
 Provides functions to queue sync operations when OCR completes or catch-up sync is needed.
 """
 
+import json
 from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
+from app.core.sync_engine import ContentFingerprint
+from app.integrations.registry import NOTEBOOK_METADATA, PAGE_TEXT, TODO, targets_supporting
+from app.models.notebook import Notebook
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.services.fingerprinting import fingerprint_highlight, fingerprint_page, fingerprint_todo
 
@@ -70,14 +74,16 @@ def queue_sync(
     # For page_text items, check by page_uuid (reMarkable's unique page identifier)
     # This ensures we update existing pages rather than creating duplicates
     if item_type == 'page_text' and page_uuid:
-        # Check if already queued for this specific page
+        # Check if already queued for this specific page. Only a 'pending' row can
+        # still absorb new content; a 'processing' row keeps the content it
+        # started with, so changed content gets its own new pending row below.
         existing_queue = (
             db.query(SyncQueue)
             .filter(
                 SyncQueue.page_uuid == page_uuid,
                 SyncQueue.target_name == target_name,
                 SyncQueue.user_id == user_id,
-                SyncQueue.status.in_(['pending', 'processing']),
+                SyncQueue.status == 'pending',
             )
             .first()
         )
@@ -111,6 +117,44 @@ def queue_sync(
             # row is written (the sync record already says it is in sync).
             return None
         # If existing_sync exists but content_hash is different, we'll queue it for update
+    elif item_type == NOTEBOOK_METADATA and notebook_uuid:
+        # One pending row per notebook and target: the agent reports metadata on
+        # every open, and the worker rebuilds the payload from the notebook when
+        # it runs, so a pending row just takes the newest hash. Its retry
+        # schedule is kept, so frequent opens do not defeat the backoff.
+        existing_queue = (
+            db.query(SyncQueue)
+            .filter(
+                SyncQueue.user_id == user_id,
+                SyncQueue.target_name == target_name,
+                SyncQueue.item_type == NOTEBOOK_METADATA,
+                SyncQueue.notebook_uuid == notebook_uuid,
+                SyncQueue.status == 'pending',
+            )
+            .first()
+        )
+        if existing_queue:
+            if existing_queue.content_hash != content_hash:
+                existing_queue.content_hash = content_hash
+                existing_queue.updated_at = datetime.utcnow()
+                db.commit()
+            return existing_queue
+
+        # The worker keeps one record per notebook and target with the hash it
+        # last wrote; unchanged metadata is not queued again.
+        existing_sync = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == user_id,
+                SyncRecord.target_name == target_name,
+                SyncRecord.item_type == NOTEBOOK_METADATA,
+                SyncRecord.notebook_uuid == notebook_uuid,
+                SyncRecord.status == 'success',
+            )
+            .first()
+        )
+        if existing_sync and existing_sync.content_hash == content_hash:
+            return None
     else:
         # For other item types, use content_hash for deduplication
         existing_queue = (
@@ -181,7 +225,7 @@ def queue_page_sync(
 
     Called when OCR completes for a page.
     Only queues to integrations that support page text (notion, etc.).
-    Does NOT queue to todo-only integrations (notion-todos, todoist, ticktick).
+    Does NOT queue to todo-only integrations (notion-todos, todoist).
 
     Args:
         db: Database session
@@ -208,18 +252,13 @@ def queue_page_sync(
     # Generate content hash
     content_hash = fingerprint_page(notebook_uuid, page_number, ocr_text, page_uuid)
 
-    # Integrations excluded from push-based page sync queue.
-    # - Todo-only integrations only receive todo items
-    # - Pull-based integrations (obsidian) handle their own sync via polling endpoints
-    EXCLUDED_FROM_PAGE_SYNC = ['notion-todos', 'todoist', 'ticktick', 'obsidian']
-
-    # Get all enabled integrations that support page syncs
+    # Get all enabled integrations that accept page text (target registry)
     integrations = (
         db.query(IntegrationConfig)
         .filter(
             IntegrationConfig.user_id == user_id,
             IntegrationConfig.is_enabled == True,
-            ~IntegrationConfig.target_name.in_(EXCLUDED_FROM_PAGE_SYNC),
+            IntegrationConfig.target_name.in_(targets_supporting(PAGE_TEXT)),
         )
         .all()
     )
@@ -256,7 +295,7 @@ def queue_todo_sync(
     """
     Queue todo sync to all enabled todo-specific integrations.
 
-    Only queues to integrations that support todos (notion-todos, todoist, ticktick, etc.).
+    Only queues to integrations that support todos (notion-todos, todoist).
     Does NOT queue to general notebook integrations (notion).
 
     Args:
@@ -274,17 +313,13 @@ def queue_todo_sync(
     # Generate content hash and fuzzy signature
     content_hash, _ = fingerprint_todo(todo_text, notebook_uuid, page_number)
 
-    # Define which integration types support todos
-    # These are dedicated todo integrations, NOT general notebook integrations
-    TODO_INTEGRATION_TYPES = ['notion-todos', 'todoist', 'ticktick']
-
-    # Get all enabled integrations that support todos
+    # Get all enabled integrations that accept todos (target registry)
     integrations = (
         db.query(IntegrationConfig)
         .filter(
             IntegrationConfig.user_id == user_id,
             IntegrationConfig.is_enabled == True,
-            IntegrationConfig.target_name.in_(TODO_INTEGRATION_TYPES),
+            IntegrationConfig.target_name.in_(targets_supporting(TODO)),
         )
         .all()
     )
@@ -307,6 +342,89 @@ def queue_todo_sync(
             queued_entries.append(queue_entry)
 
     return queued_entries
+
+
+def _page_count_from_content(content_json: Optional[str]) -> int:
+    """Page count from a notebook's .content data (pageCount, else its page list)."""
+    if not content_json:
+        return 0
+    try:
+        content_data = json.loads(content_json)
+    except (TypeError, ValueError):
+        return 0
+    if not isinstance(content_data, dict):
+        return 0
+    page_count = content_data.get("pageCount")
+    if isinstance(page_count, int):
+        return page_count
+    pages = content_data.get("pages") or (content_data.get("cPages") or {}).get("pages") or []
+    return len(pages) if isinstance(pages, list) else 0
+
+
+def notebook_metadata_payload(notebook: Notebook) -> dict:
+    """Properties-only data for a notebook_metadata sync (no page content)."""
+    # reMarkable's own lastModified (ms since epoch); notebook.updated_at changes
+    # on every database write, so it is not used here.
+    last_modified_at = None
+    if notebook.metadata_json:
+        try:
+            meta = json.loads(notebook.metadata_json)
+            if meta.get("lastModified"):
+                last_modified_at = datetime.fromtimestamp(
+                    int(meta["lastModified"]) / 1000.0
+                ).isoformat()
+        except (ValueError, KeyError, TypeError, AttributeError):
+            pass
+
+    title = notebook.visible_name or "Untitled Notebook"
+    return {
+        "notebook_uuid": notebook.notebook_uuid,
+        "notebook_name": title,
+        "title": title,
+        "page_count": _page_count_from_content(notebook.content_json),
+        "full_path": notebook.full_path or "",
+        "last_opened_at": notebook.last_opened.isoformat() if notebook.last_opened else None,
+        "last_modified_at": last_modified_at,
+    }
+
+
+def queue_notebook_metadata_sync(db: Session, notebook: Notebook) -> list[SyncQueue]:
+    """Queue a properties-only update of the notebook for every target that accepts one.
+
+    The worker rebuilds the payload from the database when it runs, so a row
+    always writes the notebook's latest metadata. There is at most one pending
+    row per notebook and target, and none when the target already has this
+    metadata (see queue_sync). Makes no external calls.
+
+    Returns the pending queue rows, new or reused.
+    """
+    content_hash = ContentFingerprint.for_notebook_metadata(notebook_metadata_payload(notebook))
+
+    integrations = (
+        db.query(IntegrationConfig)
+        .filter(
+            IntegrationConfig.user_id == notebook.user_id,
+            IntegrationConfig.is_enabled == True,  # noqa: E712
+            IntegrationConfig.target_name.in_(targets_supporting(NOTEBOOK_METADATA)),
+        )
+        .all()
+    )
+
+    queued = []
+    for integration in integrations:
+        entry = queue_sync(
+            db=db,
+            user_id=notebook.user_id,
+            item_type=NOTEBOOK_METADATA,
+            item_id=notebook.notebook_uuid,
+            content_hash=content_hash,
+            target_name=integration.target_name,
+            notebook_uuid=notebook.notebook_uuid,
+            priority=5,
+        )
+        if entry is not None:
+            queued.append(entry)
+    return queued
 
 
 def queue_highlight_sync(
