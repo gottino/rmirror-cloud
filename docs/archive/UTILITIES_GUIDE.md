@@ -28,7 +28,7 @@ poetry run python backfill_page_hashes.py /path/to/remarkable/source
 **Example:**
 ```bash
 poetry run python backfill_page_hashes.py \
-  "/Users/gabriele/Library/Containers/com.remarkable.desktop/Data/Library/Application Support/remarkable/desktop"
+  "~/Library/Containers/com.remarkable.desktop/Data/Library/Application Support/remarkable/desktop"
 ```
 
 **What it does:**
@@ -41,17 +41,17 @@ poetry run python backfill_page_hashes.py \
 
 **Output Example:**
 ```
-Using reMarkable source directory: /Users/gabriele/Library/.../remarkable/desktop
+Using reMarkable source directory: ~/Library/.../remarkable/desktop
 Found 1,234 pages without file hashes (updated before 2025-12-01)
 
 Processing 1,234 pages...
 [1/1234] Notebook: Project Notes, Page: abc123def456...
-   File: /Users/gabriele/Library/.../abc123def456.rm
+   File: ~/Library/.../abc123def456.rm
    Hash: 8f3d2a1b9c4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a
    ✓ Updated page ID 456
 
 [2/1234] Notebook: Meeting Notes, Page: def789ghi012...
-   File: /Users/gabriele/Library/.../def789ghi012.rm
+   File: ~/Library/.../def789ghi012.rm
    Hash: 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2
    ✓ Updated page ID 457
 

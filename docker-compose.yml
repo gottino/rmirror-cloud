@@ -1,129 +1,48 @@
-version: '3.8'
+# Local-development helpers only.
+#
+# SQLite is the default local database (no setup needed, see README). Use this
+# file only to test the backend against PostgreSQL and S3-compatible storage:
+#
+#   docker compose up -d
+#   DATABASE_URL=postgresql://rmirror:rmirror_dev_password@localhost:5432/rmirror
+#   S3_ENDPOINT_URL=http://localhost:9000  (create the bucket in the console, port 9001)
+#
+# The backend, dashboard and agent run on the host, not in containers.
 
 services:
-  # PostgreSQL Database
   postgres:
-    image: postgres:15-alpine
-    container_name: rmirror-db
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: rmirror
       POSTGRES_USER: rmirror
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rmirror_dev_password}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rmirror"]
+      test: ["CMD-SHELL", "pg_isready -U rmirror -d rmirror"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Redis for job queue
-  redis:
-    image: redis:7-alpine
-    container_name: rmirror-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  # MinIO (S3-compatible storage for local dev)
   minio:
     image: minio/minio:latest
-    container_name: rmirror-storage
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"  # API
-      - "9001:9001"  # Console
+      - "127.0.0.1:9000:9000"  # S3 API
+      - "127.0.0.1:9001:9001"  # web console
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-
-  # FastAPI Backend
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: rmirror-backend
-    environment:
-      DATABASE_URL: postgresql://rmirror:${DB_PASSWORD:-changeme}@postgres:5432/rmirror
-      REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      S3_BUCKET: rmirror-files
-      CLAUDE_API_KEY: ${CLAUDE_API_KEY}
-      ENVIRONMENT: development
-    ports:
-      - "8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-  # OCR Worker
-  worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: rmirror-worker
-    environment:
-      DATABASE_URL: postgresql://rmirror:${DB_PASSWORD:-changeme}@postgres:5432/rmirror
-      REDIS_URL: redis://redis:6379/0
-      S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      S3_BUCKET: rmirror-files
-      CLAUDE_API_KEY: ${CLAUDE_API_KEY}
-      ENVIRONMENT: development
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: python -m app.workers.main
-
-  # Next.js Dashboard (optional - can run separately with npm run dev)
-  # dashboard:
-  #   build:
-  #     context: ./dashboard
-  #     dockerfile: Dockerfile.dev
-  #   container_name: rmirror-dashboard
-  #   environment:
-  #     NEXT_PUBLIC_API_URL: http://localhost:8000
-  #   ports:
-  #     - "3000:3000"
-  #   volumes:
-  #     - ./dashboard:/app
-  #     - /app/node_modules
-  #   command: npm run dev
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
-  redis_data:
   minio_data:
-
-networks:
-  default:
-    name: rmirror-network
