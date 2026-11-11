@@ -189,7 +189,7 @@ poetry run python tests/manual_test_data/reset_quota_and_process.py test@example
    - Verify warning banner visible
 
 3. **Verify agent:**
-   - Open agent UI (http://localhost:9090 or check agent status)
+   - Open agent UI (http://localhost:5555 or check agent status)
    - Check quota shows "2/30 pages remaining" (yellow)
 
 4. **Consume 1 page:** Upload via agent or simulate

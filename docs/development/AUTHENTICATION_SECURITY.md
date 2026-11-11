@@ -539,9 +539,9 @@ curl https://rmirror.io/v1/auth/status
 
 ## Related Documentation
 
-- [Clerk Setup Guide](CLERK_SETUP.md) - Detailed Clerk configuration
-- [Backend README](README.md) - General backend documentation
-- [CHANGELOG](../CHANGELOG.md) - Authentication-related changes
+- [Clerk Setup Guide](../../backend/CLERK_SETUP.md) - Detailed Clerk configuration
+- [Backend README](../../backend/README.md) - General backend documentation
+- [CHANGELOG](../../CHANGELOG.md) - Authentication-related changes
 
 ## References
 
