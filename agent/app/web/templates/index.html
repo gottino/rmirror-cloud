@@ -1718,7 +1718,7 @@
                 } else if (data.has_update) {
                     message.style.background = '#fff3cd';
                     message.style.color = '#856404';
-                    message.innerHTML = `<strong>Update available!</strong> Version ${data.latest_version} is ready.`;
+                    message.textContent = `Update available! Version ${data.latest_version} is ready.`;
                     message.style.display = 'block';
 
                     if (data.release_notes) {
@@ -1733,7 +1733,7 @@
                 } else {
                     message.style.background = '#d4edda';
                     message.style.color = '#155724';
-                    message.innerHTML = `<strong>You're up to date!</strong> Version ${data.current_version} is the latest.`;
+                    message.textContent = `You're up to date! Version ${data.current_version} is the latest.`;
                     message.style.display = 'block';
                 }
             } catch (error) {
