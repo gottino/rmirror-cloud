@@ -82,7 +82,7 @@ Option 2: Manually trigger deployment from GitHub:
 After deployment completes, SSH to the server and verify:
 
 ```bash
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 
 # Check that S3 variables are set
 cd /var/www/rmirror-cloud/backend
@@ -119,7 +119,7 @@ If you have existing files stored locally on the server, you can migrate them to
 
 ```bash
 # SSH to server
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 
 # Check current local storage size
 du -sh /var/www/rmirror-cloud/backend/storage/
@@ -171,7 +171,7 @@ b2 ls b2://rmirror-user-data/users/
 
 **Fix:**
 ```bash
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 cd /var/www/rmirror-cloud/backend
 cat .env | grep S3_
 sudo systemctl restart rmirror
