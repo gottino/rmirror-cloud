@@ -12,6 +12,13 @@ on:
   # Allow manual deployment from GitHub UI
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-landing
+  cancel-in-progress: false
+
 jobs:
   deploy-landing:
     name: Deploy Landing Page to Hetzner
