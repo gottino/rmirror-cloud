@@ -25,13 +25,11 @@ from app.core.rm_metadata import RMMetadataParser
 from app.database import get_db
 from app.dependencies import get_storage_service
 from app.models.notebook import DocumentType, Notebook
-from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
 from app.models.sync_record import IntegrationConfig
 from app.models.user import User
 from app.services import quota_service
-from app.services.fingerprinting import fingerprint_page
-from app.services.sync_queue import queue_sync
+from app.services.page_events import on_ocr_completed, update_obsidian_content_hash
 from app.storage import StorageService
 from app.utils.files import calculate_file_hash, parse_uuid, require_uuid
 from app.utils.umami import track_event
@@ -221,9 +219,10 @@ async def process_rm_file(
             page is None or
             page.file_hash != file_hash or
             page.ocr_status == OcrStatus.FAILED or
-            page.ocr_status == OcrStatus.NOT_SYNCED or  # Page stub from metadata sync
-            (page.ocr_status == OcrStatus.COMPLETED and not page.ocr_text)
+            page.ocr_status == OcrStatus.NOT_SYNCED  # Page stub from metadata sync
         )
+        # An unchanged COMPLETED page is not re-OCR'd even when its text is
+        # empty: a page with no handwriting legitimately OCRs to "".
 
         extracted_text = ""
         pdf_bytes = None
@@ -234,27 +233,41 @@ async def process_rm_file(
             logger.info(f"Converting {rm_file.filename} to PDF (file hash changed or new file)")
             pdf_bytes = await asyncio.to_thread(converter.rm_to_pdf_bytes, temp_rm_path)
 
-            # Check quota BEFORE OCR (not before upload)
-            has_quota = quota_service.check_quota(db, current_user.id)
+            # Reserve quota BEFORE OCR (not before upload). The reservation is a
+            # single conditional UPDATE, so concurrent uploads can't overspend.
+            try:
+                has_quota = quota_service.reserve_quota(db, current_user.id)
+            except quota_service.NoSubscriptionError:
+                # Should not happen (the Clerk webhook creates a subscription
+                # with the user), but treat it as "no quota" rather than a 500.
+                logger.error(
+                    f"User {current_user.id} has no subscription; storing page "
+                    f"without OCR (PENDING_QUOTA)"
+                )
+                has_quota = False
+                quota_status = None
+            else:
+                quota_status = (
+                    None if has_quota else quota_service.get_quota_status(db, current_user.id)
+                )
 
             if has_quota:
-                # Quota available - run OCR
+                # Quota reserved - run OCR, giving the unit back if OCR fails
                 logger.info(f"Extracting text from {rm_file.filename} via OCR")
-                extracted_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
-
-                # Consume quota after successful OCR
                 try:
-                    quota_service.consume_quota(db, current_user.id, amount=1)
+                    extracted_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
+                except Exception:
+                    quota_service.release_quota(db, current_user.id)
+                    raise
+                if extracted_text:
                     logger.info(f"Consumed 1 OCR quota unit for user {current_user.id}")
-                    ocr_status = OcrStatus.COMPLETED
-                except quota_service.QuotaExceededError as e:
-                    # Race condition - quota exhausted between check and consume
-                    logger.warning(f"Quota exhausted during processing: {e}")
-                    ocr_status = OcrStatus.PENDING_QUOTA
-                    extracted_text = ""
+                else:
+                    # A blank page is a legitimate result; don't charge for it.
+                    quota_service.release_quota(db, current_user.id)
+                    logger.info(f"OCR found no text in {rm_file.filename}; quota not charged")
+                ocr_status = OcrStatus.COMPLETED
             else:
                 # Quota exhausted - skip OCR but keep page
-                quota_status = quota_service.get_quota_status(db, current_user.id)
 
                 # Hard cap: Limit pending pages to prevent abuse
                 pending_count = db.query(Page).filter(
@@ -275,15 +288,16 @@ async def process_rm_file(
                         }
                     )
 
-                await track_event(
-                    "quota_exceeded",
-                    {"used": quota_status["used"], "limit": quota_status["limit"]},
-                    user_id=current_user.id,
-                )
-                logger.info(
-                    f"Quota exhausted ({quota_status['used']}/{quota_status['limit']}) - "
-                    f"page uploaded without OCR (will be processed when quota resets)"
-                )
+                if quota_status is not None:
+                    await track_event(
+                        "quota_exceeded",
+                        {"used": quota_status["used"], "limit": quota_status["limit"]},
+                        user_id=current_user.id,
+                    )
+                    logger.info(
+                        f"Quota exhausted ({quota_status['used']}/{quota_status['limit']}) - "
+                        f"page uploaded without OCR (will be processed when quota resets)"
+                    )
                 ocr_status = OcrStatus.PENDING_QUOTA
                 extracted_text = ""
         else:
@@ -346,29 +360,14 @@ async def process_rm_file(
         db.commit()
         db.refresh(page)
 
-        # Update notebook's Obsidian content hash for pull-based sync
-        try:
-            from app.services.obsidian_service import compute_notebook_content_hash
-
-            ocr_pages = (
-                db.query(NotebookPage.page_number, Page.ocr_text)
-                .join(Page, NotebookPage.page_id == Page.id)
-                .filter(
-                    NotebookPage.notebook_id == notebook.id,
-                    Page.ocr_status == OcrStatus.COMPLETED.value,
-                    Page.ocr_text.isnot(None),
-                )
-                .order_by(NotebookPage.page_number)
-                .all()
-            )
-
-            notebook.obsidian_content_hash = compute_notebook_content_hash(
-                [(pn, text) for pn, text in ocr_pages]
-            )
-            db.commit()
-        except Exception as e:
-            logger.error(f"Failed to update obsidian content hash: {e}")
-            # Non-fatal — don't block the upload
+        if ocr_status == OcrStatus.COMPLETED:
+            # OCR ran in this request: Obsidian hash + integration syncs. Syncs
+            # depend on OCR having produced text, not on quota left afterwards.
+            on_ocr_completed(db, page, notebook)
+        else:
+            # Page may have left COMPLETED (e.g. new content stored as
+            # PENDING_QUOTA), so keep the Obsidian content hash current.
+            update_obsidian_content_hash(db, notebook)
 
         # Track first OCR milestone
         if ocr_status == OcrStatus.COMPLETED and not current_user.first_ocr_completed_at:
@@ -393,86 +392,6 @@ async def process_rm_file(
             f"notebook_id={notebook.id}, page_id={page.id}, "
             f"extracted {len(extracted_text)} characters"
         )
-
-        # Queue sync to active integrations only if OCR completed successfully
-        # Don't sync if: quota exhausted (PENDING_QUOTA), processing failed, or no text extracted
-        if ocr_status == OcrStatus.COMPLETED and extracted_text:
-            # Double-check quota for integration syncing
-            # If quota exhausted, skip integration sync (per strategy: block integrations when quota exceeded)
-            has_quota = quota_service.check_quota(db, current_user.id)
-
-            if not has_quota:
-                logger.warning(
-                    f"Skipping integration sync for user {current_user.id} - quota exhausted. "
-                    "OCR completed but integrations will not be updated."
-                )
-            else:
-                # Get the page number from the notebook_pages mapping
-                notebook_page = (
-                    db.query(NotebookPage)
-                    .filter(
-                        NotebookPage.notebook_id == notebook.id,
-                        NotebookPage.page_id == page.id,
-                    )
-                    .first()
-                )
-
-                page_number = notebook_page.page_number if notebook_page else None
-
-                # Get all active integrations for this user
-                active_integrations = (
-                    db.query(IntegrationConfig)
-                    .filter(
-                        IntegrationConfig.user_id == current_user.id,
-                        IntegrationConfig.is_enabled == True,
-                    )
-                    .all()
-                )
-
-                logger.info(f"Found {len(active_integrations)} active integrations for user {current_user.id}")
-
-                # Queue sync for each active integration
-                for integration in active_integrations:
-                    # Skip pull-based integrations (they sync via their own polling endpoints)
-                    if integration.target_name == 'obsidian':
-                        continue
-
-                    try:
-                        # Generate content hash for this page
-                        content_hash = fingerprint_page(
-                            notebook_uuid=notebook_uuid,
-                            page_number=page_number or 0,
-                            ocr_text=extracted_text,
-                            page_uuid=page_uuid,
-                        )
-
-                        # Queue the sync
-                        queue_entry = queue_sync(
-                            db=db,
-                            user_id=current_user.id,
-                            item_type='page_text',
-                            item_id=str(page.id),
-                            content_hash=content_hash,
-                            target_name=integration.target_name,
-                            page_uuid=page_uuid,
-                            notebook_uuid=notebook_uuid,
-                            page_number=page_number,
-                            metadata={
-                                'notebook_name': notebook.visible_name,
-                                'notebook_id': notebook.id,
-                                'page_id': page.id,
-                            }
-                        )
-
-                        logger.info(
-                            f"Queued sync to {integration.target_name}: "
-                            f"queue_id={queue_entry.id}, status={queue_entry.status}"
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to queue sync to {integration.target_name}: {e}")
-                        # Don't fail the whole request if queueing fails
-
-                db.commit()
 
         return ProcessRMFileResponse(
             success=True,
