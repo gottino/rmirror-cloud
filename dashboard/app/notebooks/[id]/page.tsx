@@ -7,7 +7,7 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu, Search, X, Loader2, Trash2 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
-import { getNotebook, getIntegrations, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
+import { getNotebook, getIntegrations, QuotaExceededError, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
@@ -19,7 +19,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
 
 interface PageCardProps {
   page: Page;
-  token: string;
+  getToken: () => Promise<string>;
   copiedPageId: number | null;
   setCopiedPageId: (id: number | null) => void;
   quota: QuotaStatus | null;
@@ -27,7 +27,7 @@ interface PageCardProps {
   cardRef?: (el: HTMLDivElement | null) => void;
 }
 
-function PageCard({ page, token, copiedPageId, setCopiedPageId, quota, isTargetPage, cardRef }: PageCardProps) {
+function PageCard({ page, getToken, copiedPageId, setCopiedPageId, quota, isTargetPage, cardRef }: PageCardProps) {
   const [showPdf, setShowPdf] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfBlob, setPdfBlob] = useState<string | null>(null);
@@ -50,6 +50,7 @@ function PageCard({ page, token, copiedPageId, setCopiedPageId, quota, isTargetP
       setLoadingPdf(true);
       try {
         const url = `${API_URL}/pages/${page.id}/pdf`;
+        const token = await getToken();
         const response = await fetch(url, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -361,7 +362,6 @@ function NotebookPageContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedPageId, setCopiedPageId] = useState<number | null>(null);
-  const [authToken, setAuthToken] = useState<string>('');
   const { quota } = useQuota();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
@@ -387,6 +387,17 @@ function NotebookPageContent() {
   const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
 
+  // Always fetch a fresh token at the point of use (Clerk tokens are short-lived)
+  const getFreshToken = useCallback(async (): Promise<string> => {
+    const token = isDevelopmentMode
+      ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+      : await getToken();
+    if (!token) {
+      throw new Error('Failed to get authentication token');
+    }
+    return token;
+  }, [isDevelopmentMode, getToken]);
+
   useEffect(() => {
     if (!effectiveIsSignedIn) {
       router.push('/');
@@ -396,16 +407,7 @@ function NotebookPageContent() {
     const fetchNotebook = async () => {
       try {
         // In dev mode, get JWT token from env var or localStorage
-        const token = isDevelopmentMode
-          ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-          : await getToken();
-
-        if (!token) {
-          throw new Error('Failed to get authentication token');
-        }
-
-        // Store token for PDF fetching
-        setAuthToken(token);
+        const token = await getFreshToken();
 
         const id = Number(params.id);
         if (isNaN(id)) {
@@ -423,6 +425,10 @@ function NotebookPageContent() {
           // Non-critical — just leave hasNotion as false
         }
       } catch (err) {
+        if (err instanceof QuotaExceededError) {
+          setQuotaModalData(err.quota);
+          setQuotaModalOpen(true);
+        }
         console.error('Error fetching notebook:', err);
         setError(err instanceof Error ? err.message : 'Failed to fetch notebook');
       } finally {
@@ -431,7 +437,7 @@ function NotebookPageContent() {
     };
 
     fetchNotebook();
-  }, [params.id, effectiveIsSignedIn, getToken, router, isDevelopmentMode]);
+  }, [params.id, effectiveIsSignedIn, getFreshToken, router]);
 
   // Scroll to target page when navigating from search results
   useEffect(() => {
@@ -454,15 +460,16 @@ function NotebookPageContent() {
 
   // Handle export
   const handleExport = async (format: 'markdown' | 'pdf') => {
-    if (!notebook || !authToken) return;
+    if (!notebook) return;
 
     setExporting(true);
     setExportMenuOpen(false);
 
     try {
+      const token = await getFreshToken();
       const response = await fetch(`${API_URL}/notebooks/${notebook.id}/export?format=${format}`, {
         headers: {
-          'Authorization': `Bearer ${authToken}`,
+          'Authorization': `Bearer ${token}`,
         },
       });
 
@@ -976,7 +983,7 @@ function NotebookPageContent() {
                   <PageCard
                     key={page.id}
                     page={page}
-                    token={authToken}
+                    getToken={getFreshToken}
                     copiedPageId={copiedPageId}
                     setCopiedPageId={setCopiedPageId}
                     quota={quota}

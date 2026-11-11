@@ -137,7 +137,7 @@ export default function BillingPage() {
             </div>
 
             {/* Pro tier preview */}
-            <ProTierInfoCard variant="billing" showPriceDetail analyticsSource="billing_page" />
+            <ProTierInfoCard variant="billing" showPriceDetail />
 
             {/* Beta note */}
             {quota?.is_beta && (

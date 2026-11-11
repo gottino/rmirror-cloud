@@ -66,10 +66,33 @@ describe('API Client', () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 402,
-        json: () => Promise.resolve({ quota: mockQuota }),
+        json: () => Promise.resolve({ detail: { message: 'Quota exceeded', quota: mockQuota } }),
       });
 
       await expect(getQuotaStatus('test-token')).rejects.toThrow(QuotaExceededError);
+    });
+
+    it('throws a plain error on 402 without a detail.quota body', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 402,
+        json: () => Promise.resolve({ quota: { used: 30 } }),
+      });
+
+      const promise = getQuotaStatus('test-token');
+      await expect(promise).rejects.toThrow('Quota exceeded');
+      await expect(promise).rejects.not.toBeInstanceOf(QuotaExceededError);
+    });
+
+    it('exposes the backend quota on the thrown error', async () => {
+      const quota = { used: 30, limit: 30, is_exhausted: true };
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 402,
+        json: () => Promise.resolve({ detail: { message: 'x', quota } }),
+      });
+
+      await expect(getQuotaStatus('t')).rejects.toMatchObject({ quota });
     });
 
     it('throws generic error on 500 response', async () => {
@@ -140,7 +163,7 @@ describe('API Client', () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 402,
-        json: () => Promise.resolve({ quota: mockQuota }),
+        json: () => Promise.resolve({ detail: { message: 'Quota exceeded', quota: mockQuota } }),
       });
 
       await expect(getNotebooks('test-token')).rejects.toThrow(QuotaExceededError);
