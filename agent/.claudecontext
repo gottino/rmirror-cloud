@@ -127,7 +127,7 @@ Configuration in `~/.rmirror/config.yaml`:
 ```yaml
 # reMarkable sync folder
 remarkable:
-  sync_folder: "/Users/username/reMarkable"
+  sync_folder: "~/reMarkable"
 
 # Backend API
 api:

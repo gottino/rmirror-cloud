@@ -23,17 +23,17 @@ Run these three commands in **parallel background shells**:
 
 1. **Backend** (FastAPI on port 8000):
    ```bash
-   cd /Users/gabriele/Documents/Development/rmirror-cloud/backend && poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   cd ~/Documents/Development/rmirror-cloud/backend && poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 2. **Dashboard** (Next.js on port 3000):
    ```bash
-   cd /Users/gabriele/Documents/Development/rmirror-cloud/dashboard && npm run dev
+   cd ~/Documents/Development/rmirror-cloud/dashboard && npm run dev
    ```
 
 3. **Agent** (Flask web UI on port 5555):
    ```bash
-   cd /Users/gabriele/Documents/Development/rmirror-cloud/agent && poetry run python -m app.main --foreground --debug
+   cd ~/Documents/Development/rmirror-cloud/agent && poetry run python -m app.main --foreground --debug
    ```
 
 ### Starting Individual Components

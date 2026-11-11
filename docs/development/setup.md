@@ -61,7 +61,7 @@ backend/
 You'll need Docker installed. Start PostgreSQL, Redis, and MinIO:
 
 ```bash
-cd /Users/gabriele/Documents/Development/rmirror-cloud
+cd ~/Documents/Development/rmirror-cloud
 docker compose up -d postgres redis minio
 ```
 
