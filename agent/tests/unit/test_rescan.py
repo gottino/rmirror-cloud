@@ -3,6 +3,7 @@ Tests for the start-up rescan (scan_for_changes), the first-run baseline rule,
 and recording initial-sync uploads in the manifest.
 """
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -166,3 +167,81 @@ class TestInitialSyncRecordsUploads:
 
         await initial._sync_notebook_content(NB)
         assert manifest.get(source / NB / "p1.rm") is None
+
+
+class TestWatcherEvents:
+    """Real watchdog event objects reach the queue with the right path."""
+
+    @pytest.fixture
+    def recorder(self, config):
+        added = []
+
+        class Recorder:
+            async def add(self, file_path, notebook_uuid, file_type):
+                added.append((file_path, notebook_uuid, file_type))
+                return True
+
+        return ReMarkableEventHandler(Recorder(), config), added
+
+    def test_created_modified_and_moved_events_are_queued(self, recorder, source):
+        from watchdog.events import FileCreatedEvent, FileModifiedEvent, FileMovedEvent
+
+        handler, added = recorder
+        page = source / NB / "p1.rm"
+        handler.on_any_event(FileCreatedEvent(str(page)))
+        handler.on_any_event(FileModifiedEvent(str(page)))
+        handler.on_any_event(FileMovedEvent(str(source / "tmp-write"), str(page)))
+
+        assert added == [(page, NB, "rm")] * 3
+
+    def test_moved_event_without_dest_falls_back_to_src(self, recorder, source):
+        from watchdog.events import FileMovedEvent
+
+        handler, added = recorder
+        page = source / NB / "p1.rm"
+        handler.on_any_event(FileMovedEvent(str(page), ""))
+        assert added == [(page, NB, "rm")]
+
+    def test_directory_events_are_ignored(self, recorder, source):
+        from watchdog.events import DirCreatedEvent, DirModifiedEvent, DirMovedEvent
+
+        handler, added = recorder
+        handler.on_any_event(DirCreatedEvent(str(source / NB)))
+        handler.on_any_event(DirModifiedEvent(str(source / NB)))
+        handler.on_any_event(DirMovedEvent(str(source / "x"), str(source / NB)))
+        assert added == []
+
+    async def test_one_desktop_save_uploads_each_file_once(self, source, config, manifest):
+        """created + modified + moved for the same path, debounced, gives a single upload."""
+        from watchdog.events import FileCreatedEvent, FileModifiedEvent, FileMovedEvent
+
+        scan_for_changes(source, ReMarkableEventHandler(MagicMock(), config), manifest)  # baseline
+
+        cloud_sync = MagicMock()
+        cloud_sync.upload_file = AsyncMock(return_value={"success": True})
+        now = [0.0]
+
+        async def fake_sleep(seconds):
+            now[0] += seconds
+
+        sync_queue = SyncQueue(config, cloud_sync, manifest=manifest, clock=lambda: now[0], sleep=fake_sleep)
+        sync_queue.metadata_sync = MagicMock(run=AsyncMock())
+        handler = ReMarkableEventHandler(sync_queue, config)
+
+        page = source / NB / "p1.rm"
+        meta = source / f"{NB}.metadata"
+        page.write_bytes(b"saved by the desktop app")
+        meta.write_text('{"visibleName": "saved"}')
+        for path in (page, meta):
+            handler.on_any_event(FileCreatedEvent(str(path)))
+            handler.on_any_event(FileModifiedEvent(str(path)))
+            handler.on_any_event(FileMovedEvent(str(source / "tmp"), str(path)))
+            now[0] += 0.1
+
+        # Called from inside a running loop, the handler schedules add() as tasks
+        await asyncio.sleep(0)
+        now[0] += config.sync.cooldown_seconds
+        stats = await sync_queue._run_once()
+        assert stats["uploaded"] == 2
+        assert sorted(c.args[0].name for c in cloud_sync.upload_file.await_args_list) == sorted([page.name, meta.name])
+        assert await sync_queue._run_once() is None

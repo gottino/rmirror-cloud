@@ -131,8 +131,12 @@ class ReMarkableEventHandler(FileSystemEventHandler):
         if event.event_type not in ("created", "modified", "moved"):
             return
 
-        # For moved events, use the destination path; otherwise use the source path
-        file_path_str = getattr(event, 'dest_path', event.src_path)
+        # For moved events, use the destination path; otherwise use the source path.
+        # (watchdog 4+ sets dest_path to '' on non-move events, so check the type.)
+        if event.event_type == "moved":
+            file_path_str = event.dest_path or event.src_path
+        else:
+            file_path_str = event.src_path
         file_path = Path(file_path_str)
 
         # Check if we should ignore this file

@@ -261,7 +261,7 @@ class CloudSync:
         return metadata_request
 
     async def upload_file(
-        self, file_path: Path, notebook_uuid: str, file_type: str
+        self, file_path: Path, notebook_uuid: str, file_type: str, _reauthenticated: bool = False
     ) -> dict:
         """
         Upload a single file to the backend.
@@ -426,11 +426,17 @@ class CloudSync:
             )
 
             if e.response.status_code == 401:
-                # Token expired, re-authenticate and retry
-                logger.info("Token expired, re-authenticating...")
                 self.authenticated = False
+                if _reauthenticated:
+                    # Re-auth succeeded but the upload is still rejected: retry only once
+                    raise AuthenticationRequiredError(
+                        f"Upload of {file_path.name} rejected after re-authentication. Please sign in again.",
+                        status_code=401,
+                    )
+                # Token expired, re-authenticate and retry once
+                logger.info("Token expired, re-authenticating...")
                 await self.authenticate()
-                return await self.upload_file(file_path, notebook_uuid, file_type)
+                return await self.upload_file(file_path, notebook_uuid, file_type, _reauthenticated=True)
 
             if e.response.status_code == 402:
                 # Quota exceeded
