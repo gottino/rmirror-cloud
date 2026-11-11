@@ -117,7 +117,9 @@ class Settings(BaseSettings):
     ]
 
     # File Processing
-    max_upload_size: int = 100 * 1024 * 1024  # 100MB
+    max_upload_size: int = 100 * 1024 * 1024  # 100MB, documents (PDF/EPUB)
+    max_rm_file_size: int = 10 * 1024 * 1024  # 10MB, a single .rm page file
+    max_metadata_file_size: int = 1024 * 1024  # 1MB, .metadata and .content JSON
     allowed_file_types: list[str] = [".pdf", ".epub"]
 
     # Email Configuration (Resend)

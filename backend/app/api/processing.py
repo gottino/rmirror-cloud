@@ -18,6 +18,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
+from app.config import get_settings
 from app.core.notebook_metadata_service import NotebookMetadataService
 from app.core.ocr_service import OCRService
 from app.core.rm_converter import RMConverter
@@ -33,7 +34,12 @@ from app.services import quota_service
 from app.services.fingerprinting import fingerprint_page
 from app.services.sync_queue import queue_sync
 from app.storage import StorageService
-from app.utils.files import calculate_file_hash, parse_uuid, require_uuid
+from app.utils.files import (
+    calculate_file_hash,
+    parse_uuid,
+    read_upload_limited,
+    require_uuid,
+)
 from app.utils.umami import track_event
 
 logger = logging.getLogger(__name__)
@@ -114,10 +120,18 @@ async def process_rm_file(
 
     logger.info(f"Processing .rm file: {page_uuid} for user {current_user.id}")
 
+    # Read the uploads with size limits (413 if exceeded) before any work is done
+    rm_content = await read_upload_limited(
+        rm_file, get_settings().max_rm_file_size, ".rm file"
+    )
+    metadata_bytes = None
+    if metadata_file:
+        metadata_bytes = await read_upload_limited(
+            metadata_file, get_settings().max_metadata_file_size, ".metadata file"
+        )
+
     temp_rm_path = None
     try:
-        # Read .rm file content
-        rm_content = await rm_file.read()
 
         # Calculate file hash
         file_stream = BytesIO(rm_content)
@@ -130,7 +144,7 @@ async def process_rm_file(
 
         if metadata_file:
             try:
-                metadata_content = await metadata_file.read()
+                metadata_content = metadata_bytes
                 parser = RMMetadataParser()
                 metadata_obj = parser.parse_bytes(metadata_content)
                 metadata_dict = {

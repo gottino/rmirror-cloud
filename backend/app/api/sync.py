@@ -66,6 +66,13 @@ class SyncStatsResponse(BaseModel):
 # ============================================================================
 
 
+# The agent sends its whole library in one request, and a large library can hold
+# a few thousand notebooks. These caps sit well above that; they exist to reject
+# absurd payloads, not to shape normal use.
+MAX_METADATA_NOTEBOOKS = 5000
+MAX_PAGES_PER_NOTEBOOK = 5000
+
+
 class NotebookMetadataItem(BaseModel):
     """Metadata for a single notebook to sync."""
 
@@ -73,7 +80,11 @@ class NotebookMetadataItem(BaseModel):
     visible_name: str = Field(..., description="Display name of the notebook")
     parent_uuid: Optional[str] = Field(None, description="Parent folder UUID, if any")
     document_type: str = Field("notebook", description="Document type (notebook, pdf, epub, folder)")
-    pages: List[str] = Field(default_factory=list, description="Ordered list of page UUIDs from .content file")
+    pages: List[str] = Field(
+        default_factory=list,
+        max_length=MAX_PAGES_PER_NOTEBOOK,
+        description="Ordered list of page UUIDs from .content file",
+    )
     # Optional metadata fields
     pinned: Optional[bool] = None
     deleted: Optional[bool] = None
@@ -92,7 +103,7 @@ class MetadataSyncRequest(BaseModel):
     """
 
     notebooks: List[NotebookMetadataItem] = Field(
-        ..., description="List of notebooks with their page structure"
+        ..., max_length=MAX_METADATA_NOTEBOOKS, description="List of notebooks with their page structure"
     )
 
 
