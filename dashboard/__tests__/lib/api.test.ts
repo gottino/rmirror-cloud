@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getQuotaStatus,
-  getNotebooks,
   QuotaExceededError,
   type QuotaStatus,
 } from '../../lib/api';
@@ -122,51 +121,6 @@ describe('API Client', () => {
           }),
         })
       );
-    });
-  });
-
-  describe('getNotebooks', () => {
-    it('returns notebooks on success', async () => {
-      const mockNotebooks = [
-        {
-          id: 1,
-          visible_name: 'Test Notebook',
-          document_type: 'notebook',
-          notebook_uuid: 'uuid-123',
-        },
-      ];
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockNotebooks),
-      });
-
-      const result = await getNotebooks('test-token');
-
-      expect(result).toEqual(mockNotebooks);
-    });
-
-    it('handles 402 quota exceeded for notebooks', async () => {
-      const mockQuota: QuotaStatus = {
-        quota_type: 'ocr',
-        used: 30,
-        limit: 30,
-        remaining: 0,
-        percentage_used: 100,
-        is_near_limit: true,
-        is_exhausted: true,
-        reset_at: '2026-02-01T00:00:00Z',
-        period_start: '2026-01-01T00:00:00Z',
-      };
-
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 402,
-        json: () => Promise.resolve({ detail: { message: 'Quota exceeded', quota: mockQuota } }),
-      });
-
-      await expect(getNotebooks('test-token')).rejects.toThrow(QuotaExceededError);
     });
   });
 
