@@ -8,7 +8,7 @@ rMirror Cloud is a comprehensive cloud service that brings your reMarkable table
 
 **Key Features:**
 - 📓 **Cloud Notebook Storage** - Sync and store your reMarkable notebooks
-- 🔍 **OCR Processing** - Extract text from handwritten notes using Claude Vision API
+- 🔍 **OCR Processing** - Extract text from handwritten notes using Google Gemini Vision
 - ✅ **Smart Todo Extraction** - Automatically detect and manage checkbox todo items
 - 🔄 **Notion Integration** - Full production sync with metadata-only mode for speed
 - 📊 **Quota Management** - Free tier (30 pages/month) with graceful degradation
@@ -28,16 +28,11 @@ The rMirror Cloud platform consists of three main components:
 
 ### Getting Started
 
-- **[Architecture Overview](architecture.md)** - System architecture and component relationships
-- **[Development Setup](development/setup.md)** - Set up your development environment
+- **[Backend Quick Start](../backend/README.md#quick-start)** - Set up your development environment
 - **[Quick Start Guide](#quick-start)** - Get up and running in 5 minutes
-- **[Documentation Index](development/DOCUMENTATION_INDEX.md)** - Complete documentation catalog
 
 ### Development Guides
 
-- **[Development Setup](development/setup.md)** - Detailed development environment setup
-- **[OCR Deduplication Guide](development/OCR_DEDUPLICATION.md)** - SHA-256 file hashing system for OCR cost reduction
-- **[Utilities Guide](development/UTILITIES_GUIDE.md)** - Database utilities, hash backfilling, and maintenance tools
 - **[Authentication & Security](development/AUTHENTICATION_SECURITY.md)** - OAuth with Clerk, development mode, security best practices
 - **[Contributing Guidelines](../CONTRIBUTING.md)** - How to contribute to the project
 
@@ -59,10 +54,9 @@ The rMirror Cloud platform consists of three main components:
 - **[Resend Email Setup](deployment/RESEND_SETUP.md)** - Configure Resend for transactional emails
 - **[Deployment Automation](deployment/automation.md)** - Scripts and automation tools
 
-### Architecture
+### Archive
 
-- **[Architecture Overview](architecture.md)** - System design and component relationships
-- **[Project Context](../CONTEXT.md)** - Project history and background
+- **[Archive](archive/README.md)** - Historical documents (old architecture, plans, test reports); may be wrong about the current system
 
 ---
 
@@ -101,7 +95,7 @@ poetry install
 
 # Create environment file
 cp .env.example .env
-# Edit .env with your configuration (especially CLAUDE_API_KEY and CLERK_SECRET_KEY)
+# Edit .env with your configuration (especially GOOGLE_AI_API_KEY and CLERK_SECRET_KEY)
 
 # Run database migrations
 poetry run alembic upgrade head
@@ -156,7 +150,7 @@ The backend is a FastAPI application that provides the core API services.
 - FastAPI - Modern Python web framework
 - SQLAlchemy - ORM for database access
 - Alembic - Database migrations
-- Claude Vision API - OCR processing
+- Google Gemini Vision API - OCR processing
 - Notion API - Integration
 - Clerk - Authentication
 - Resend - Email notifications
@@ -164,11 +158,9 @@ The backend is a FastAPI application that provides the core API services.
 **Documentation:**
 - [Backend README](../backend/README.md) - Component overview
 - [API Reference](api/backend-api.md) - Complete API documentation
-- [Setup Guide](development/setup.md) - Development setup
+- [Quick Start](../backend/README.md#quick-start) - Development setup
 
-**Test Scripts:**
-- `test_todo_extraction.py` - Test todo extraction feature
-- `test_notion_sync.py` - Test Notion integration
+**Tests:** `backend/tests/` (run with `poetry run pytest`)
 
 ### Agent (macOS)
 
@@ -184,7 +176,7 @@ The agent runs locally on macOS and syncs reMarkable tablets with the cloud back
 - Real-time sync to cloud backend
 - Intelligent sync queue with batching and deduplication
 - Exponential backoff retry logic for failed uploads
-- Web UI for configuration and monitoring (localhost:9090)
+- Web UI for configuration and monitoring (localhost:5555)
 - Quota display with color-coded status (green/orange/red)
 - CLI interface with foreground/background modes
 - Support for .rm, .metadata, and .content files
@@ -214,10 +206,10 @@ The dashboard provides a web-based interface for managing notebooks, todos, and 
 
 **Status:** 🟢 Production Ready
 
-**Deployed at:** https://rmirror.io (Vercel)
+**Deployed at:** https://rmirror.io (Hetzner VPS, pm2)
 
 **Key Technologies:**
-- Next.js 14 (App Router)
+- Next.js 15 (App Router)
 - TypeScript
 - Tailwind CSS
 - Clerk Authentication
@@ -242,7 +234,7 @@ npm install
 npm run dev  # Runs on localhost:3000
 ```
 
-See [dashboard/README.md](../dashboard/README.md) for detailed documentation.
+See `dashboard/.claudecontext` for dashboard details.
 
 ---
 
@@ -252,8 +244,8 @@ The rMirror Cloud backend provides a comprehensive REST API. Here's a quick over
 
 ### Authentication
 ```bash
-POST /v1/auth/login        # Get access token
-POST /v1/auth/register     # Create new user
+POST /v1/auth/agent-token  # Exchange a Clerk session token for a 30-day agent token
+# Login itself is handled by Clerk (the password endpoints were removed)
 ```
 
 ### Notebooks
@@ -313,7 +305,7 @@ The rMirror Cloud platform follows a client-server architecture:
 ┌─────────────────┐         HTTPS         ┌─────────────────┐
 │   Mac Agent     │◄──────────────────────►│  Cloud Backend  │
 │   (Local)       │    Clerk Auth          │   (FastAPI)     │
-│  - Menu bar UI  │    Quota checks        │  - OCR + Claude │
+│  - Menu bar UI  │    Quota checks        │  - OCR + Gemini │
 │  - File watcher │                        │  - PostgreSQL   │
 └─────────────────┘                        │  - Quota mgmt   │
          ▲                                 └────────┬────────┘
@@ -325,13 +317,11 @@ The rMirror Cloud platform follows a client-server architecture:
          │ ┌─────────────────┐            ┌──────────────────┐
          └─┤  Web Dashboard  │            │   Integrations   │
            │   (Next.js)     │            │  - Notion        │
-           │  - Vercel       │            │  - Readwise (*)  │
+           │  - Hetzner/pm2  │            │  - Obsidian      │
            └─────────────────┘            └──────────────────┘
 ```
 
-*(\*) = Planned*
-
-See [architecture.md](architecture.md) for detailed architecture documentation.
+Integrations also include Todoist; Readwise is not implemented. The old architecture write-up is in the [archive](archive/architecture.md) and may be wrong.
 
 ---
 
@@ -424,8 +414,8 @@ SECRET_KEY=your-dev-secret-key
 ACCESS_TOKEN_EXPIRE_MINUTES=10080
 DEBUG=true  # Enables development mode authentication
 
-# Claude API (for OCR)
-CLAUDE_API_KEY=your-claude-api-key
+# Google Gemini (for OCR)
+GOOGLE_AI_API_KEY=your-google-ai-api-key
 
 # Clerk Authentication (get from https://clerk.com)
 CLERK_SECRET_KEY=sk_test_your_dev_key
@@ -457,8 +447,8 @@ SECRET_KEY=production-secret-key-min-32-chars
 ACCESS_TOKEN_EXPIRE_MINUTES=10080
 DEBUG=false  # CRITICAL: Must be false in production
 
-# Claude API (for OCR)
-CLAUDE_API_KEY=your-production-claude-api-key
+# Google Gemini (for OCR)
+GOOGLE_AI_API_KEY=your-production-google-ai-api-key
 
 # Clerk Authentication
 CLERK_SECRET_KEY=sk_live_your_production_key
@@ -499,11 +489,7 @@ poetry run pytest
 poetry run pytest --cov=app --cov-report=html
 
 # Run specific test file
-poetry run pytest tests/test_todos.py
-
-# Run integration tests
-poetry run python test_todo_extraction.py
-poetry run python test_notion_sync.py
+poetry run pytest tests/test_quota_service.py
 ```
 
 ---
@@ -523,8 +509,8 @@ poetry run alembic upgrade head
 ```
 
 **Issue:** OCR not working
-- Verify `CLAUDE_API_KEY` is set correctly in .env
-- Check Claude API quota and rate limits
+- Verify `GOOGLE_AI_API_KEY` is set correctly in .env
+- Check the Google AI API quota and rate limits
 - Review logs: `tail -f backend/logs/app.log`
 
 **Issue:** Notion sync failing
@@ -566,7 +552,7 @@ This project is proprietary software. All rights reserved.
 
 🟢 **Backend API** - Production ready (deployed on Hetzner)
 🟢 **macOS Agent** - Production ready v1.4.1 (available at https://rmirror.io)
-🟢 **Web Dashboard** - Production ready (deployed on Vercel)
+🟢 **Web Dashboard** - Production ready (deployed on the Hetzner VPS)
 
 **Recent Updates (January 2026):**
 - ✅ Quota management system with graceful degradation

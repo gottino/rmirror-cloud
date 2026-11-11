@@ -108,7 +108,7 @@ poetry run python backfill_page_hashes.py /path/to/remarkable/source
 
 # Example
 poetry run python backfill_page_hashes.py \
-  "/Users/gabriele/Library/Containers/com.remarkable.desktop/Data/Library/Application Support/remarkable/desktop"
+  "~/Library/Containers/com.remarkable.desktop/Data/Library/Application Support/remarkable/desktop"
 ```
 
 **What it does:**
@@ -491,9 +491,9 @@ poetry run python check_content_vs_db.py
 
 ## Related Documentation
 
-- [Initial Sync Feature](/Users/gabriele/Documents/Development/rmirror-cloud/agent/INITIAL_SYNC_FEATURE.md)
-- [PostgreSQL Migration Guide](/Users/gabriele/Documents/Development/rmirror-cloud/backend/scripts/POSTGRES_MIGRATION.md)
-- [Backend README](/Users/gabriele/Documents/Development/rmirror-cloud/backend/README.md)
+- [Initial Sync Feature](~/Documents/Development/rmirror-cloud/agent/INITIAL_SYNC_FEATURE.md)
+- [PostgreSQL Migration Guide](~/Documents/Development/rmirror-cloud/backend/scripts/POSTGRES_MIGRATION.md)
+- [Backend README](~/Documents/Development/rmirror-cloud/backend/README.md)
 
 ## Support
 
