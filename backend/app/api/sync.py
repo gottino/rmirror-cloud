@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
 from app.core.sync_engine import SyncItem
 from app.core.unified_sync_manager import UnifiedSyncManager
+from app.core.upserts import get_or_create_notebook, get_or_create_page
 from app.database import get_db
 from app.integrations.notion_sync import NotionSyncTarget
 from app.middleware.rate_limit import limiter
@@ -144,13 +145,29 @@ async def sync_metadata(
 
     try:
         for nb_data in sync_request.notebooks:
-            # Find or create notebook
-            notebook = db.query(Notebook).filter(
-                Notebook.user_id == current_user.id,
-                Notebook.notebook_uuid == nb_data.uuid
-            ).first()
+            # Find or create notebook (insert-or-ignore, safe under concurrency)
+            last_opened = None
+            if nb_data.last_opened:
+                try:
+                    last_opened = datetime.fromisoformat(nb_data.last_opened.replace("Z", "+00:00"))
+                except ValueError:
+                    pass
+            notebook, created = get_or_create_notebook(
+                db,
+                current_user.id,
+                nb_data.uuid,
+                visible_name=nb_data.visible_name,
+                parent_uuid=nb_data.parent_uuid,
+                document_type=nb_data.document_type,
+                pinned=nb_data.pinned or False,
+                deleted=nb_data.deleted or False,
+                version=nb_data.version,
+                last_opened=last_opened,
+                last_opened_page=nb_data.last_opened_page,
+                last_synced_at=datetime.utcnow(),
+            )
 
-            if notebook:
+            if not created:
                 # Update existing notebook metadata
                 notebook.visible_name = nb_data.visible_name
                 notebook.parent_uuid = nb_data.parent_uuid
@@ -160,38 +177,14 @@ async def sync_metadata(
                     notebook.deleted = nb_data.deleted
                 if nb_data.version is not None:
                     notebook.version = nb_data.version
-                if nb_data.last_opened:
-                    try:
-                        notebook.last_opened = datetime.fromisoformat(nb_data.last_opened.replace("Z", "+00:00"))
-                    except ValueError:
-                        pass
+                if last_opened:
+                    notebook.last_opened = last_opened
                 if nb_data.last_opened_page is not None:
                     notebook.last_opened_page = nb_data.last_opened_page
                 notebook.last_synced_at = datetime.utcnow()
                 notebooks_updated += 1
                 logger.debug(f"Updated notebook: {nb_data.visible_name} ({nb_data.uuid})")
             else:
-                # Create new notebook
-                notebook = Notebook(
-                    user_id=current_user.id,
-                    notebook_uuid=nb_data.uuid,
-                    visible_name=nb_data.visible_name,
-                    parent_uuid=nb_data.parent_uuid,
-                    document_type=nb_data.document_type,
-                    pinned=nb_data.pinned or False,
-                    deleted=nb_data.deleted or False,
-                    version=nb_data.version,
-                    last_synced_at=datetime.utcnow(),
-                )
-                if nb_data.last_opened:
-                    try:
-                        notebook.last_opened = datetime.fromisoformat(nb_data.last_opened.replace("Z", "+00:00"))
-                    except ValueError:
-                        pass
-                if nb_data.last_opened_page is not None:
-                    notebook.last_opened_page = nb_data.last_opened_page
-                db.add(notebook)
-                db.flush()  # Get the notebook ID
                 notebooks_created += 1
                 logger.debug(f"Created notebook: {nb_data.visible_name} ({nb_data.uuid})")
 
@@ -205,29 +198,20 @@ async def sync_metadata(
 
             # Process page stubs
             for page_idx, page_uuid in enumerate(nb_data.pages):
-                # Find existing page
-                page = db.query(Page).filter(
-                    Page.notebook_id == notebook.id,
-                    Page.page_uuid == page_uuid
-                ).first()
+                # Find or create page stub (insert-or-ignore, safe under concurrency)
+                page, page_created = get_or_create_page(
+                    db, notebook.id, page_uuid, ocr_status=OcrStatus.NOT_SYNCED
+                )
 
-                if page and page.s3_key:
+                if page_created:
+                    pages_registered += 1
+                elif page.s3_key:
                     # Page already has content uploaded - don't reset it
                     pages_already_synced += 1
-                elif page:
+                else:
                     # Page exists but no content - ensure NOT_SYNCED status
                     if page.ocr_status not in [OcrStatus.COMPLETED, OcrStatus.PENDING, OcrStatus.PROCESSING]:
                         page.ocr_status = OcrStatus.NOT_SYNCED
-                    pages_registered += 1
-                else:
-                    # Create new page stub
-                    page = Page(
-                        notebook_id=notebook.id,
-                        page_uuid=page_uuid,
-                        ocr_status=OcrStatus.NOT_SYNCED,
-                    )
-                    db.add(page)
-                    db.flush()  # Get the page ID
                     pages_registered += 1
 
                 # Create or update NotebookPage mapping

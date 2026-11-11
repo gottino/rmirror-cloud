@@ -18,6 +18,7 @@ from app.core.notebook_metadata_service import NotebookMetadataService
 from app.core.ocr_service import OCRService
 from app.core.rm_converter import RMConverter
 from app.core.rm_metadata import RMMetadataParser
+from app.core.upserts import get_or_create_notebook, get_or_create_page
 from app.database import get_db
 from app.dependencies import get_storage_service
 from app.middleware.rate_limit import UPLOAD_LIMIT, limiter
@@ -146,26 +147,21 @@ async def process_rm_file(
         if not visible_name:
             visible_name = f"Notebook {notebook_uuid[:8]}"
 
-        # Find or create Notebook record
-        notebook = db.query(Notebook).filter(
-            Notebook.user_id == current_user.id,
-            Notebook.notebook_uuid == notebook_uuid
-        ).first()
+        # Find or create Notebook record (insert-or-ignore, safe under concurrency)
+        notebook, notebook_created = get_or_create_notebook(
+            db,
+            current_user.id,
+            notebook_uuid,
+            visible_name=visible_name,
+            document_type=DocumentType.NOTEBOOK,
+            metadata_json=json.dumps(metadata_dict) if metadata_dict else None,
+            last_synced_at=datetime.utcnow(),
+        )
 
-        if not notebook:
-            logger.info(f"Creating new notebook: {visible_name} ({notebook_uuid})")
-            notebook = Notebook(
-                user_id=current_user.id,
-                notebook_uuid=notebook_uuid,
-                visible_name=visible_name,
-                document_type=DocumentType.NOTEBOOK,
-                metadata_json=json.dumps(metadata_dict) if metadata_dict else None,
-                last_synced_at=datetime.utcnow(),
-            )
-            db.add(notebook)
+        if notebook_created:
             db.commit()
             db.refresh(notebook)
-            logger.info(f"Created notebook with ID: {notebook.id}")
+            logger.info(f"Created notebook {visible_name} ({notebook_uuid}) with ID: {notebook.id}")
 
             # Track first notebook milestone
             if not current_user.first_notebook_synced_at:
@@ -306,11 +302,15 @@ async def process_rm_file(
             logger.info(f"Stored page PDF at: {pdf_storage_key}")
 
         # Create or update Page record
+        page_created = False
         if not page:
-            # Create new page (page_number is managed in notebook_pages mapping table)
-            page = Page(
-                notebook_id=notebook.id,
-                page_uuid=page_uuid,
+            # Create new page (page_number is managed in notebook_pages mapping table).
+            # A concurrent upload of the same page may have inserted it meanwhile;
+            # then the existing row is updated below instead.
+            page, page_created = get_or_create_page(
+                db,
+                notebook.id,
+                page_uuid,
                 s3_key=storage_key,
                 pdf_s3_key=pdf_storage_key,
                 file_hash=file_hash,
@@ -318,8 +318,7 @@ async def process_rm_file(
                 ocr_text=extracted_text,
                 ocr_completed_at=datetime.utcnow() if ocr_status == OcrStatus.COMPLETED else None,
             )
-            db.add(page)
-        else:
+        if not page_created:
             # Update existing page
             page.s3_key = storage_key
             if pdf_bytes:

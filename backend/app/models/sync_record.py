@@ -95,9 +95,11 @@ class SyncQueue(Base):
 
     __tablename__ = "sync_queue"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # Column indexes are declared once, in __table_args__ (idx_queue_*), as the
+    # migrations create them.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
 
     # Item to sync
@@ -111,10 +113,10 @@ class SyncQueue(Base):
     page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Target
-    target_name: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    target_name: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # Queue status
-    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True, default="pending")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=5)  # 1-10, lower = higher priority
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
