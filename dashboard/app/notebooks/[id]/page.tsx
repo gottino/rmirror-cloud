@@ -1,13 +1,15 @@
 'use client';
 
 import { useAuth } from '@clerk/nextjs';
-import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
+import { Suspense, memo, useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu, Search, X, Loader2, Trash2 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
-import { getNotebook, getIntegrations, QuotaExceededError, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
+import { getNotebook, getNotebookPages, getIntegrations, QuotaExceededError, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
+import { useNotebookPages, useLoadMoreSentinel, type FetchPagesWindow } from '@/lib/useNotebookPages';
+import { useObjectUrl } from '@/lib/useObjectUrl';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
@@ -20,19 +22,26 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
 interface PageCardProps {
   page: Page;
   getToken: () => Promise<string>;
-  copiedPageId: number | null;
+  copied: boolean;
   setCopiedPageId: (id: number | null) => void;
   quota: QuotaStatus | null;
   isTargetPage?: boolean;
-  cardRef?: (el: HTMLDivElement | null) => void;
+  registerRef: (pageNumber: number, el: HTMLDivElement | null) => void;
 }
 
-function PageCard({ page, getToken, copiedPageId, setCopiedPageId, quota, isTargetPage, cardRef }: PageCardProps) {
+// Memoised: with incrementally loaded pages, a load or a copy must not
+// re-render (and re-parse the markdown of) every card already on screen.
+// All props passed by the notebook view are stable or primitive.
+const PageCard = memo(function PageCard({ page, getToken, copied, setCopiedPageId, quota, isTargetPage, registerRef }: PageCardProps) {
   const [showPdf, setShowPdf] = useState(false);
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [pdfBlob, setPdfBlob] = useState<string | null>(null);
+  const [pdfBlob, setPdfBlob] = useObjectUrl();
   const [loadingPdf, setLoadingPdf] = useState(false);
   const hasPdf = !!page.pdf_s3_key;
+  const pageNumber = page.page_number;
+  const cardRef = useCallback(
+    (el: HTMLDivElement | null) => registerRef(pageNumber, el),
+    [registerRef, pageNumber]
+  );
 
   const handleCopy = async () => {
     if (page.ocr_text) {
@@ -61,9 +70,7 @@ function PageCard({ page, getToken, copiedPageId, setCopiedPageId, quota, isTarg
           throw new Error('Failed to load PDF');
         }
 
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        setPdfBlob(blobUrl);
+        setPdfBlob(await response.blob());
       } catch (error) {
         console.error('Error loading PDF:', error);
       } finally {
@@ -158,7 +165,7 @@ function PageCard({ page, getToken, copiedPageId, setCopiedPageId, quota, isTarg
                   style={{ color: 'var(--warm-gray)' }}
                   title="Copy markdown"
                 >
-                  {copiedPageId === page.id ? (
+                  {copied ? (
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: 'var(--sage-green)' }}>
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
@@ -307,19 +314,19 @@ function PageCard({ page, getToken, copiedPageId, setCopiedPageId, quota, isTarg
       </div>
     </div>
   );
-}
+});
 
-// Sync progress component shows progress when pages are being synced
+// Sync progress component shows progress when pages are being synced.
+// Counts come from the API (page_counts), not from the pages loaded so far.
 interface SyncProgressProps {
-  pages: Page[];
+  totalPages: number;
+  notSyncedCount: number;
 }
 
-function SyncProgress({ pages }: SyncProgressProps) {
-  if (pages.length === 0) return null;
+function SyncProgress({ totalPages, notSyncedCount }: SyncProgressProps) {
+  if (totalPages === 0) return null;
 
-  const notSyncedCount = pages.filter(p => p.ocr_status === 'not_synced').length;
-  const syncedCount = pages.filter(p => p.ocr_status !== 'not_synced').length;
-  const totalPages = pages.length;
+  const syncedCount = totalPages - notSyncedCount;
   const progressPercent = totalPages > 0 ? Math.round((syncedCount / totalPages) * 100) : 0;
 
   // Only show if there are not_synced pages
@@ -375,6 +382,11 @@ function NotebookPageContent() {
   // Target page from URL query param (for search result navigation)
   const targetPage = searchParams.get('page');
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const registerPageRef = useCallback((pageNumber: number, el: HTMLDivElement | null) => {
+    if (el) pageRefs.current.set(pageNumber, el);
+    else pageRefs.current.delete(pageNumber);
+  }, []);
+  const [scrollRoot, setScrollRoot] = useState<HTMLElement | null>(null);
 
   // In-notebook search state
   const [notebookSearchQuery, setNotebookSearchQuery] = useState('');
@@ -414,7 +426,8 @@ function NotebookPageContent() {
           throw new Error('Invalid notebook ID');
         }
 
-        const data = await getNotebook(id, token);
+        // Metadata and page counts only; pages are loaded in windows below
+        const data = await getNotebook(id, token, { includePages: false });
         setNotebook(data);
 
         // Check Notion integration status for delete modal
@@ -439,24 +452,55 @@ function NotebookPageContent() {
     fetchNotebook();
   }, [params.id, effectiveIsSignedIn, getFreshToken, router]);
 
-  // Scroll to target page when navigating from search results
-  useEffect(() => {
-    if (notebook && targetPage && !loading) {
-      const pageNum = parseInt(targetPage, 10);
-      if (!isNaN(pageNum)) {
-        // Small delay to ensure DOM is rendered
-        setTimeout(() => {
-          const pageEl = pageRefs.current.get(pageNum);
-          if (pageEl) {
-            pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            // Add highlight animation
-            pageEl.classList.add('highlight-pulse');
-            setTimeout(() => pageEl.classList.remove('highlight-pulse'), 2000);
-          }
-        }, 100);
-      }
+  // Pages are loaded incrementally, newest (highest page number) first
+  const notebookId = notebook?.id ?? null;
+  const fetchPagesWindow = useCallback<FetchPagesWindow>(async (offset, limit) => {
+    const token = await getFreshToken();
+    return getNotebookPages(Number(params.id), token, { offset, limit, order: 'desc' });
+  }, [getFreshToken, params.id]);
+  const {
+    pages: loadedPages,
+    total: loadedTotal,
+    hasMore: hasMorePages,
+    loading: pagesLoading,
+    error: pagesError,
+    loadMore: loadMorePages,
+    loadUntil: loadPagesUntil,
+  } = useNotebookPages(notebookId, fetchPagesWindow);
+  const loadMoreOnScroll = useCallback(() => {
+    if (!pagesError) void loadMorePages();
+  }, [loadMorePages, pagesError]);
+  const sentinelRef = useLoadMoreSentinel(loadMoreOnScroll, {
+    enabled: hasMorePages && !pagesLoading,
+    root: scrollRoot,
+    watchKey: loadedPages.length,
+  });
+
+  // Scroll to a specific page
+  const scrollToPage = useCallback((pageNumber: number) => {
+    const pageEl = pageRefs.current.get(pageNumber);
+    if (pageEl) {
+      pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      pageEl.classList.add('highlight-pulse');
+      setTimeout(() => pageEl.classList.remove('highlight-pulse'), 2000);
     }
-  }, [notebook, targetPage, loading]);
+  }, []);
+
+  // Load windows until the page is loaded, then scroll to it
+  const goToPage = useCallback(async (pageNumber: number) => {
+    const found = await loadPagesUntil((p) => p.page_number === pageNumber);
+    // Small delay to ensure DOM is rendered
+    if (found) setTimeout(() => scrollToPage(pageNumber), 100);
+  }, [loadPagesUntil, scrollToPage]);
+
+  // Scroll to target page when navigating from search results (?page=N)
+  useEffect(() => {
+    if (notebookId === null || !targetPage) return;
+    const pageNum = parseInt(targetPage, 10);
+    if (!isNaN(pageNum)) {
+      void goToPage(pageNum);
+    }
+  }, [notebookId, targetPage, goToPage]);
 
   // Handle export
   const handleExport = async (format: 'markdown' | 'pdf') => {
@@ -599,16 +643,6 @@ function NotebookPageContent() {
     setNotebookSearchResults(null);
   };
 
-  // Scroll to a specific page
-  const scrollToPage = (pageNumber: number) => {
-    const pageEl = pageRefs.current.get(pageNumber);
-    if (pageEl) {
-      pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      pageEl.classList.add('highlight-pulse');
-      setTimeout(() => pageEl.classList.remove('highlight-pulse'), 2000);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--background)' }}>
@@ -692,8 +726,9 @@ function NotebookPageContent() {
     );
   }
 
-  // Sort pages in reverse order (highest page number first)
-  const sortedPages = [...notebook.pages].sort((a, b) => b.page_number - a.page_number);
+  // Counts come from the API, not from the pages loaded so far
+  const totalPages = notebook.page_counts?.total_pages ?? loadedTotal ?? 0;
+  const notSyncedCount = notebook.page_counts?.not_synced_pages ?? 0;
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--background)' }}>
@@ -755,7 +790,7 @@ function NotebookPageContent() {
         </header>
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
+        <main ref={setScrollRoot} className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
           <div className="max-w-4xl mx-auto">
             {/* Notebook header with metadata and actions */}
             <div className="mb-8">
@@ -819,7 +854,7 @@ function NotebookPageContent() {
                   </span>
                 </div>
                 <span>
-                  <strong>{notebook.pages.length}</strong> {notebook.pages.length === 1 ? 'page' : 'pages'}
+                  <strong>{totalPages}</strong> {totalPages === 1 ? 'page' : 'pages'}
                 </span>
                 <span>
                   <strong style={{ textTransform: 'capitalize' }}>{notebook.document_type}</strong>
@@ -925,7 +960,7 @@ function NotebookPageContent() {
             </div>
 
             {/* Sync Progress */}
-            <SyncProgress pages={notebook.pages} />
+            <SyncProgress totalPages={totalPages} notSyncedCount={notSyncedCount} />
 
             {/* In-notebook search results */}
             {isNotebookSearchMode && notebookSearchResults ? (
@@ -950,7 +985,7 @@ function NotebookPageContent() {
                     key={matchedPage.page_id}
                     onClick={() => {
                       clearNotebookSearch();
-                      setTimeout(() => scrollToPage(matchedPage.page_number), 100);
+                      void goToPage(matchedPage.page_number);
                     }}
                     className="block w-full text-left p-4 rounded-lg transition-all hover:border-[var(--terracotta)]"
                     style={{
@@ -967,7 +1002,22 @@ function NotebookPageContent() {
                   </button>
                 ))}
               </div>
-            ) : sortedPages.length === 0 ? (
+            ) : loadedPages.length === 0 && (pagesLoading || hasMorePages) && !pagesError ? (
+              /* First window of pages still loading */
+              <div className="space-y-6" aria-busy="true">
+                {Array.from({ length: 2 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="rounded-lg p-6"
+                    style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
+                  >
+                    <Skeleton className="mb-4" style={{ width: '80px', height: '20px' }} />
+                    <Skeleton className="mb-3" style={{ width: '100%', height: '14px' }} />
+                    <Skeleton style={{ width: '85%', height: '14px' }} />
+                  </div>
+                ))}
+              </div>
+            ) : loadedPages.length === 0 && !pagesError ? (
               <div className="text-center py-12 rounded-lg" style={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>
                   No pages found
@@ -977,20 +1027,51 @@ function NotebookPageContent() {
                 </p>
               </div>
             ) : (
-              /* Pages */
+              /* Pages (loaded in windows; more load near the end of the list) */
               <div className="space-y-6">
-                {sortedPages.map((page) => (
+                {loadedPages.map((page) => (
                   <PageCard
                     key={page.id}
                     page={page}
                     getToken={getFreshToken}
-                    copiedPageId={copiedPageId}
+                    copied={copiedPageId === page.id}
                     setCopiedPageId={setCopiedPageId}
                     quota={quota}
                     isTargetPage={targetPage === String(page.page_number)}
-                    cardRef={(el) => el && pageRefs.current.set(page.page_number, el)}
+                    registerRef={registerPageRef}
                   />
                 ))}
+
+                {hasMorePages && (
+                  <div ref={sentinelRef} className="flex flex-col items-center gap-2 py-4">
+                    {pagesError && (
+                      <p role="alert" style={{ fontSize: '0.875em', color: 'var(--destructive)' }}>
+                        Could not load more pages: {pagesError}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void loadMorePages()}
+                      disabled={pagesLoading}
+                      className="px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                      style={{
+                        border: '1px solid var(--border)',
+                        backgroundColor: 'var(--card)',
+                        color: 'var(--warm-charcoal)',
+                        fontSize: '0.875em',
+                        fontWeight: 500,
+                        cursor: pagesLoading ? 'not-allowed' : 'pointer',
+                        opacity: pagesLoading ? 0.7 : 1,
+                      }}
+                    >
+                      {pagesLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {pagesLoading ? 'Loading pages...' : pagesError ? 'Retry' : 'Load more pages'}
+                    </button>
+                    <p style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }} aria-live="polite">
+                      Showing {loadedPages.length} of {totalPages} pages
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1069,7 +1150,7 @@ function NotebookPageContent() {
         notebook={notebook ? {
           id: notebook.id,
           visible_name: notebook.visible_name || notebook.title || 'Untitled',
-          page_count: notebook.pages.length,
+          page_count: totalPages,
         } : null}
         hasNotion={hasNotion}
         getToken={async () => {

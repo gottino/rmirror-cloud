@@ -70,8 +70,25 @@ export interface Page {
   updated_at: string;
 }
 
+export interface NotebookPageCounts {
+  total_pages: number;
+  synced_pages: number;
+  not_synced_pages: number;
+  pending_quota_pages: number;
+}
+
 export interface NotebookWithPages extends Notebook {
   pages: Page[];
+  /** Counts over all pages; present even when pages were not requested. */
+  page_counts?: NotebookPageCounts | null;
+}
+
+export interface NotebookPagesResponse {
+  items: Page[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
 }
 
 export interface SyncProgress {
@@ -131,14 +148,41 @@ export async function getNotebooksTree(token: string): Promise<NotebookTree> {
 /**
  * Fetch a single notebook with its pages
  */
-export async function getNotebook(id: number, token: string): Promise<NotebookWithPages> {
-  const response = await fetch(`${API_URL}/notebooks/${id}`, {
+export async function getNotebook(
+  id: number,
+  token: string,
+  options?: { includePages?: boolean }
+): Promise<NotebookWithPages> {
+  const query = options?.includePages === false ? '?include_pages=false' : '';
+  const response = await fetch(`${API_URL}/notebooks/${id}${query}`, {
     headers: {
       'Authorization': `Bearer ${token}`,
     },
   });
 
   return handleApiResponse<NotebookWithPages>(response);
+}
+
+/**
+ * Fetch one window of a notebook's pages (with OCR text), ordered by page number
+ */
+export async function getNotebookPages(
+  id: number,
+  token: string,
+  options: { offset: number; limit: number; order?: 'asc' | 'desc' }
+): Promise<NotebookPagesResponse> {
+  const params = new URLSearchParams({
+    offset: String(options.offset),
+    limit: String(options.limit),
+    order: options.order ?? 'asc',
+  });
+  const response = await fetch(`${API_URL}/notebooks/${id}/pages?${params}`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  return handleApiResponse<NotebookPagesResponse>(response);
 }
 
 /**

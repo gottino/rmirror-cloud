@@ -64,13 +64,35 @@ export function QuotaProvider({ children }: QuotaProviderProps) {
     }
   }, [effectiveIsSignedIn, isDevelopmentMode, getToken]);
 
+  // Poll only while someone is signed in and the tab is visible. A hidden tab
+  // stops polling and fetches once when it becomes visible again.
   useEffect(() => {
-    fetchQuota();
-    intervalRef.current = setInterval(fetchQuota, QUOTA_POLL_INTERVAL_MS);
-    return () => {
+    if (!effectiveIsSignedIn) {
+      setLoading(false);
+      return;
+    }
+
+    const stop = () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = undefined;
     };
-  }, [fetchQuota]);
+    const start = () => {
+      stop();
+      fetchQuota();
+      intervalRef.current = setInterval(fetchQuota, QUOTA_POLL_INTERVAL_MS);
+    };
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else start();
+    };
+
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      stop();
+    };
+  }, [effectiveIsSignedIn, fetchQuota]);
 
   return (
     <QuotaContext.Provider value={{ quota, loading, error, refetch: fetchQuota }}>
