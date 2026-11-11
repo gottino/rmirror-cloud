@@ -3,12 +3,13 @@
 Upload reMarkable metadata files to the API for testing.
 
 Usage:
-    python upload_metadata.py --token YOUR_JWT_TOKEN [--base-url http://167.235.74.51]
+    python upload_metadata.py --token YOUR_JWT_TOKEN [--base-url http://<server-ip>]
 """
 
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -131,8 +132,8 @@ def main():
     )
     parser.add_argument(
         '--base-url',
-        default='http://167.235.74.51',
-        help='API base URL (default: http://167.235.74.51)',
+        default=os.environ.get('RMIRROR_API_URL', 'http://localhost:8000'),  # set RMIRROR_API_URL for a remote server
+        help='API base URL (default: $RMIRROR_API_URL or http://localhost:8000)',
     )
     parser.add_argument(
         '--metadata-dir',

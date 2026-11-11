@@ -5,14 +5,14 @@ FastAPI backend for rMirror Cloud - a cloud service that brings your reMarkable 
 ## Features
 
 - **Notebook Management** - Store and manage reMarkable notebooks in the cloud
-- **OCR Processing** - Extract text from handwritten notes using Claude Vision API
-- **OCR Deduplication** - SHA-256 file hashing to prevent re-processing unchanged files
+- **OCR Processing** - Extract text from handwritten notes using Google Gemini Vision
+- **OCR Deduplication** - SHA-256 file hashing (`pages.file_hash`) to prevent re-processing unchanged files
 - **Todo Extraction** - Automatically detect and extract todo items from checkbox patterns
 - **Notion Integration** - Sync notebooks to Notion with markdown formatting
 - **Initial Sync** - Bulk upload functionality for catch-up scenarios
 - **PostgreSQL Support** - Automated migration from SQLite to PostgreSQL
 - **RESTful API** - Comprehensive API for all features
-- **OAuth Authentication** - Secure Clerk-based authentication with local development mode
+- **Clerk Authentication** - Clerk session tokens, plus 30-day agent tokens (`POST /v1/auth/agent-token`)
 - **Database Migrations** - Alembic for schema version control
 
 ## Quick Start
@@ -60,7 +60,7 @@ poetry run pytest
 poetry run pytest --cov=app --cov-report=html
 
 # Run specific test file
-poetry run pytest tests/test_todos.py
+poetry run pytest tests/test_quota_service.py
 ```
 
 ## Environment Variables
@@ -76,8 +76,13 @@ DATABASE_URL=sqlite:///./rmirror.db
 SECRET_KEY=your-secret-key-here
 ACCESS_TOKEN_EXPIRE_MINUTES=10080
 
-# Claude API (for OCR)
-CLAUDE_API_KEY=your-claude-api-key
+# Google Gemini (for OCR)
+GOOGLE_AI_API_KEY=your-google-ai-api-key
+
+# Clerk authentication
+CLERK_SECRET_KEY=your-clerk-secret-key
+CLERK_JWKS_URL=https://your-instance.clerk.accounts.dev/.well-known/jwks.json
+CLERK_WEBHOOK_SECRET=your-clerk-webhook-secret
 
 # Notion Integration (optional)
 NOTION_CLIENT_ID=your-notion-client-id
@@ -100,16 +105,13 @@ These flags work only with a SQLite `DATABASE_URL`; the API refuses to start wit
 - **[📖 Complete Documentation](../docs/)** - Full project documentation
 - **[CHANGELOG](../CHANGELOG.md)** - Complete project changelog with all changes
 
-### New Features (December 2025)
-- **[OCR Deduplication Guide](OCR_DEDUPLICATION.md)** - Hash-based deduplication system
-- **[Utilities Guide](UTILITIES_GUIDE.md)** - Complete utilities documentation
-- **[Authentication & Security](AUTHENTICATION_SECURITY.md)** - OAuth and development mode
+### Guides
+- **[Authentication & Security](../docs/development/AUTHENTICATION_SECURITY.md)** - Clerk authentication and development mode
 - **[PostgreSQL Migration Guide](scripts/POSTGRES_MIGRATION.md)** - Automated PostgreSQL migration
 - **[Initial Sync Feature](../agent/INITIAL_SYNC_FEATURE.md)** - Bulk upload documentation
 
 ### General Documentation
 - **[API Reference](../docs/api/backend-api.md)** - Complete API endpoint documentation
-- **[Setup Guide](../docs/development/setup.md)** - Detailed setup instructions
 - **[Deployment Guide](../docs/deployment/hetzner.md)** - Production deployment on Hetzner
 - **[GitHub Actions](../docs/deployment/github-actions.md)** - Automated deployment setup
 - **[Clerk Setup](CLERK_SETUP.md)** - Clerk authentication configuration
@@ -120,7 +122,7 @@ These flags work only with a SQLite `DATABASE_URL`; the API refuses to start wit
 backend/
 ├── app/
 │   ├── api/              # API endpoints
-│   │   ├── auth.py       # Authentication endpoints
+│   │   ├── auth.py       # Agent token endpoint (POST /auth/agent-token)
 │   │   ├── users.py      # User management
 │   │   ├── notebooks.py  # Notebook CRUD
 │   │   ├── processing.py # OCR processing
@@ -145,21 +147,22 @@ backend/
 │   └── main.py          # FastAPI application
 ├── alembic/             # Database migrations
 ├── tests/               # Test suite
-├── scripts/             # Utility scripts
+├── scripts/             # Deployment and PostgreSQL migration scripts
 └── pyproject.toml       # Poetry dependencies
 ```
 
 ## API Overview
 
 ### Authentication
-- `POST /v1/auth/login` - Get access token
-- `POST /v1/auth/register` - Create new user
+Login is handled by Clerk. The password login/register endpoints were removed.
+- `POST /v1/auth/agent-token` - Exchange a Clerk session token for a 30-day agent token
 
 ### Notebooks
 - `GET /v1/notebooks/` - List user's notebooks
 - `GET /v1/notebooks/uuid/{uuid}` - Get notebook by UUID
-- `GET /v1/notebooks/{id}/pages` - Get notebook pages
-- `GET /v1/notebooks/{id}/content` - Get notebook as markdown
+- `GET /v1/notebooks/tree` - Notebook/folder tree
+- `GET /v1/notebooks/{id}` - Get notebook with its pages
+- `GET /v1/notebooks/{id}/export?format=markdown|pdf` - Export a notebook
 
 ### Todos
 - `GET /v1/todos/` - List todos (with filters)
@@ -170,41 +173,14 @@ backend/
 - `GET /v1/todos/stats/summary` - Get statistics
 
 ### Integrations
-- `POST /v1/integrations/notion` - Configure Notion
-- `GET /v1/integrations/notion/test` - Test Notion connection
-- `POST /v1/sync/notebook/{id}` - Sync notebook to Notion
+- `GET /v1/integrations/` - List configured integrations
+- `GET /v1/integrations/notion/oauth/authorize` - Start Notion OAuth
+- `POST /v1/integrations/{target_name}/test` - Test an integration connection
+- `POST /v1/sync/trigger` - Queue a sync
 
-See [API_REFERENCE.md](API_REFERENCE.md) for complete endpoint documentation.
+See the [API Reference](../docs/api/backend-api.md) or `/docs` on a running server for complete endpoint documentation.
 
 ## Utility Scripts
-
-### OCR Hash Management
-
-**Backfill file hashes for existing pages:**
-```bash
-# Basic hash backfilling
-poetry run python backfill_page_hashes.py /path/to/remarkable/source
-
-# Advanced metadata-based backfilling
-poetry run python backfill_by_metadata.py /path/to/remarkable/source
-
-# Targeted notebook backfilling
-poetry run python backfill_specific_notebooks.py
-```
-
-**Check hash coverage and sync integrity:**
-```bash
-# Generate hash coverage report
-poetry run python hash_coverage_report.py
-
-# Show missing pages summary
-poetry run python show_missing_pages_summary.py
-
-# Compare database with .content files
-poetry run python check_content_vs_db.py
-```
-
-See [OCR Deduplication Guide](OCR_DEDUPLICATION.md) for complete documentation.
 
 ### PostgreSQL Migration
 
@@ -244,16 +220,11 @@ poetry run alembic history
 # Start the server
 poetry run uvicorn app.main:app --reload
 
-# In another terminal, test endpoints
-# Login and get token
-curl -X POST http://localhost:8000/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"password"}'
-
-# Use the provided test scripts
-poetry run python test_todo_extraction.py
-poetry run python test_notion_sync.py
+# In another terminal, check the server
+curl http://localhost:8000/health
 ```
+
+Authenticated endpoints need a Clerk session token (or an agent token); see [Clerk Setup](CLERK_SETUP.md).
 
 ## Production Deployment
 
@@ -292,4 +263,4 @@ For issues or questions:
 
 ---
 
-Built with FastAPI, SQLAlchemy, and Claude AI.
+Built with FastAPI, SQLAlchemy, and Google Gemini.

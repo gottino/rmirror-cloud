@@ -2,8 +2,8 @@
 # Deploy Umami analytics to Hetzner VPS
 #
 # Usage: Run as root on the server
-#   scp scripts/deploy-umami.sh deploy@167.235.74.51:/tmp/
-#   ssh deploy@167.235.74.51
+#   scp scripts/deploy-umami.sh deploy@<server-ip>:/tmp/
+#   ssh deploy@<server-ip>
 #   sudo bash /tmp/deploy-umami.sh
 #
 # After running:
