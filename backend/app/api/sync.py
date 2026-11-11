@@ -5,24 +5,23 @@ import logging
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
-from app.core.sync_engine import SyncItem
 from app.core.unified_sync_manager import UnifiedSyncManager
 from app.database import get_db
-from app.integrations.notion_sync import NotionSyncTarget
+from app.integrations.registry import PAGE_TEXT, missing_config, supports
 from app.models.deleted_notebook import DeletedNotebook
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
-from app.models.sync_record import IntegrationConfig, SyncItemType, SyncQueue, SyncRecord
+from app.models.sync_record import IntegrationConfig
 from app.models.user import User
-from app.services.sync_worker import apply_sync_failure, apply_sync_result
+from app.services.initial_sync import queue_pages_for_sync
 from app.utils.files import parse_uuid
 
 logger = logging.getLogger(__name__)
@@ -35,9 +34,9 @@ limiter = Limiter(key_func=get_remote_address)
 class SyncRequest(BaseModel):
     """Request to trigger a sync operation."""
 
-    target_name: str  # "notion", "readwise", "all"
-    item_type: str | None = None  # "notebook", "todo", "highlight" or None for all
-    limit: int = 100
+    target_name: str  # a target that accepts page text (e.g. "notion"), or "all"
+    item_type: str | None = None  # Ignored; kept so existing clients still validate
+    limit: int = 100  # Ignored; every unsynced page is queued
     notebook_uuids: list[str] | None = None  # Optional list of specific notebook UUIDs to sync
 
 
@@ -321,31 +320,37 @@ async def sync_metadata(
 @router.post("/trigger", response_model=SyncResponse)
 async def trigger_sync(
     request: SyncRequest,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_clerk_session_user),
     db: Session = Depends(get_db),
 ):
     """
-    Trigger a sync operation.
+    Queue a sync to the specified target (or every enabled target for "all").
 
-    This will sync content to the specified target (or all targets if "all" is specified).
-    The sync runs in the background.
+    Every OCR-completed page that has not been synced to the target yet, and
+    is not already queued, gets a ``page_text`` row in the sync queue
+    (optionally only pages of ``notebook_uuids``). The sync worker does the
+    writing; this endpoint never calls the target. ``skipped_count`` counts
+    pages already synced or queued. Only targets that accept page text are
+    used.
     """
     try:
-        # Initialize sync manager
-        sync_manager = UnifiedSyncManager(db, current_user.id)
-
-        # Get integration configs for the user
         if request.target_name == "all":
-            configs = (
-                db.query(IntegrationConfig)
+            configs = [
+                config
+                for config in db.query(IntegrationConfig)
                 .filter(
                     IntegrationConfig.user_id == current_user.id,
                     IntegrationConfig.is_enabled == True,
                 )
                 .all()
-            )
+                if supports(config.target_name, PAGE_TEXT)
+            ]
         else:
+            if not supports(request.target_name, PAGE_TEXT):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Integration '{request.target_name}' does not sync notebook pages",
+                )
             config = (
                 db.query(IntegrationConfig)
                 .filter(
@@ -369,40 +374,28 @@ async def trigger_sync(
                 status_code=404, detail="No enabled integrations found"
             )
 
-        # Register sync targets
         for config in configs:
-            config_dict = config.get_config()
-
-            if config.target_name == "notion":
-                access_token = config_dict.get("access_token")
-                if not access_token:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Notion integration requires OAuth authentication. Please reconnect to Notion."
-                    )
-                target = NotionSyncTarget(
-                    access_token=access_token,
-                    database_id=config_dict.get("database_id"),
+            if missing_config(config.target_name, config.get_config()):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Integration '{config.target_name}' is not fully configured. Please reconnect it.",
                 )
-                sync_manager.register_target(target)
 
-        # Start sync in background
-        background_tasks.add_task(
-            _run_sync,
-            sync_manager,
-            request.target_name,
-            request.limit,
-            current_user.id,
-            db,
-            request.notebook_uuids,
-        )
+        queued = 0
+        skipped = 0
+        for config in configs:
+            stats = queue_pages_for_sync(
+                db, current_user.id, config.target_name, request.notebook_uuids
+            )
+            queued += stats["queued_count"]
+            skipped += stats["skipped_count"]
 
         return SyncResponse(
             success=True,
-            message=f"Sync started for {request.target_name}",
+            message=f"Queued {queued} pages for {request.target_name}",
             synced_count=0,
             failed_count=0,
-            skipped_count=0,
+            skipped_count=skipped,
         )
 
     except HTTPException:
@@ -410,80 +403,6 @@ async def trigger_sync(
     except Exception as e:
         logger.error(f"Error triggering sync: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An internal error occurred")
-
-
-async def _run_sync(
-    sync_manager: UnifiedSyncManager,
-    target_name: str,
-    limit: int,
-    user_id: int,
-    db: Session,
-    notebook_uuids: list[str] | None = None,
-):
-    """
-    Run sync operation in background.
-
-    Args:
-        sync_manager: Initialized sync manager
-        target_name: Target to sync to
-        limit: Maximum items to sync
-        user_id: User ID
-        db: Database session
-        notebook_uuids: Optional list of specific notebook UUIDs to sync
-    """
-    try:
-        logger.info(f"Starting background sync for user {user_id} to {target_name}")
-
-        synced_count = 0
-        failed_count = 0
-        skipped_count = 0
-
-        # Get targets to sync to
-        if target_name == "all":
-            target_names = list(sync_manager.targets.keys())
-        else:
-            target_names = [target_name]
-
-        # Get notebooks needing sync
-        for t_name in target_names:
-            if notebook_uuids:
-                # Sync specific notebooks
-                notebooks = sync_manager.get_specific_notebooks(t_name, notebook_uuids)
-            else:
-                # Sync notebooks that need syncing
-                notebooks = sync_manager.get_notebooks_needing_sync(t_name, limit)
-
-            logger.info(f"Found {len(notebooks)} notebooks to sync to {t_name}")
-
-            for notebook_item in notebooks:
-                result = await sync_manager.sync_item_to_target(notebook_item, t_name)
-
-                if result.success:
-                    synced_count += 1
-                elif result.status.value == "skipped":
-                    skipped_count += 1
-                else:
-                    failed_count += 1
-
-            # Update last_synced_at
-            config = (
-                db.query(IntegrationConfig)
-                .filter(
-                    IntegrationConfig.user_id == user_id,
-                    IntegrationConfig.target_name == t_name,
-                )
-                .first()
-            )
-            if config:
-                config.last_synced_at = datetime.utcnow()
-                db.commit()
-
-        logger.info(
-            f"Background sync completed: {synced_count} synced, {failed_count} failed, {skipped_count} skipped"
-        )
-
-    except Exception as e:
-        logger.error(f"Error in background sync: {e}", exc_info=True)
 
 
 @router.get("/stats", response_model=SyncStatsResponse)
@@ -557,183 +476,6 @@ async def get_sync_status(
         raise
     except Exception as e:
         logger.error(f"Error getting sync status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An internal error occurred")
-
-
-@router.post("/process-queue")
-async def process_sync_queue(
-    limit: int = 10,
-    current_user: User = Depends(get_clerk_session_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Process pending items in the sync queue.
-
-    This endpoint manually processes items from the sync queue.
-    In production, this would be handled by a background worker.
-    """
-    try:
-        # Get pending queue items for this user
-        pending_items = (
-            db.query(SyncQueue)
-            .filter(
-                SyncQueue.user_id == current_user.id,
-                SyncQueue.status == 'pending',
-                # Items in retry backoff wait for their turn, as in the worker
-                SyncQueue.scheduled_at <= datetime.utcnow(),
-            )
-            .order_by(SyncQueue.priority, SyncQueue.created_at)
-            .limit(limit)
-            .with_for_update(skip_locked=True)
-            .all()
-        )
-
-        if not pending_items:
-            return {
-                "success": True,
-                "message": "No pending items in queue",
-                "processed": 0,
-                "failed": 0
-            }
-
-        logger.info(f"Processing {len(pending_items)} pending sync items")
-
-        processed = 0
-        failed = 0
-
-        for queue_item in pending_items:
-            try:
-                # Mark as processing
-                queue_item.status = 'processing'
-                queue_item.started_at = datetime.utcnow()
-                db.commit()
-
-                # Get integration config
-                config = (
-                    db.query(IntegrationConfig)
-                    .filter(
-                        IntegrationConfig.user_id == current_user.id,
-                        IntegrationConfig.target_name == queue_item.target_name,
-                        IntegrationConfig.is_enabled == True,
-                    )
-                    .first()
-                )
-
-                if not config:
-                    logger.warning(f"No active integration found for {queue_item.target_name}")
-                    queue_item.status = 'failed'
-                    queue_item.error_message = f"Integration {queue_item.target_name} not active"
-                    failed += 1
-                    db.commit()
-                    continue
-
-                # Get the page data
-                if queue_item.item_type == 'page_text':
-                    page = db.query(Page).filter(Page.id == int(queue_item.item_id)).first()
-                    if not page:
-                        logger.warning(f"Page {queue_item.item_id} not found")
-                        queue_item.status = 'failed'
-                        queue_item.error_message = "Page not found"
-                        failed += 1
-                        db.commit()
-                        continue
-
-                    # Get notebook info
-                    notebook = db.query(Notebook).filter(Notebook.id == page.notebook_id).first()
-
-                    # Get decrypted config
-                    config_dict = config.get_config()
-
-                    # Create appropriate sync target
-                    if queue_item.target_name == 'notion':
-                        from app.integrations.notion_sync import NotionSyncTarget
-                        target = NotionSyncTarget(
-                            access_token=config_dict.get('access_token'),
-                            database_id=config_dict.get('database_id'),
-                        )
-                    else:
-                        logger.warning(f"Unknown target: {queue_item.target_name}")
-                        queue_item.status = 'failed'
-                        queue_item.error_message = f"Unknown target: {queue_item.target_name}"
-                        failed += 1
-                        db.commit()
-                        continue
-
-                    # Create sync item
-                    metadata = json.loads(queue_item.metadata_json) if queue_item.metadata_json else {}
-                    sync_item = SyncItem(
-                        item_type=SyncItemType.PAGE_TEXT,
-                        item_id=str(page.id),
-                        content_hash=queue_item.content_hash,
-                        data={
-                            'page_uuid': queue_item.page_uuid,
-                            'notebook_uuid': queue_item.notebook_uuid,
-                            'page_number': queue_item.page_number,
-                            'text': page.ocr_text or '',
-                            'notebook_name': notebook.visible_name if notebook else 'Unknown',
-                            **metadata
-                        },
-                        source_table='pages',
-                        created_at=page.created_at,
-                        updated_at=page.updated_at,
-                    )
-
-                    # Sync the item
-                    result = await target.sync_item(sync_item)
-
-                    if result.success:
-                        # Create sync record
-                        sync_record = SyncRecord(
-                            user_id=current_user.id,
-                            target_name=queue_item.target_name,
-                            item_type=queue_item.item_type,
-                            item_id=queue_item.item_id,
-                            content_hash=queue_item.content_hash,
-                            external_id=result.target_id,
-                            status='success',
-                            synced_at=datetime.utcnow(),
-                        )
-                        db.add(sync_record)
-
-                        # Mark queue item as completed
-                        queue_item.status = 'completed'
-                        queue_item.completed_at = datetime.utcnow()
-                        processed += 1
-
-                        logger.info(f"Successfully synced page {page.id} to {queue_item.target_name}")
-                    else:
-                        # Same skip/retry/permanent rules as the background worker
-                        outcome = apply_sync_result(queue_item, result)
-                        if outcome == "skipped":
-                            processed += 1
-                        else:
-                            failed += 1
-                            logger.error(f"Failed to sync page {page.id} ({outcome}): {result.error_message}")
-
-                    db.commit()
-                else:
-                    logger.warning(f"Unsupported item type: {queue_item.item_type}")
-                    queue_item.status = 'failed'
-                    queue_item.error_message = f"Unsupported item type: {queue_item.item_type}"
-                    failed += 1
-                    db.commit()
-
-            except Exception as e:
-                logger.error(f"Error processing queue item {queue_item.id}: {e}", exc_info=True)
-                db.rollback()
-                apply_sync_failure(queue_item, str(e))
-                failed += 1
-                db.commit()
-
-        return {
-            "success": True,
-            "message": f"Processed {processed} items, {failed} failed",
-            "processed": processed,
-            "failed": failed
-        }
-
-    except Exception as e:
-        logger.error(f"Error processing sync queue: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An internal error occurred")
 
 

@@ -27,10 +27,10 @@ from app.database import get_db
 from app.dependencies import get_storage_service
 from app.models.notebook import DocumentType, Notebook
 from app.models.page import OcrStatus, Page
-from app.models.sync_record import IntegrationConfig
 from app.models.user import User
 from app.services import quota_service
 from app.services.page_events import on_ocr_completed, update_obsidian_content_hash
+from app.services.sync_queue import queue_notebook_metadata_sync
 from app.storage import StorageService
 from app.utils.files import (
     calculate_file_hash,
@@ -527,13 +527,12 @@ async def update_notebook_metadata(
         if request.document_type == "folder":
             metadata_service.update_paths_for_subtree(request.notebook_uuid)
 
-        # Queue lightweight metadata sync to all enabled integrations
-        # This ensures Notion and other integrations get updated metadata (lastOpened, etc.)
-        # Uses NOTEBOOK_METADATA type which doesn't process page content
+        # Queue a lightweight, properties-only update for the integrations that
+        # accept one (target registry). The sync worker writes it; this request
+        # never calls an integration itself.
         if request.document_type == "notebook":
             try:
-                # Check if user has quota remaining for integration syncing
-                # If quota exhausted, skip integration sync (per strategy: block integrations when quota exceeded)
+                # Integrations are blocked while the OCR quota is exhausted.
                 quota_status = quota_service.get_quota_status(db, current_user.id)
 
                 if quota_status["is_exhausted"]:
@@ -542,95 +541,14 @@ async def update_notebook_metadata(
                         "Metadata updates will not be synced to integrations."
                     )
                 else:
-                    from app.core.sync_engine import ContentFingerprint, SyncItem
-                    from app.core.unified_sync_manager import UnifiedSyncManager
-                    from app.models.sync_record import SyncItemType
-
-                    # Get page count from .content file (no DB query needed)
-                    page_count = 0
-                    if notebook.content_json:
-                        try:
-                            content_data = json.loads(notebook.content_json)
-                            page_count = content_data.get("pageCount", 0)
-                        except Exception as e:
-                            logger.warning(f"Failed to parse content_json for page count: {e}")
-                            # Fallback: use length of pages array if available
-                            pages_array = content_data.get("pages", [])
-                            if not pages_array and "cPages" in content_data:
-                                pages_array = content_data.get("cPages", {}).get("pages", [])
-                            page_count = len(pages_array)
-
-                    # Extract lastModified from metadata_json (reMarkable's original timestamp)
-                    # Don't use notebook.updated_at as it auto-updates on every DB change
-                    last_modified_at = None
-                    if notebook.metadata_json:
-                        try:
-                            meta = json.loads(notebook.metadata_json)
-                            if meta.get("lastModified"):
-                                # Convert milliseconds since epoch to ISO format
-                                last_modified_at = datetime.fromtimestamp(
-                                    int(meta["lastModified"]) / 1000.0
-                                ).isoformat()
-                        except (ValueError, KeyError, TypeError) as e:
-                            logger.warning(f"Failed to parse lastModified from metadata_json: {e}")
-
-                    # Build lightweight metadata-only data (no page content)
-                    notebook_metadata = {
-                        "notebook_uuid": notebook.notebook_uuid,
-                        "notebook_name": notebook.visible_name or "Untitled Notebook",
-                        "title": notebook.visible_name or "Untitled Notebook",
-                        "page_count": page_count,
-                        "full_path": notebook.full_path or "",
-                        "last_opened_at": notebook.last_opened.isoformat() if notebook.last_opened else None,
-                        "last_modified_at": last_modified_at,
-                    }
-
-                    # Calculate metadata-only content hash
-                    content_hash = ContentFingerprint.for_notebook_metadata(notebook_metadata)
-
-                    # Initialize sync manager
-                    sync_manager = UnifiedSyncManager(db, current_user.id)
-
-                    # Get enabled integrations
-                    integrations = (
-                        db.query(IntegrationConfig)
-                        .filter(
-                            IntegrationConfig.user_id == current_user.id,
-                            IntegrationConfig.is_enabled == True,
-                        )
-                        .all()
+                    queued = queue_notebook_metadata_sync(db, notebook)
+                    logger.info(
+                        f"Queued metadata sync for notebook {notebook.notebook_uuid} "
+                        f"to {len(queued)} integrations"
                     )
-
-                    # Register sync targets
-                    for integration in integrations:
-                        if integration.target_name == "notion":
-                            from app.integrations.notion_sync import NotionSyncTarget
-                            config_dict = integration.get_config()
-                            target = NotionSyncTarget(
-                                access_token=config_dict.get("access_token"),
-                                database_id=config_dict.get("database_id"),
-                            )
-                            sync_manager.register_target(target)
-
-                    # Sync metadata only (lightweight)
-                    for integration in integrations:
-                        # Create metadata-only sync item
-                        sync_item = SyncItem(
-                            item_type=SyncItemType.NOTEBOOK_METADATA,  # Lightweight metadata sync
-                            item_id=notebook.notebook_uuid,
-                            content_hash=content_hash,
-                            data=notebook_metadata,
-                            source_table="notebooks",
-                            created_at=notebook.created_at,
-                            updated_at=notebook.updated_at,
-                        )
-
-                        # Sync the notebook metadata (no page content processing)
-                        await sync_manager.sync_item_to_target(sync_item, integration.target_name)
-
-                    logger.info(f"Synced metadata (lightweight) for notebook {notebook.notebook_uuid} to {len(integrations)} integrations")
             except Exception as e:
-                logger.warning(f"Failed to sync metadata: {e}")
+                db.rollback()
+                logger.warning(f"Failed to queue metadata sync: {e}")
                 # Don't fail the whole request if sync queueing fails
 
         return UpdateMetadataResponse(

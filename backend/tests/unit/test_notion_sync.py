@@ -1,7 +1,7 @@
 """Unit tests for NotionSyncTarget.
 
 Tests cover:
-- Notebook syncing with full metadata
+- Notebook page creation with full metadata
 - Notebook metadata-only syncing
 - Page text syncing with block management
 - Deduplication using page_uuid
@@ -55,109 +55,58 @@ class TestNotionSyncTargetInit:
 
 
 class TestNotionSyncTargetNotebookSync:
-    """Tests for notebook syncing."""
+    """Tests for notebook page creation and metadata syncing."""
 
     @pytest.mark.asyncio
-    async def test_sync_notebook_creates_page_with_metadata(self, sample_notebook_sync_item):
-        """Verify notebook sync creates page with all metadata fields."""
+    async def test_create_notebook_page_with_metadata(self):
+        """The notebook page is created with all metadata fields and no page toggles."""
         with patch("app.integrations.notion_sync.NotionClient") as mock_notion_class:
             with patch("app.integrations.notion_sync.httpx.Client"):
                 mock_client = MagicMock()
                 mock_client.pages.create.return_value = {"id": "notebook-page-123"}
-                # No existing page found
-                mock_client.search.return_value = {"results": []}
                 mock_notion_class.return_value = mock_client
 
-                # Mock httpx.post for database query (find_existing_page)
-                with patch("httpx.post") as mock_post:
-                    mock_response = MagicMock()
-                    mock_response.status_code = 200
-                    mock_response.json.return_value = {"results": []}
-                    mock_post.return_value = mock_response
+                from app.integrations.notion_sync import NotionSyncTarget
 
-                    from app.integrations.notion_sync import NotionSyncTarget
+                target = NotionSyncTarget(
+                    access_token="test-token",
+                    database_id="db-123",
+                )
 
-                    target = NotionSyncTarget(
-                        access_token="test-token",
-                        database_id="db-123",
-                    )
+                page_id = await target._create_notion_page(
+                    notebook_uuid="nb-123",
+                    title="Test Notebook",
+                    full_path="Work/Projects/Client A",
+                    last_opened="2026-01-15T10:00:00",
+                    last_modified="2026-01-15T09:00:00",
+                )
 
-                    result = await target.sync_item(sample_notebook_sync_item)
+                assert page_id == "notebook-page-123"
 
-                    assert result.status == SyncStatus.SUCCESS
-                    assert result.target_id == "notebook-page-123"
-                    assert result.metadata.get("action") == "created"
+                call_args = mock_client.pages.create.call_args
+                properties = call_args.kwargs["properties"]
 
-                    # Verify page was created with correct properties
-                    call_args = mock_client.pages.create.call_args
-                    properties = call_args.kwargs["properties"]
+                # Core properties
+                assert properties["Name"]["title"][0]["text"]["content"] == "Test Notebook"
+                assert properties["UUID"]["rich_text"][0]["text"]["content"] == "nb-123"
+                assert properties["Path"]["rich_text"][0]["text"]["content"] == "Work/Projects/Client A"
+                assert properties["Pages"]["number"] == 0
 
-                    # Core properties
-                    assert "Name" in properties
-                    assert properties["Name"]["title"][0]["text"]["content"] == "Test Notebook"
+                # Tags from path
+                tag_names = [t["name"] for t in properties["Tags"]["multi_select"]]
+                assert tag_names == ["Work", "Projects", "Client A"]
 
-                    assert "UUID" in properties
-                    assert properties["UUID"]["rich_text"][0]["text"]["content"] == "nb-123"
+                # Timestamps
+                assert "Last Opened" in properties
+                assert "Last Modified" in properties
+                assert "Synced At" in properties
 
-                    assert "Path" in properties
-                    assert properties["Path"]["rich_text"][0]["text"]["content"] == "Work/Projects/Client A"
+                # Status
+                assert properties["Status"]["select"]["name"] == "Synced"
 
-                    # Page count
-                    assert "Pages" in properties
-                    assert properties["Pages"]["number"] == 2
-
-                    # Tags from path
-                    assert "Tags" in properties
-                    tag_names = [t["name"] for t in properties["Tags"]["multi_select"]]
-                    assert "Work" in tag_names
-                    assert "Projects" in tag_names
-                    assert "Client A" in tag_names
-
-                    # Timestamps
-                    assert "Last Opened" in properties
-                    assert "Last Modified" in properties
-                    assert "Synced At" in properties
-
-                    # Status
-                    assert "Status" in properties
-                    assert properties["Status"]["select"]["name"] == "Synced"
-
-    @pytest.mark.asyncio
-    async def test_sync_notebook_updates_existing_page(self, sample_notebook_sync_item):
-        """Verify notebook sync updates existing page when found."""
-        with patch("app.integrations.notion_sync.NotionClient") as mock_notion_class:
-            with patch("app.integrations.notion_sync.httpx.Client"):
-                mock_client = MagicMock()
-                mock_client.pages.update.return_value = {"id": "existing-page-456"}
-                mock_client.blocks.children.list.return_value = {"results": [], "has_more": False}
-                mock_client.blocks.children.append.return_value = {"results": []}
-                mock_notion_class.return_value = mock_client
-
-                # Mock httpx.post to return existing page
-                with patch("httpx.post") as mock_post:
-                    mock_response = MagicMock()
-                    mock_response.status_code = 200
-                    mock_response.json.return_value = {
-                        "results": [{"id": "existing-page-456"}]
-                    }
-                    mock_post.return_value = mock_response
-
-                    from app.integrations.notion_sync import NotionSyncTarget
-
-                    target = NotionSyncTarget(
-                        access_token="test-token",
-                        database_id="db-123",
-                    )
-
-                    result = await target.sync_item(sample_notebook_sync_item)
-
-                    assert result.status == SyncStatus.SUCCESS
-                    assert result.target_id == "existing-page-456"
-                    assert result.metadata.get("action") == "updated"
-
-                    # Verify page was updated, not created
-                    mock_client.pages.update.assert_called()
-                    mock_client.pages.create.assert_not_called()
+                # Only the content heading; page toggles come from page syncs.
+                children = call_args.kwargs["children"]
+                assert [b["type"] for b in children] == ["heading_2"]
 
     @pytest.mark.asyncio
     async def test_sync_notebook_metadata_only(self):
@@ -573,36 +522,22 @@ class TestNotionSyncTargetErrorHandling:
                 assert result.status == SyncStatus.SUCCESS
 
     @pytest.mark.asyncio
-    async def test_handles_sync_item_exception(self, sample_notebook_sync_item):
-        """Test general exception handling in sync_item - returns RETRY on page creation failure."""
+    async def test_create_notion_page_returns_none_on_error(self):
+        """_create_notion_page swallows the error and returns None."""
         with patch("app.integrations.notion_sync.NotionClient") as mock_notion_class:
             with patch("app.integrations.notion_sync.httpx.Client"):
                 mock_client = MagicMock()
-                mock_client.search.return_value = {"results": []}
-                # Page creation fails (returns None which triggers RETRY, not FAILED)
                 mock_client.pages.create.side_effect = Exception("API error: invalid database")
                 mock_notion_class.return_value = mock_client
 
-                with patch("httpx.post") as mock_post:
-                    # Database query returns no results (so it tries to create)
-                    mock_response = MagicMock()
-                    mock_response.status_code = 200
-                    mock_response.json.return_value = {"results": []}
-                    mock_post.return_value = mock_response
+                from app.integrations.notion_sync import NotionSyncTarget
 
-                    from app.integrations.notion_sync import NotionSyncTarget
+                target = NotionSyncTarget(
+                    access_token="test-token",
+                    database_id="db-123",
+                )
 
-                    target = NotionSyncTarget(
-                        access_token="test-token",
-                        database_id="db-123",
-                    )
-
-                    result = await target.sync_item(sample_notebook_sync_item)
-
-                    # The implementation returns RETRY when page creation fails
-                    # (exception is caught in _create_notion_page, returns None)
-                    assert result.status == SyncStatus.RETRY
-                    assert "Failed to create Notion page" in result.error_message
+                assert await target._create_notion_page("nb-123", "Test", "") is None
 
     @pytest.mark.asyncio
     async def test_handles_unsupported_item_type(self):

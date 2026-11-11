@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -23,41 +23,12 @@ BATCH_INTERVAL_SECONDS = 5  # Seconds between batches
 INITIAL_SYNC_PRIORITY = 8  # Lower priority than real-time syncs (5)
 
 
-async def trigger_initial_sync(
-    db: Session,
-    user_id: int,
-    target_name: str,
-    max_items: Optional[int] = None,
-) -> dict:
+def _completed_pages_query(db: Session, user_id: int, notebook_uuids: Optional[List[str]] = None):
+    """(Page, NotebookPage, Notebook) rows with completed OCR text, newest first.
+
+    Only actual notebooks (not PDFs, EPUBs, or folders) are included.
     """
-    Queue all existing OCR-completed pages for sync to a target.
-
-    This is called when a user first connects an integration (e.g., Notion)
-    to sync their existing data to the new target.
-
-    The sync happens in two phases:
-    1. Create notebook pages in Notion (sequentially, to prevent duplicates)
-    2. Queue individual pages for background processing
-
-    Args:
-        db: Database session
-        user_id: User ID
-        target_name: Target integration name (e.g., "notion")
-        max_items: Maximum number of items to queue (None for all)
-
-    Returns:
-        Dictionary with sync statistics:
-        - queued_count: Number of items queued
-        - skipped_count: Number of items skipped (already synced or no content)
-        - total_pages: Total pages found for user
-        - notebooks_created: Number of notebook pages created in Notion
-    """
-    logger.info(f"Triggering initial sync for user {user_id} to {target_name}")
-
-    # Get all pages with completed OCR for this user
-    # Join through notebook to get user's pages
-    # Only sync actual notebooks (not PDFs, EPUBs, or folders)
-    pages_query = (
+    query = (
         db.query(Page, NotebookPage, Notebook)
         .join(NotebookPage, Page.id == NotebookPage.page_id)
         .join(Notebook, NotebookPage.notebook_id == Notebook.id)
@@ -69,30 +40,24 @@ async def trigger_initial_sync(
             Page.ocr_text.isnot(None),
             Page.ocr_text != "",
         )
-        .order_by(
-            # Most recently opened notebooks first, then highest page numbers first
-            Notebook.last_opened.desc().nullslast(),
-            NotebookPage.page_number.desc(),
-        )
+    )
+    if notebook_uuids is not None:
+        query = query.filter(Notebook.notebook_uuid.in_(notebook_uuids))
+    return query.order_by(
+        # Most recently opened notebooks first, then highest page numbers first
+        Notebook.last_opened.desc().nullslast(),
+        NotebookPage.page_number.desc(),
     )
 
-    if max_items:
-        pages_query = pages_query.limit(max_items)
 
-    pages_data = pages_query.all()
-    total_pages = len(pages_data)
+def _queue_unsynced_pages(
+    db: Session, user_id: int, target_name: str, pages_data: list
+) -> Tuple[int, int]:
+    """Queue page_text rows for pages with no SyncRecord and no open queue row.
 
-    logger.info(f"Found {total_pages} pages with completed OCR for user {user_id}")
-
-    # PHASE 1: Create notebook pages in Notion first (sequentially)
-    # This prevents race conditions when workers process pages in parallel
-    notebooks_created = 0
-    if target_name == "notion":
-        notebooks_created = await _create_notebook_pages_in_notion(
-            db, user_id, target_name, pages_data
-        )
-
-    # PHASE 2: Queue individual pages for sync
+    Rows are staggered in batches to stay under the target's rate limit; the
+    sync worker does the writing. Returns (queued_count, skipped_count).
+    """
     queued_count = 0
     skipped_count = 0
     current_time = datetime.utcnow()
@@ -155,6 +120,84 @@ async def trigger_initial_sync(
         queued_count += 1
 
     db.commit()
+    return queued_count, skipped_count
+
+
+def queue_pages_for_sync(
+    db: Session,
+    user_id: int,
+    target_name: str,
+    notebook_uuids: Optional[List[str]] = None,
+) -> dict:
+    """Queue every completed page not yet synced to ``target_name`` (no target calls).
+
+    Used by ``POST /sync/trigger``. Unlike the initial sync it does not create
+    notebook pages up front; the worker creates a missing notebook page when it
+    syncs the notebook's first page.
+    """
+    pages_data = _completed_pages_query(db, user_id, notebook_uuids).all()
+    queued_count, skipped_count = _queue_unsynced_pages(db, user_id, target_name, pages_data)
+    logger.info(
+        f"Sync trigger for user {user_id} to {target_name}: "
+        f"queued {queued_count}, skipped {skipped_count}, total {len(pages_data)}"
+    )
+    return {
+        "queued_count": queued_count,
+        "skipped_count": skipped_count,
+        "total_pages": len(pages_data),
+    }
+
+
+async def trigger_initial_sync(
+    db: Session,
+    user_id: int,
+    target_name: str,
+    max_items: Optional[int] = None,
+) -> dict:
+    """
+    Queue all existing OCR-completed pages for sync to a target.
+
+    This is called when a user first connects an integration (e.g., Notion)
+    to sync their existing data to the new target.
+
+    The sync happens in two phases:
+    1. Create notebook pages in Notion (sequentially, to prevent duplicates)
+    2. Queue individual pages for background processing
+
+    Args:
+        db: Database session
+        user_id: User ID
+        target_name: Target integration name (e.g., "notion")
+        max_items: Maximum number of items to queue (None for all)
+
+    Returns:
+        Dictionary with sync statistics:
+        - queued_count: Number of items queued
+        - skipped_count: Number of items skipped (already synced or no content)
+        - total_pages: Total pages found for user
+        - notebooks_created: Number of notebook pages created in Notion
+    """
+    logger.info(f"Triggering initial sync for user {user_id} to {target_name}")
+
+    pages_query = _completed_pages_query(db, user_id)
+    if max_items:
+        pages_query = pages_query.limit(max_items)
+
+    pages_data = pages_query.all()
+    total_pages = len(pages_data)
+
+    logger.info(f"Found {total_pages} pages with completed OCR for user {user_id}")
+
+    # PHASE 1: Create notebook pages in Notion first (sequentially)
+    # This prevents race conditions when workers process pages in parallel
+    notebooks_created = 0
+    if target_name == "notion":
+        notebooks_created = await _create_notebook_pages_in_notion(
+            db, user_id, target_name, pages_data
+        )
+
+    # PHASE 2: Queue individual pages for sync
+    queued_count, skipped_count = _queue_unsynced_pages(db, user_id, target_name, pages_data)
 
     result = {
         "queued_count": queued_count,
@@ -269,7 +312,6 @@ async def _create_notebook_pages_in_notion(
             notion_page_id = await notion_target._create_notion_page(
                 notebook_uuid=notebook.notebook_uuid,
                 title=notebook.visible_name or "Untitled",
-                pages=[],  # Empty - pages synced separately
                 full_path=notebook.full_path or "",
                 last_opened=last_opened,
                 last_modified=last_modified,
