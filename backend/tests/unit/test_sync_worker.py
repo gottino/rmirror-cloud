@@ -129,7 +129,7 @@ class TestSyncWorkerProcessing:
         # Prevent db.close() from detaching our objects
         with patch("app.services.sync_worker.SessionLocal", return_value=db), \
              patch.object(db, "close"), \
-             patch("app.services.sync_worker.NotionSyncTarget") as MockTarget:
+             patch("app.integrations.registry.NotionSyncTarget") as MockTarget:
             mock_target = MagicMock()
             mock_target.sync_item = AsyncMock(return_value=mock_result)
             MockTarget.return_value = mock_target
@@ -165,7 +165,7 @@ class TestSyncWorkerProcessing:
         mock_result.target_id = "notion-block-456"
         mock_result.metadata = {}
 
-        with patch("app.services.sync_worker.NotionSyncTarget") as MockTarget:
+        with patch("app.integrations.registry.NotionSyncTarget") as MockTarget:
             mock_target = MagicMock()
             mock_target.sync_item = AsyncMock(return_value=mock_result)
             MockTarget.return_value = mock_target
@@ -262,7 +262,7 @@ class TestSyncWorkerProcessing:
         mock_result.target_id = "updated-block"
         mock_result.metadata = {}
 
-        with patch("app.services.sync_worker.NotionSyncTarget") as MockTarget:
+        with patch("app.integrations.registry.NotionSyncTarget") as MockTarget:
             mock_target = MagicMock()
             mock_target.sync_item = AsyncMock(return_value=mock_result)
             MockTarget.return_value = mock_target
@@ -289,7 +289,7 @@ class TestSyncWorkerProcessing:
         mock_result.error_message = "Notion API error"
         mock_result.metadata = {}
 
-        with patch("app.services.sync_worker.NotionSyncTarget") as MockTarget:
+        with patch("app.integrations.registry.NotionSyncTarget") as MockTarget:
             mock_target = MagicMock()
             mock_target.sync_item = AsyncMock(return_value=mock_result)
             MockTarget.return_value = mock_target
@@ -311,7 +311,7 @@ class TestSyncWorkerProcessing:
         worker = SyncWorker()
         item_id = queue_item.id
 
-        with patch("app.services.sync_worker.NotionSyncTarget") as MockTarget, \
+        with patch("app.integrations.registry.NotionSyncTarget") as MockTarget, \
              patch("app.services.sync_worker.SessionLocal", return_value=db), \
              patch.object(db, "close"):
             mock_target = MagicMock()
@@ -341,7 +341,7 @@ class TestSyncWorkerProcessing:
 
         with patch("app.services.sync_worker.SessionLocal", return_value=db), \
              patch.object(db, "close"), \
-             patch("app.services.sync_worker.NotionSyncTarget") as MockTarget:
+             patch("app.integrations.registry.NotionSyncTarget") as MockTarget:
             mock_target = MagicMock()
             mock_target.sync_item = AsyncMock(return_value=mock_result)
             MockTarget.return_value = mock_target
@@ -364,7 +364,7 @@ class TestSyncWorkerProcessing:
 
         with patch("app.services.sync_worker.SessionLocal", return_value=db), \
              patch.object(db, "close"), \
-             patch("app.services.sync_worker.NotionSyncTarget") as MockTarget:
+             patch("app.integrations.registry.NotionSyncTarget") as MockTarget:
             mock_target = MagicMock()
             mock_target.sync_item = AsyncMock(side_effect=Exception("still failing"))
             MockTarget.return_value = mock_target
@@ -593,7 +593,7 @@ class TestStaleProcessingReclaim:
 
         with patch("app.services.sync_worker.SessionLocal", return_value=db), \
              patch.object(db, "close"), \
-             patch("app.services.sync_worker.NotionSyncTarget") as MockTarget:
+             patch("app.integrations.registry.NotionSyncTarget") as MockTarget:
             MockTarget.return_value.sync_item = AsyncMock(return_value=mock_result)
             with patch.object(IntegrationConfig, "get_config",
                               return_value={"access_token": "t", "database_id": "d"}):
@@ -1107,7 +1107,7 @@ class TestRetrySafeNotionWrites:
             status=SyncStatus.RETRY, error_message="gone",
             error_kind=SyncErrorKind.PARENT_GONE,
         ))
-        with patch("app.services.sync_worker.NotionSyncTarget", return_value=mock_target), \
+        with patch("app.integrations.registry.NotionSyncTarget", return_value=mock_target), \
              patch.object(IntegrationConfig, "get_config",
                           return_value={"access_token": "test", "database_id": "db-123"}):
             await SyncWorker()._process_queue_item(db, queue_item)
