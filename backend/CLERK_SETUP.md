@@ -342,15 +342,6 @@ New users:
 - ✅ Ensure no middleware is modifying request before verification
 - ✅ Verify webhook URL in Clerk dashboard is correct
 
-### Can't Access Beta Page
-
-**Problem**: `https://rmirror.io/beta` shows 404
-
-**Solutions**:
-- ✅ Deploy the beta page: `scp landing/beta.html deploy@167.235.74.51:/var/www/rmirror-landing/`
-- ✅ Check nginx configuration includes the landing page directory
-- ✅ Verify file permissions: `chmod 644 /var/www/rmirror-landing/beta.html`
-
 ## Security Best Practices
 
 1. **Always validate JWTs** - Never trust client-sent user IDs

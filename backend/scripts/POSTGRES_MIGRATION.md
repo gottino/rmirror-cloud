@@ -8,7 +8,7 @@ This guide walks you through migrating your rMirror Cloud production database fr
 
 ```bash
 # SSH to production
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 cd /var/www/rmirror-cloud/backend
 
 # Pull latest code
@@ -55,7 +55,7 @@ The migration process involves:
 
 ```bash
 # SSH into production
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 
 # Navigate to backend directory
 cd /var/www/rmirror-cloud/backend
