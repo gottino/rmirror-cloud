@@ -16,29 +16,28 @@ Review backend code changes for correctness, security, performance, and adherenc
 When reviewing code, systematically check:
 
 ### 1. Async/Await Patterns
-- All FastAPI route handlers must be async
-- Database operations use async sessions correctly
+- FastAPI route handlers are `async def`
+- Database access uses synchronous SQLAlchemy `Session` objects (`get_db`, `SessionLocal`); there are no async sessions
 - Background workers use asyncio properly
-- No blocking I/O in async contexts
+- No blocking I/O in async contexts: blocking SDK calls (Gemini, boto3, Notion SDK, subprocesses) must be wrapped with `run_off_loop` from `app/utils/concurrency.py`
 
 ### 2. SQLAlchemy Session Management
 - Sessions MUST be closed in finally blocks (especially in background workers)
 - No session leaks in error paths
-- Proper use of async context managers
 - Session cleanup in sync queue worker
 
 ### 3. Quota System
 - Quota checks happen BEFORE resource consumption (OCR, sync)
 - Quota consumed AFTER successful operation (not before)
-- HTTP 402 returned when quota exhausted
-- Response includes quota details (used, limit, reset_at)
-- Integration syncs blocked when quota exhausted
+- Uploads are never rejected for quota (page stored as `PENDING_QUOTA`, hard cap of 100 pending pages then HTTP 429)
+- HTTP 402 with quota details (used, limit, reset_at) where a feature needs quota (e.g. notebook export)
+- Retroactive OCR runs in the sync worker, never from request code- Integration syncs blocked when quota exhausted
 
 ### 4. Database Deduplication
 - Uses `page_uuid` for deduplication (NOT `content_hash`)
 - Queries by page identifier in upsert patterns
 - Respects `sync_records` as source of truth
-- Proper UNIQUE constraints enforced
+- UNIQUE index on `sync_records(page_uuid, target_name, user_id)` respected; `pages.page_uuid` is NOT unique, so never assume one row per UUID
 
 ### 5. Poetry Commands
 - ALWAYS uses `poetry run` for alembic, pytest, uvicorn
@@ -55,7 +54,7 @@ When reviewing code, systematically check:
 - No SQL injection vulnerabilities
 - Encrypted credentials in integration_configs
 - Proper input validation
-- Authentication checks on protected endpoints
+- Authentication checks on protected endpoints (Clerk dependencies such as `get_clerk_active_user`; password login endpoints no longer exist)
 
 ## Review Process
 
@@ -87,13 +86,13 @@ When reviewing code, systematically check:
 ## Backend Code Review
 
 ### Critical Issues
-- **File**: backend/app/api/ocr.py:45
+- **File**: backend/app/api/processing.py:45
   **Issue**: Quota not checked before OCR processing
   **Fix**: Add quota check before OCR:
   ```python
-  await quota_service.check_quota(user_id, "ocr_pages", 1)
-  # ... OCR processing
-  await quota_service.consume_quota(user_id, "ocr_pages", 1)
+  if quota_service.check_quota(db, user_id):
+      # ... OCR processing
+      quota_service.consume_quota(db, user_id, amount=1)
   ```
 
 ### Warnings
@@ -112,6 +111,7 @@ When reviewing code, systematically check:
 - **Deduplication**: Always use `page_uuid`, never `content_hash`
 - **Session cleanup**: Always use finally blocks for SQLAlchemy sessions
 - **Graceful degradation**: Accept uploads when quota exhausted, defer OCR
+- **Event loop**: Never block the loop; use `run_off_loop` for synchronous clients
 - **Database as truth**: `sync_records` table is authoritative for sync state
 
 Be thorough, professional, and constructive. Focus on preventing bugs and maintaining architectural consistency.

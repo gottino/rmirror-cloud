@@ -32,7 +32,7 @@
    - concepts/remarkable-cloud-complete.md: Original strategic concept
 
 3. **Development Environment**
-   - docker-compose.yml: PostgreSQL, Redis, MinIO (S3-compatible)
+   - docker-compose.yml: PostgreSQL, MinIO (S3-compatible)
    - .env.example: Environment variable template
    - .gitignore: Proper exclusions (includes concepts/)
 
@@ -195,7 +195,7 @@ cp .env.example .env
 # Edit .env with Claude API key
 
 # Start infrastructure
-docker-compose up -d postgres redis minio
+docker-compose up -d
 
 # Backend (when ready)
 cd backend
