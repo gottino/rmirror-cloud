@@ -14,7 +14,7 @@ Use this checklist when performing the production migration.
 ### Step 1: Backup Current Database ⏱️ 2 min
 
 ```bash
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 cd /var/www/rmirror-cloud/backend
 sudo cp rmirror.db rmirror.db.backup.$(date +%Y%m%d_%H%M%S)
 ls -lh rmirror.db*

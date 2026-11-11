@@ -16,7 +16,7 @@ This guide will help you strengthen SSH security by:
 
 1. **SSH into the server:**
    ```bash
-   ssh -p 22 deploy@167.235.74.51
+   ssh -p 22 deploy@<server-ip>
    ```
 
 2. **Run the fail2ban update script:**
@@ -61,7 +61,7 @@ This guide will help you strengthen SSH security by:
 
 4. **Test the new port (open a NEW terminal window):**
    ```bash
-   ssh -p 2222 deploy@167.235.74.51
+   ssh -p 2222 deploy@<server-ip>
    ```
 
    ✅ If this works, continue to step 5
@@ -104,7 +104,7 @@ After completing all phases:
 
 1. **Test SSH connection:**
    ```bash
-   ssh -p 2222 deploy@167.235.74.51
+   ssh -p 2222 deploy@<server-ip>
    ```
 
 2. **Check fail2ban status:**

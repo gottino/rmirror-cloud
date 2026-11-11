@@ -145,3 +145,9 @@ dashboard/dev-context/
 
 # Obsidian plugin (separate repo, developed here temporarily)
 obsidian-plugin/
+
+# Personal data exports, DB backups, browser-automation screenshots
+*.sql
+!backend/tests/manual_test_data/*.sql
+*.backup
+.playwright-mcp/
