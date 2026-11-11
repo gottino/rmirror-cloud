@@ -47,6 +47,20 @@ describe('buildAgentRedirectUrl', () => {
     expect(u.searchParams.get('x')).toBe('1');
   });
 
+  it('keeps the agent state parameter unchanged', () => {
+    // The agent sends ?callback=<encoded URL carrying its one-time state>
+    const page = new URL(
+      'https://dashboard.example/agent?callback=' +
+        encodeURIComponent('http://localhost:5555/auth/callback?state=Ab-_9xYz'),
+    );
+    const callback = page.searchParams.get('callback') as string;
+    expect(validateCallbackUrl(callback)).toBe(true);
+    const out = buildAgentRedirectUrl(callback, 'tok');
+    const u = new URL(out as string);
+    expect(u.searchParams.get('state')).toBe('Ab-_9xYz');
+    expect(u.searchParams.get('token')).toBe('tok');
+  });
+
   it('returns null for a rejected callback', () => {
     expect(buildAgentRedirectUrl('javascript://localhost/%0aalert(1)', 't')).toBeNull();
     expect(buildAgentRedirectUrl('http://localhost:5555/other', 't')).toBeNull();
