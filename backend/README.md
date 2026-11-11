@@ -46,7 +46,7 @@ poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 The API will be available at `http://localhost:8000`
 
-Interactive API documentation:
+Interactive API documentation (off by default; set `ENABLE_API_DOCS=true` in `.env` to serve it):
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
