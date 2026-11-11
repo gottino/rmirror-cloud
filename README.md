@@ -7,7 +7,7 @@ Mirror your reMarkable notes to the cloud with AI-powered handwriting recognitio
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.135+-green.svg)](https://fastapi.tiangolo.com)
-[![Next.js 14](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org)
+[![Next.js 15](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org)
 
 ---
 
@@ -64,7 +64,7 @@ poetry install
 poetry run python -m app.main --foreground --debug
 ```
 
-Visit `http://localhost:3000` for the dashboard, `http://localhost:9090` for agent config.
+Visit `http://localhost:3000` for the dashboard, `http://localhost:5555` for agent config.
 
 See [Development Setup](#-development-setup) for detailed instructions.
 
@@ -100,7 +100,7 @@ See [Development Setup](#-development-setup) for detailed instructions.
          │
          ↓
 ┌─────────────────────────────────────┐
-│   Next.js Dashboard (Vercel)        │
+│   Next.js Dashboard (Hetzner)       │
 │  ┌──────────────────────────────┐   │
 │  │  Clerk Auth (Google OAuth)   │   │
 │  └──────────────────────────────┘   │
@@ -119,9 +119,9 @@ See [Development Setup](#-development-setup) for detailed instructions.
 
 **Components:**
 
-- **Agent** (`agent/`) - macOS background service with menu bar app and localhost web UI (port 9090)
+- **Agent** (`agent/`) - macOS background service with menu bar app and localhost web UI (port 5555)
 - **Backend** (`backend/`) - FastAPI server with asyncio sync workers, quota enforcement, OCR pipeline
-- **Dashboard** (`dashboard/`) - Next.js 14 web interface with Clerk authentication
+- **Dashboard** (`dashboard/`) - Next.js 15 web interface with Clerk authentication
 - **Database** - PostgreSQL (production), SQLite (development)
 - **Storage** - S3-compatible (Backblaze B2 for production)
 
@@ -136,9 +136,9 @@ See [Development Setup](#-development-setup) for detailed instructions.
 | Database | PostgreSQL / SQLite | Robust for production, simple for dev |
 | OCR | Google Gemini 2.5 Flash | Best quality/cost ratio for handwriting OCR |
 | Storage | S3-compatible (Backblaze B2) | Scalable, cost-effective object storage |
-| Dashboard | Next.js 14 + Clerk | SSR, great DX, managed authentication |
+| Dashboard | Next.js 15 + Clerk | SSR, great DX, managed authentication |
 | Auth | JWT (30-day tokens) | Stateless, secure, long-lived for agent |
-| Deployment | Hetzner VPS + Vercel | Backend on VPS, frontend on edge network |
+| Deployment | Hetzner VPS | Backend (systemd) and dashboard (pm2) behind nginx; push to `main` deploys staging, production is a manual workflow |
 
 ---
 
@@ -187,7 +187,7 @@ See [Development Setup](#-development-setup) for detailed instructions.
 **macOS Agent**
 - [x] Python background service with menu bar app
 - [x] File watching & automatic sync to cloud
-- [x] Flask web UI for configuration (localhost:9090)
+- [x] Flask web UI for configuration (localhost:5555)
 - [x] Intelligent sync queue with batching
 - [x] Exponential backoff retry logic
 - [x] Long-lived token authentication (30-day JWT)
@@ -198,7 +198,7 @@ See [Development Setup](#-development-setup) for detailed instructions.
 - [x] Per-notebook deletion support
 
 **Web Dashboard**
-- [x] Next.js 14 web interface (deployed on Vercel)
+- [x] Next.js 15 web interface (deployed on the Hetzner VPS)
 - [x] Clerk authentication (Google OAuth)
 - [x] Notebook browsing with folder hierarchy
 - [x] PDF viewer for pages
@@ -335,7 +335,7 @@ poetry run python -m app.main --foreground --debug
 ./build_macos.sh
 ```
 
-Agent web UI runs at `http://localhost:9090`.
+Agent web UI runs at `http://localhost:5555`.
 
 **Configuration:**
 - Config stored at `~/.rmirror/config.yaml`
@@ -455,19 +455,18 @@ UNIQUE (page_uuid, target_name, user_id)
 - No OCR, no PDF upload, no block creation
 - Triggered by metadata changes (notebook renamed, page reordered, etc.)
 
-**Queue item types:**
+**Sync types:**
 
-- `NOTEBOOK` → Full content sync (OCR + Notion blocks)
-- `NOTEBOOK_METADATA` → Metadata-only sync (properties only)
+- `NOTEBOOK` → Full content sync (OCR + Notion blocks), processed from the `sync_queue` by the background worker
+- `NOTEBOOK_METADATA` → Metadata-only sync (properties only), run inline by `POST /processing/metadata/update` (not a queue item)
 
 ---
 
 ## 📚 Documentation
 
 - **[📖 Complete Documentation](docs/)** - Comprehensive project documentation
-- **[Architecture Overview](docs/architecture.md)** - System design and components
 - **[API Reference](docs/api/backend-api.md)** - Complete REST API documentation
-- **[Development Setup](docs/development/setup.md)** - Get started with development
+- **[Backend Quick Start](backend/README.md#quick-start)** - Get started with development
 - **[Deployment Guide](docs/deployment/hetzner.md)** - Production deployment
 - **[Contributing Guidelines](CONTRIBUTING.md)** - How to contribute
 

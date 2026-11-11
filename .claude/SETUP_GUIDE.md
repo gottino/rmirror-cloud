@@ -60,7 +60,7 @@ Run agent locally in foreground mode.
 
 # Starts agent with:
 - Foreground logging
-- Flask UI on localhost:9090
+- Flask UI on localhost:5555
 - File watcher active
 ```
 

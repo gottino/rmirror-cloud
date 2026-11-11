@@ -2,9 +2,11 @@
 
 This guide walks you through setting up automated deployment to your Hetzner production server using GitHub Actions.
 
+> **Current setup:** the repository ships two workflows instead of the single `deploy.yml` shown below. `deploy-staging.yml` runs CI and deploys **staging** on every push to `main`; `deploy-production.yml` deploys **production** only when started by hand ("Run workflow"), after CI and a staging health check. Both build the dashboard in Actions (never on the server). The `deploy.yml` in Step 4 is a simplified example of the pattern, and its `push` trigger would deploy production on every push, which the project does not do.
+
 ## Overview
 
-When you push code to the `main` branch (or manually trigger a deployment), GitHub Actions will:
+When a deployment runs (on push to `main` for staging, or a manual run for production), GitHub Actions will:
 1. Connect to your Hetzner server via SSH
 2. Pull the latest code
 3. Install dependencies
