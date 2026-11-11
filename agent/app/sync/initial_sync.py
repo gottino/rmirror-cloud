@@ -18,6 +18,7 @@ from typing import Optional
 from app.config import Config
 from app.remarkable.metadata_scanner import MetadataScanner
 from app.sync.cloud_sync import CloudSync, QuotaExceededError, RateLimitError
+from app.sync.manifest import Fingerprint, UploadManifest, fingerprint_file
 from app.sync.metadata_sync import MetadataSync
 
 logger = logging.getLogger(__name__)
@@ -32,16 +33,19 @@ class InitialSync:
     2. Content sync (slow): Uploads pages with rate limit handling
     """
 
-    def __init__(self, config: Config, cloud_sync: CloudSync):
+    def __init__(self, config: Config, cloud_sync: CloudSync, manifest: UploadManifest | None = None):
         """
         Initialize initial sync.
 
         Args:
             config: Agent configuration
             cloud_sync: Cloud sync client
+            manifest: Upload manifest; pages uploaded here are recorded in it so the
+                watcher does not upload them again (defaults to the config directory's)
         """
         self.config = config
         self.cloud_sync = cloud_sync
+        self.manifest = manifest if manifest is not None else UploadManifest.for_config(config)
         self.remarkable_folder = Path(config.remarkable.source_directory)
         self.metadata_sync = MetadataSync(config, cloud_sync)
 
@@ -278,6 +282,7 @@ class InitialSync:
 
             for page_file in page_files_to_upload:
                 try:
+                    fingerprint = fingerprint_file(page_file)
                     result = await self._upload_with_retry(page_file, notebook_uuid)
                     if result.get("rate_limited"):
                         stats["rate_limited"] += 1
@@ -286,6 +291,7 @@ class InitialSync:
                         if remaining > 0:
                             print(f"   ⏸️  Rate limited. {remaining} page(s) will sync later.")
                         break
+                    self._record_upload(page_file, fingerprint)
                     stats["uploaded"] += 1
                 except QuotaExceededError:
                     # Re-raise to stop the entire sync
@@ -308,6 +314,13 @@ class InitialSync:
             print(f"   ✓ Uploaded {stats['uploaded']} page(s)")
 
         return stats
+
+    def _record_upload(self, page_file: Path, fingerprint: Fingerprint) -> None:
+        """Record an uploaded page in the manifest; a failure here must not fail the sync."""
+        try:
+            self.manifest.record_upload(page_file, fingerprint)
+        except Exception as e:
+            logger.warning(f"Could not record {page_file.name} in upload manifest: {e}")
 
     async def _upload_with_retry(
         self, page_file: Path, notebook_uuid: str, max_retries: int = 2

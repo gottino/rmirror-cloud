@@ -292,3 +292,36 @@ class TestAccessLogRedaction:
         filters = [f for f in werkzeug_logger.filters if isinstance(f, RedactQuerySecretsFilter)]
         assert len(filters) == 1
 
+
+
+class TestSyncQueueStatus:
+    @pytest.fixture
+    def queue_app(self, config, cloud_sync):
+        sync_queue = MagicMock()
+        sync_queue.get_stats.return_value = {
+            "queue_size": 3, "pending": 0, "running": True, "paused_reason": "sign_in_required",
+        }
+        agent = MagicMock()
+        agent.file_watcher.sync_queue = sync_queue
+        agent.remarkable_folder_missing = False
+        flask_app = create_app(config, cloud_sync, agent=agent)
+        flask_app.config["TESTING"] = True
+        return flask_app, sync_queue
+
+    def test_status_reports_paused_reason(self, queue_app):
+        flask_app, _ = queue_app
+        data = flask_app.test_client().get("/api/status", base_url=BASE_URL).get_json()
+        assert data["sync"]["paused_reason"] == "sign_in_required"
+        assert data["sync"]["queue"]["queue_size"] == 3
+        assert data["authentication"]["sign_in_required"] is True
+
+    def test_status_without_watcher(self, client):
+        data = client.get("/api/status", base_url=BASE_URL).get_json()
+        assert data["sync"]["paused_reason"] is None
+        assert data["authentication"]["sign_in_required"] is False
+
+    def test_trigger_asks_paused_queue_to_resume(self, queue_app):
+        flask_app, sync_queue = queue_app
+        resp = flask_app.test_client().post("/api/sync/trigger", base_url=BASE_URL)
+        assert resp.status_code == 200
+        sync_queue.request_resume.assert_called_once()

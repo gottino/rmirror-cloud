@@ -6,6 +6,9 @@ Based on the file watcher implementation from rm-int-src.
 """
 
 import asyncio
+import logging
+import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
 
@@ -14,7 +17,10 @@ from watchdog.observers import Observer
 
 from app.config import Config
 from app.sync.cloud_sync import CloudSync
+from app.sync.manifest import UploadManifest, fingerprint_file
 from app.sync.queue import SyncQueue
+
+logger = logging.getLogger(__name__)
 
 
 class ReMarkableEventHandler(FileSystemEventHandler):
@@ -161,6 +167,65 @@ class ReMarkableEventHandler(FileSystemEventHandler):
         await self.sync_queue.add(file_path, notebook_uuid, file_type)
 
 
+def scan_for_changes(
+    source_dir: Path, handler: ReMarkableEventHandler, manifest: UploadManifest
+) -> list[tuple[Path, str, str]]:
+    """
+    Walk the source folder and return the files that changed since the agent last saw them.
+
+    Uses the watcher's own filters (``_should_ignore_file``, ``_extract_notebook_uuid``,
+    ``_should_sync_notebook``), so the scan considers exactly the files the watcher would.
+
+    Baseline rule: the first time this runs for an API host the manifest is empty.
+    Uploading everything then would spend the user's OCR quota on the whole library
+    without asking (first uploads go through the explicit initial sync, which has a
+    page limit). So on that first run every existing file is recorded as a *baseline*
+    (hash stored, not uploaded) and nothing is returned. From then on, files that are
+    new or whose hash differs from their entry (baseline or uploaded) are returned.
+    Files of notebooks that are not selected for sync are baselined if they have no
+    entry yet, so selecting a notebook later does not upload its whole history either.
+
+    Blocking (stats and hashes files); run it off the event loop.
+
+    Returns:
+        (file_path, notebook_uuid, file_type) for each file to upload.
+    """
+    initialised = manifest.is_initialised()
+    changed: list[tuple[Path, str, str]] = []
+    baselined = 0
+
+    for root, _dirs, files in os.walk(source_dir):
+        for name in files:
+            file_path = Path(root) / name
+            if handler._should_ignore_file(str(file_path)):
+                continue
+            notebook_uuid = handler._extract_notebook_uuid(file_path)
+            if not notebook_uuid:
+                continue
+
+            try:
+                if not initialised or not handler._should_sync_notebook(notebook_uuid):
+                    if manifest.get(file_path) is None:
+                        if manifest.record_baseline(file_path, fingerprint_file(file_path)):
+                            baselined += 1
+                    continue
+
+                if manifest.changed_fingerprint(file_path) is not None:
+                    changed.append((file_path, notebook_uuid, handler._get_file_type(file_path)))
+            except OSError as e:
+                logger.debug(f"Skipping unreadable file during scan: {file_path}: {e}")
+
+    if not initialised:
+        manifest.mark_initialised()
+        logger.info(f"Upload manifest initialised: {baselined} existing file(s) recorded as baseline")
+        print(f"✓ Recorded {baselined} existing file(s) as already present (not uploaded)")
+    elif changed:
+        logger.info(f"Start-up scan found {len(changed)} changed file(s)")
+        print(f"🔎 Found {len(changed)} file(s) changed while the agent was not watching")
+
+    return changed
+
+
 class FileWatcher:
     """
     File watcher for monitoring reMarkable Desktop app folder.
@@ -169,11 +234,19 @@ class FileWatcher:
     automatically sync files to the cloud.
     """
 
-    def __init__(self, config: Config, cloud_sync: CloudSync):
+    def __init__(
+        self,
+        config: Config,
+        cloud_sync: CloudSync,
+        on_status: Callable[[str], None] | None = None,
+        manifest: UploadManifest | None = None,
+    ):
         """Initialize file watcher."""
         self.config = config
         self.cloud_sync = cloud_sync
-        self.sync_queue = SyncQueue(config, cloud_sync)
+        self.sync_queue = SyncQueue(config, cloud_sync, manifest=manifest, on_status=on_status)
+        # Rescan when the queue resumes after the user signs in again
+        self.sync_queue.on_reconnect = self.rescan
 
         self.observer: Optional[Observer] = None
         self.event_handler: Optional[ReMarkableEventHandler] = None
@@ -194,14 +267,24 @@ class FileWatcher:
         # EXACT PATTERN FROM ISOLATION TEST
         await self.sync_queue.start()
 
-        self.observer = Observer()
         self.event_handler = ReMarkableEventHandler(self.sync_queue, self.config)
 
+        # First run for this backend: record the baseline before watching, so the
+        # baseline cannot swallow a change made while it is being recorded.
+        baseline_first = not await asyncio.to_thread(self.sync_queue.manifest.is_initialised)
+        if baseline_first:
+            await self._rescan_logged()
+
+        self.observer = Observer()
         watch_dir = str(source_dir)
         print(f'Scheduling observer for: {watch_dir}')
         self.observer.schedule(self.event_handler, watch_dir, recursive=True)
         self.observer.start()
         print(f'Observer started, is_alive: {self.observer.is_alive()}')
+
+        # Later runs: scan after the observer is up, so no change slips between the two
+        if not baseline_first:
+            await self._rescan_logged()
 
         self.running = True
         print("✓ File watcher started")
@@ -212,6 +295,22 @@ class FileWatcher:
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             pass
+
+    async def rescan(self) -> int:
+        """Queue files that changed while the agent was not watching (see scan_for_changes)."""
+        source_dir = Path(self.config.remarkable.source_directory)
+        handler = self.event_handler or ReMarkableEventHandler(self.sync_queue, self.config)
+        changed = await asyncio.to_thread(scan_for_changes, source_dir, handler, self.sync_queue.manifest)
+        for file_path, notebook_uuid, file_type in changed:
+            await self.sync_queue.add(file_path, notebook_uuid, file_type)
+        return len(changed)
+
+    async def _rescan_logged(self) -> None:
+        """Rescan, but never let a scan failure stop the watcher from starting."""
+        try:
+            await self.rescan()
+        except Exception as e:
+            logger.error(f"Start-up scan failed (watching continues): {e}", exc_info=True)
 
     async def stop(self) -> None:
         """Stop watching the reMarkable folder."""
