@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
@@ -81,16 +81,6 @@ class NotebookMetadataItem(BaseModel):
     last_opened: Optional[str] = None
     last_opened_page: Optional[int] = None
 
-    @field_validator("uuid")
-    @classmethod
-    def _validate_uuid(cls, v: str) -> str:
-        return parse_uuid(v)
-
-    @field_validator("pages")
-    @classmethod
-    def _validate_pages(cls, v: List[str]) -> List[str]:
-        return [parse_uuid(p) for p in v]
-
 
 class MetadataSyncRequest(BaseModel):
     """Request to sync notebook metadata and page structure.
@@ -114,6 +104,7 @@ class MetadataSyncResponse(BaseModel):
     notebooks_updated: int = Field(..., description="Number of existing notebooks updated")
     pages_registered: int = Field(..., description="Total number of page stubs registered")
     pages_already_synced: int = Field(..., description="Pages that already have content")
+    skipped: int = Field(0, description="Notebooks and pages skipped because their id was not a UUID")
     message: str
 
 
@@ -156,13 +147,37 @@ async def sync_metadata(
     notebooks_updated = 0
     pages_registered = 0
     pages_already_synced = 0
+    skipped = 0
 
     try:
         for nb_data in sync_request.notebooks:
+            # Ids become storage keys later: skip anything that is not a UUID
+            # instead of failing the whole batch. Never log the raw value.
+            try:
+                nb_uuid = parse_uuid(nb_data.uuid)
+            except ValueError:
+                logger.warning(
+                    f"Skipping notebook with invalid uuid (length {len(nb_data.uuid)}) "
+                    f"for user {current_user.id}"
+                )
+                skipped += 1
+                continue
+
+            page_uuids = []
+            for raw_page in nb_data.pages:
+                try:
+                    page_uuids.append(parse_uuid(raw_page))
+                except ValueError:
+                    logger.warning(
+                        f"Skipping page with invalid uuid (length {len(raw_page)}) "
+                        f"for user {current_user.id}"
+                    )
+                    skipped += 1
+
             # Find or create notebook
             notebook = db.query(Notebook).filter(
                 Notebook.user_id == current_user.id,
-                Notebook.notebook_uuid == nb_data.uuid
+                Notebook.notebook_uuid == nb_uuid
             ).first()
 
             if notebook:
@@ -184,12 +199,12 @@ async def sync_metadata(
                     notebook.last_opened_page = nb_data.last_opened_page
                 notebook.last_synced_at = datetime.utcnow()
                 notebooks_updated += 1
-                logger.debug(f"Updated notebook: {nb_data.visible_name} ({nb_data.uuid})")
+                logger.debug(f"Updated notebook: {nb_data.visible_name} ({nb_uuid})")
             else:
                 # Create new notebook
                 notebook = Notebook(
                     user_id=current_user.id,
-                    notebook_uuid=nb_data.uuid,
+                    notebook_uuid=nb_uuid,
                     visible_name=nb_data.visible_name,
                     parent_uuid=nb_data.parent_uuid,
                     document_type=nb_data.document_type,
@@ -208,18 +223,18 @@ async def sync_metadata(
                 db.add(notebook)
                 db.flush()  # Get the notebook ID
                 notebooks_created += 1
-                logger.debug(f"Created notebook: {nb_data.visible_name} ({nb_data.uuid})")
+                logger.debug(f"Created notebook: {nb_data.visible_name} ({nb_uuid})")
 
             # Store page UUIDs in content_json for reference
-            if nb_data.pages:
+            if page_uuids:
                 content_data = {
-                    "pages": nb_data.pages,
-                    "pageCount": len(nb_data.pages),
+                    "pages": page_uuids,
+                    "pageCount": len(page_uuids),
                 }
                 notebook.content_json = json.dumps(content_data)
 
             # Process page stubs
-            for page_idx, page_uuid in enumerate(nb_data.pages):
+            for page_idx, page_uuid in enumerate(page_uuids):
                 # Find existing page
                 page = db.query(Page).filter(
                     Page.notebook_id == notebook.id,
@@ -279,6 +294,7 @@ async def sync_metadata(
             notebooks_updated=notebooks_updated,
             pages_registered=pages_registered,
             pages_already_synced=pages_already_synced,
+            skipped=skipped,
             message=f"Synced {notebooks_created + notebooks_updated} notebooks with {total_pages} pages",
         )
 

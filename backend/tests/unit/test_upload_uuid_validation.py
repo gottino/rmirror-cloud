@@ -123,10 +123,30 @@ def test_metadata_update_rejects_non_uuid(client_user):
     assert resp.status_code == 422
 
 
-def test_sync_metadata_rejects_non_uuid(client_user):
-    client, _ = client_user
-    bad_nb = {"notebooks": [{"uuid": "a/b", "visible_name": "n"}]}
-    bad_page = {"notebooks": [{"uuid": NB_UUID, "visible_name": "n", "pages": ["../p"]}]}
-    for body in (bad_nb, bad_page):
-        resp = client.post(f"{API}/sync/metadata", json=body)
-        assert resp.status_code == 422
+def test_sync_metadata_skips_bad_ids_but_accepts_batch(client_user, db):
+    from app.models.notebook import Notebook
+    from app.models.page import Page
+
+    client, user = client_user
+    good_page = "0B6D1F9E-2C55-4A39-9F5E-1D2B3C4D5E6F"
+    body = {
+        "notebooks": [
+            {"uuid": "../bad", "visible_name": "bad", "pages": [PAGE_UUID]},
+            {
+                "uuid": NB_UUID.upper(),
+                "visible_name": "good",
+                "pages": [good_page, "a/b"],
+            },
+        ]
+    }
+    resp = client.post(f"{API}/sync/metadata", json=body)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["notebooks_created"] == 1
+    assert data["pages_registered"] == 1
+    assert data["skipped"] == 2
+
+    notebooks = db.query(Notebook).filter(Notebook.user_id == user.id).all()
+    assert [n.notebook_uuid for n in notebooks] == [NB_UUID]
+    pages = db.query(Page).filter(Page.notebook_id == notebooks[0].id).all()
+    assert [p.page_uuid for p in pages] == [PAGE_UUID]
