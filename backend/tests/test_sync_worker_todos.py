@@ -83,7 +83,7 @@ class TestProcessTodoSync:
             None,       # Existing SyncRecord query
         ]
 
-        with patch("app.services.sync_worker.TodoistSyncTarget") as mock_target_class:
+        with patch("app.integrations.registry.TodoistSyncTarget") as mock_target_class:
             mock_target = AsyncMock()
             mock_target.sync_item = AsyncMock(return_value=MagicMock(
                 success=True,
@@ -116,7 +116,7 @@ class TestProcessTodoSync:
             None,
         ]
 
-        with patch("app.services.sync_worker.NotionTodosSyncTarget") as mock_target_class:
+        with patch("app.integrations.registry.NotionTodosSyncTarget") as mock_target_class:
             mock_target = AsyncMock()
             mock_target.sync_item = AsyncMock(return_value=MagicMock(
                 success=True,
