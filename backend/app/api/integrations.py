@@ -20,13 +20,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["integrations"], dependencies=[Depends(reject_agent_token)])
 
 
-class NotionIntegrationConfig(BaseModel):
-    """Notion integration configuration."""
-
-    api_token: str
-    database_id: str
-
-
 class IntegrationConfigRequest(BaseModel):
     """Request to create/update an integration configuration."""
 

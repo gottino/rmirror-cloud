@@ -4,7 +4,6 @@ import logging
 from typing import Annotated, Optional
 
 import jwt
-from clerk_backend_sdk import ApiClient, ClientsApi, Configuration
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
@@ -20,10 +19,6 @@ logger = logging.getLogger(__name__)
 
 # HTTP Bearer token scheme
 security = HTTPBearer()
-
-# Initialize Clerk SDK (lazy-loaded)
-_clerk_api_client: Optional[ApiClient] = None
-_clients_api: Optional[ClientsApi] = None
 
 # JWKS client for JWT verification (lazy-loaded)
 _jwks_client: Optional[PyJWKClient] = None
@@ -136,25 +131,6 @@ def validate_clerk_claims(decoded: dict, settings) -> bool:
             _warn_unlisted_azp(azp, settings)
 
     return True
-
-
-def get_clerk_client() -> ClientsApi:
-    """Get or create Clerk ClientsApi instance."""
-    global _clerk_api_client, _clients_api
-    if _clients_api is None:
-        settings = get_settings()
-        if not settings.clerk_secret_key:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Clerk is not configured",
-            )
-        # Configure Clerk SDK with API key
-        configuration = Configuration(
-            api_key={"BearerAuth": settings.clerk_secret_key}
-        )
-        _clerk_api_client = ApiClient(configuration)
-        _clients_api = ClientsApi(_clerk_api_client)
-    return _clients_api
 
 
 def _agent_token_version_matches(decoded: dict, user: User) -> bool:

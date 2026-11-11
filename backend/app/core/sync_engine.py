@@ -60,10 +60,6 @@ class SyncResult:
     def success(self) -> bool:
         return self.status == SyncStatus.SUCCESS
 
-    @property
-    def should_retry(self) -> bool:
-        return self.status == SyncStatus.RETRY
-
 
 @dataclass
 class SyncItem:
@@ -76,18 +72,6 @@ class SyncItem:
     source_table: str  # Which table this came from
     created_at: datetime
     updated_at: datetime
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            "item_type": self.item_type.value,
-            "item_id": self.item_id,
-            "content_hash": self.content_hash,
-            "data": self.data,
-            "source_table": self.source_table,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
-        }
 
 
 class SyncTarget(ABC):
@@ -205,36 +189,6 @@ class ContentFingerprint:
     """
 
     @staticmethod
-    def for_notebook(notebook_data: Dict[str, Any]) -> str:
-        """
-        Generate content fingerprint for a notebook.
-
-        Args:
-            notebook_data: Notebook content dictionary
-
-        Returns:
-            SHA-256 hash of the normalized content
-        """
-        # Extract core content that defines uniqueness
-        title = notebook_data.get("title", notebook_data.get("notebook_name", ""))
-        text_content = notebook_data.get("text_content", "")
-        page_count = notebook_data.get("page_count", 0)
-        last_opened_at = notebook_data.get("last_opened_at", "")
-        last_modified_at = notebook_data.get("last_modified_at", "")
-
-        # Create normalized content string
-        content_parts = [
-            f"title:{title}",
-            f"pages:{page_count}",
-            f"content:{text_content[:1000]}",  # First 1000 chars to keep hash stable
-            f"last_opened:{last_opened_at}",  # Include metadata timestamps
-            f"last_modified:{last_modified_at}",
-        ]
-
-        content_str = "|".join(content_parts)
-        return hashlib.sha256(content_str.encode("utf-8")).hexdigest()
-
-    @staticmethod
     def for_notebook_metadata(notebook_data: Dict[str, Any]) -> str:
         """
         Generate content fingerprint for notebook metadata only (lightweight).
@@ -271,31 +225,6 @@ class ContentFingerprint:
         return hashlib.sha256(content_str.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def for_page(page_data: Dict[str, Any]) -> str:
-        """
-        Generate content fingerprint for a single page.
-
-        Args:
-            page_data: Page content dictionary
-
-        Returns:
-            SHA-256 hash of the normalized content
-        """
-        notebook_uuid = page_data.get("notebook_uuid", "")
-        page_number = page_data.get("page_number", 0)
-        text = page_data.get("text", "")
-
-        # Create normalized content string
-        content_parts = [
-            f"notebook:{notebook_uuid}",
-            f"page:{page_number}",
-            f"text:{text}",
-        ]
-
-        content_str = "|".join(content_parts)
-        return hashlib.sha256(content_str.encode("utf-8")).hexdigest()
-
-    @staticmethod
     def for_todo(todo_data: Dict[str, Any]) -> str:
         """
         Generate content fingerprint for a todo item.
@@ -313,32 +242,6 @@ class ContentFingerprint:
         content_parts = [
             f"text:{text}",
             f"notebook:{notebook_uuid}",
-            f"page:{page_number}",
-        ]
-
-        content_str = "|".join(content_parts)
-        return hashlib.sha256(content_str.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def for_highlight(highlight_data: Dict[str, Any]) -> str:
-        """
-        Generate content fingerprint for a highlight.
-
-        Args:
-            highlight_data: Highlight content dictionary
-
-        Returns:
-            SHA-256 hash of the normalized content
-        """
-        text = highlight_data.get("text", "")
-        corrected_text = highlight_data.get("corrected_text", "")
-        source_file = highlight_data.get("source_file", "")
-        page_number = highlight_data.get("page_number", 0)
-
-        content_parts = [
-            f"text:{text}",
-            f"corrected:{corrected_text}",
-            f"source:{source_file}",
             f"page:{page_number}",
         ]
 

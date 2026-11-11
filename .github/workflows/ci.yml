@@ -27,6 +27,15 @@ jobs:
       - name: Lint
         run: cd backend && poetry run ruff check .
 
+      # Unused dependencies and dead code. Config in backend/pyproject.toml,
+      # kept-on-purpose names in backend/vulture_allowlist.py.
+      - name: Dependency and dead-code checks (deptry, vulture)
+        run: |
+          cd backend
+          poetry run pip install deptry==0.25.1 vulture==2.16
+          poetry run deptry app alembic
+          poetry run vulture
+
       - name: Unit tests
         run: |
           cd backend

@@ -13,15 +13,6 @@ from typing import Any, Dict, List
 class MarkdownToNotionConverter:
     """Converts markdown-like text to Notion blocks with proper formatting."""
 
-    def __init__(self):
-        # Regex patterns for markdown elements
-        self.heading_pattern = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
-        self.checkbox_pattern = re.compile(r'^(\s*)-\s*\[([ x])\]\s+(.+)$', re.MULTILINE)
-        self.bullet_pattern = re.compile(r'^(\s*)-\s+(.+)$', re.MULTILINE)
-        self.numbered_pattern = re.compile(r'^(\s*)\d+\.\s+(.+)$', re.MULTILINE)
-        self.bold_pattern = re.compile(r'\*\*(.+?)\*\*')
-        self.italic_pattern = re.compile(r'\*(.+?)\*')
-
     def text_to_notion_blocks(self, text: str, max_blocks: int = 100) -> List[Dict[str, Any]]:
         """
         Convert markdown-like text to Notion blocks.
