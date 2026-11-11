@@ -250,11 +250,11 @@ This project uses domain-specific `.claudecontext` files for focused sessions:
 
 ## Deployment
 
-**Production**: Hetzner VPS (167.235.74.51) via GitHub Actions
+**Production**: Hetzner VPS (<server-ip>) via GitHub Actions
 
 ```bash
 # SSH access
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 
 # Check backend service
 systemctl status rmirror-backend

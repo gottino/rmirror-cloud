@@ -115,7 +115,7 @@ These commands run **without permission prompts**:
 - `ls`, `pwd`, `find`, `grep`, `cat`, `curl`, `sqlite3`
 
 **SSH (production):**
-- `ssh deploy@167.235.74.51`
+- `ssh deploy@<server-ip>`
 
 ## MCP Servers (Model Context Protocol)
 
