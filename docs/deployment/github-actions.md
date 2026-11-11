@@ -2,9 +2,11 @@
 
 This guide walks you through setting up automated deployment to your Hetzner production server using GitHub Actions.
 
+> **Current setup:** the repository ships two workflows instead of the single `deploy.yml` shown below. `deploy-staging.yml` runs CI and deploys **staging** on every push to `main`; `deploy-production.yml` deploys **production** only when started by hand ("Run workflow"), after CI and a staging health check. Both build the dashboard in Actions (never on the server). The `deploy.yml` in Step 4 is a simplified example of the pattern, and its `push` trigger would deploy production on every push, which the project does not do.
+
 ## Overview
 
-When you push code to the `main` branch (or manually trigger a deployment), GitHub Actions will:
+When a deployment runs (on push to `main` for staging, or a manual run for production), GitHub Actions will:
 1. Connect to your Hetzner server via SSH
 2. Pull the latest code
 3. Install dependencies
@@ -51,7 +53,7 @@ Then add it to your server's authorized_keys:
 
 ```bash
 # SSH into your server
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 
 # Add the public key
 echo "YOUR_PUBLIC_KEY_HERE" >> ~/.ssh/authorized_keys
@@ -67,7 +69,7 @@ exit
 **Test the connection** from your local machine:
 
 ```bash
-ssh -i ~/.ssh/github_actions_rmirror deploy@167.235.74.51 "echo 'Connection successful!'"
+ssh -i ~/.ssh/github_actions_rmirror deploy@<server-ip> "echo 'Connection successful!'"
 ```
 
 ## Step 3: Store Secrets in GitHub
@@ -88,7 +90,7 @@ Create these secrets one by one:
 | Secret Name | Description | How to Get Value |
 |-------------|-------------|------------------|
 | `SSH_PRIVATE_KEY` | GitHub Actions SSH key | `cat ~/.ssh/github_actions_rmirror` |
-| `SERVER_HOST` | Production server IP | Your Hetzner IP (e.g., `167.235.74.51`) |
+| `SERVER_HOST` | Production server IP | Your Hetzner IP (e.g., `<server-ip>`) |
 | `SERVER_USER` | SSH user for deployment | `deploy` |
 | `SERVER_PORT` | SSH port | `22` (default) |
 
@@ -257,10 +259,10 @@ You can also trigger deployments manually:
 **Solution**:
 ```bash
 # Verify public key is on server
-ssh deploy@167.235.74.51 "cat ~/.ssh/authorized_keys"
+ssh deploy@<server-ip> "cat ~/.ssh/authorized_keys"
 
 # Test SSH key locally
-ssh -i ~/.ssh/github_actions_rmirror deploy@167.235.74.51 "echo 'Test'"
+ssh -i ~/.ssh/github_actions_rmirror deploy@<server-ip> "echo 'Test'"
 ```
 
 ### Secret Not Found
@@ -279,7 +281,7 @@ ssh -i ~/.ssh/github_actions_rmirror deploy@167.235.74.51 "echo 'Test'"
 **Solution**:
 ```bash
 # SSH into server manually
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 
 # Check what went wrong
 cd /var/www/rmirror-cloud/backend
@@ -370,7 +372,7 @@ Get notified when deployments complete:
 Actions tab → Deploy to Production → Click any run
 
 # On server
-ssh deploy@167.235.74.51 "sudo journalctl -u rmirror -n 50"
+ssh deploy@<server-ip> "sudo journalctl -u rmirror -n 50"
 ```
 
 ### Rollback a Deployment
@@ -379,7 +381,7 @@ If a deployment breaks something:
 
 ```bash
 # SSH to server
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 
 cd /var/www/rmirror-cloud/backend
 
@@ -407,7 +409,7 @@ ls -lah /var/backups/rmirror/
 
 If something doesn't work:
 1. Check GitHub Actions logs (Actions tab)
-2. Check server logs (`ssh deploy@167.235.74.51 'sudo journalctl -u rmirror -n 100'`)
+2. Check server logs (`ssh deploy@<server-ip> 'sudo journalctl -u rmirror -n 100'`)
 3. Verify all secrets are set correctly
 4. Test SSH connection manually
 
