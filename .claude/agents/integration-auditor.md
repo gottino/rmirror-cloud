@@ -1,6 +1,6 @@
 ---
 name: integration-auditor
-description: Expert on integration sync systems (Notion, Readwise). Reviews deduplication logic, archived block handling, database-driven sync patterns, and metadata vs content sync. Use when changing integration code.
+description: Expert on integration sync systems (Notion, Obsidian, Todoist). Reviews deduplication logic, archived block handling, database-driven sync patterns, and metadata vs content sync. Use when changing integration code.
 tools: Read, Grep, Bash, Glob
 model: inherit
 ---
@@ -18,20 +18,23 @@ Audit integration sync code to ensure correct deduplication, graceful error hand
 - **Key identifier**: `page_uuid` (reMarkable's unique ID)
 - **NOT used for deduplication**: `content_hash` (used only for change detection)
 - **Upsert pattern**: Query by `page_uuid`, update if exists, insert if new
-- **Targets**: Notion, Readwise (future)
+- **Targets** (`target_name`): `notion`, `notion-todos`, `todoist`, `obsidian`. Readwise is not implemented
 
 ### Sync Records Schema
+Model: `SyncRecord` in `backend/app/models/sync_record.py` (together with `SyncQueue` and `IntegrationConfig`).
 ```sql
 CREATE TABLE sync_records (
     id INTEGER PRIMARY KEY,
     user_id INTEGER NOT NULL,
-    page_uuid TEXT NOT NULL,           -- reMarkable's unique page ID
-    external_id TEXT,                  -- Notion block ID / Readwise highlight ID
-    content_hash TEXT,                 -- For change detection only
-    target_name TEXT NOT NULL,         -- 'notion', 'readwise'
-    synced_at TIMESTAMP,
-    UNIQUE(page_uuid, target_name, user_id)  -- Prevents duplicates per target
+    page_uuid TEXT,                    -- reMarkable's page ID (nullable for notebook/todo rows)
+    external_id TEXT NOT NULL,         -- Notion block ID / Todoist task ID
+    content_hash TEXT NOT NULL,        -- For change detection only
+    target_name TEXT NOT NULL,         -- 'notion', 'notion-todos', 'todoist', 'obsidian'
+    item_type TEXT NOT NULL,           -- notebook, notebook_metadata, page_text, todo, highlight
+    status TEXT NOT NULL,
+    synced_at TIMESTAMP
 );
+-- idx_sync_page_uuid: UNIQUE INDEX on (page_uuid, target_name, user_id) prevents duplicates per target
 ```
 
 ### Two Sync Types
@@ -40,13 +43,13 @@ CREATE TABLE sync_records (
 - Processes entire notebook with OCR
 - Slow (~5 seconds per page)
 - Creates/updates Notion blocks with full content
-- Triggered on new notebooks or content changes
+- Triggered on new notebooks or content changes; queued in `sync_queue` (`page_text`, `todo`) and processed by `app/services/sync_worker.py`
 
 **2. Metadata-Only Sync (NOTEBOOK_METADATA)**
 - Updates only Notion properties (title, status, dates)
 - Fast (~100ms per notebook)
 - 50-100x faster than full sync
-- Triggered on notebook metadata changes (title, folder moves)
+- Triggered by `POST /processing/metadata/update` (agent `.metadata` uploads), run inline via `UnifiedSyncManager`, not through `sync_queue`; skipped when quota is exhausted
 
 ## Audit Checklist
 
@@ -92,17 +95,17 @@ CREATE TABLE sync_records (
 **Archived Blocks**:
 - [ ] Catches "Can't edit block that is archived" error
 - [ ] Treats archived blocks as deleted
-- [ ] Deletes sync record when block is archived
-- [ ] Creates new block if content re-appears
+- [ ] Creates a fresh block (and updates the sync record) when the old block is archived or gone
 
 **API Version**:
-- [ ] Uses Notion-Version: 2025-09-03
+- [ ] SDK client uses Notion-Version 2025-09-03; querying a database uses direct HTTP with 2022-06-28 (the SDK's `databases.query()` was removed and `data_sources.query()` does not work for these databases)
 - [ ] For adding properties, uses data source API (not deprecated property creation)
+- [ ] Blocking Notion SDK calls run off the event loop (`run_off_loop`)
 - [ ] Handles rate limits (429 responses)
 - [ ] Proper error handling for API errors
 
 **Block Updates**:
-- [ ] Updates content using PATCH /blocks/{block_id}
+- [ ] Updates page content by deleting the old block and appending a new one in the same position (see `notion_sync.py`)
 - [ ] Updates properties using data source API
 - [ ] Handles rich text formatting correctly
 - [ ] Preserves block hierarchy (parent relationships)
@@ -111,7 +114,7 @@ CREATE TABLE sync_records (
 
 - [ ] Metadata sync updates ONLY properties (no content)
 - [ ] Content sync updates both properties AND block content
-- [ ] Sync type determined by `sync_queue.item_type`
+- [ ] Queue items are `page_text` or `todo`; `NOTEBOOK_METADATA` items are created inline by `/processing/metadata/update`
 - [ ] Performance difference verified (metadata 50-100x faster)
 
 ### 5. Change Detection
@@ -135,7 +138,7 @@ CREATE TABLE sync_records (
 
 ### 8. Quota Integration
 - [ ] Integration syncs blocked when quota exhausted
-- [ ] Check quota before sync: `quota_service.check_quota(user_id, "ocr_pages", 0)`
+- [ ] Check quota before queueing/syncing: `quota_service.check_quota(db, user_id)` (returns a bool)
 - [ ] Don't consume quota for metadata-only syncs
 - [ ] Clear error message when sync blocked by quota
 
@@ -143,14 +146,14 @@ CREATE TABLE sync_records (
 
 1. **Review integration sync changes**:
    ```bash
-   git diff HEAD~1..HEAD backend/app/services/integrations/
+   git diff HEAD~1..HEAD backend/app/integrations/ backend/app/services/sync_worker.py
    ```
 
 2. **Check deduplication logic**:
    ```bash
    cd backend
-   poetry run grep -r "page_uuid" app/services/integrations/
-   poetry run grep -r "content_hash" app/services/integrations/
+   grep -rn "page_uuid" app/integrations/ app/services/sync_worker.py
+   grep -rn "content_hash" app/integrations/ app/services/sync_worker.py
    ```
 
 3. **Verify database queries**:
@@ -160,11 +163,11 @@ CREATE TABLE sync_records (
 
 4. **Test sync flow** (if applicable):
    ```bash
-   cd backend && poetry run pytest tests/test_integrations.py -v
+   cd backend && poetry run pytest tests/unit/test_notion_sync.py tests/unit/test_obsidian_sync.py tests/test_todoist_sync.py -v
    ```
 
 5. **Check working reference**:
-   - Reference: `rm-int-src/integrations/notion_incremental.py` (working implementation)
+   - Reference: `backend/app/integrations/notion_sync.py` and `backend/app/services/sync_worker.py`
 
 ## Common Integration Bugs to Catch
 
@@ -198,7 +201,7 @@ CREATE TABLE sync_records (
 - Clean Notion titles (no hash suffixes)
 
 ### 🔴 Critical Issue: Archived Block Handling
-- **Location**: backend/app/services/integrations/notion_sync.py:234
+- **Location**: backend/app/integrations/notion_sync.py:234
 - **Issue**: Archived block error not caught, causes sync to fail
 - **Fix**:
   ```python
@@ -206,9 +209,8 @@ CREATE TABLE sync_records (
       notion_client.update_block(block_id, content)
   except APIResponseError as e:
       if "archived" in str(e).lower():
-          # Delete sync record, block is gone
-          db.delete(sync_record)
-          return
+          # Block is gone: create a fresh one and update the sync record
+          ...
       raise
   ```
 
@@ -219,7 +221,7 @@ CREATE TABLE sync_records (
 
 ### ⚠️ Warning: Quota Check Missing
 - Integration sync should check quota before processing
-- Add: `await quota_service.check_quota(user_id, "ocr_pages", 0)`
+- Add: `quota_service.check_quota(db, user_id)` before queueing the sync
 
 ### 💡 Suggestions
 - Add sync duration metrics for monitoring

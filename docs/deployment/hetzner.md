@@ -10,11 +10,11 @@ This guide covers deploying rMirror Cloud to a Hetzner VPS with PostgreSQL, with
 │  ├─ Nginx (reverse proxy + HTTPS)       │
 │  ├─ FastAPI (systemd service)           │
 │  ├─ PostgreSQL (local database)         │
-│  └─ Redis (optional, for jobs)          │
+│  └─ pm2 (Next.js dashboard)             │
 └─────────────────────────────────────────┘
          │
          ├─ Backblaze B2 / Wasabi (S3 storage)
-         └─ Claude API (OCR processing)
+         └─ Google Gemini API (OCR processing)
 ```
 
 **Estimated costs:**
@@ -135,14 +135,6 @@ sudo apt install -y librsvg2-bin
 sudo apt install -y libmagic1
 ```
 
-### 3.6 Install Redis (Optional - for background jobs)
-
-```bash
-sudo apt install -y redis-server
-sudo systemctl enable redis-server
-sudo systemctl start redis-server
-```
-
 ---
 
 ## Step 4: Setup PostgreSQL Database
@@ -226,8 +218,8 @@ S3_SECRET_KEY=your_b2_secret
 S3_BUCKET_NAME=rmirror-prod
 S3_REGION=eu-central-003
 
-# Claude API
-CLAUDE_API_KEY=your_claude_api_key
+# Google Gemini API (OCR)
+GOOGLE_AI_API_KEY=your_google_ai_api_key
 
 # Auth (generate with: openssl rand -hex 32)
 SECRET_KEY=your_generated_secret_key
@@ -502,6 +494,8 @@ Make executable:
 chmod +x /var/www/rmirror-cloud/deploy.sh
 ```
 
+> **Current flow:** this manual script is the from-scratch fallback. The real deployment is GitHub Actions: a push to `main` deploys **staging** (`deploy-staging.yml`, systemd service `rmirror-staging`); **production** (service `rmirror`) is deployed by running the "Deploy to Production" workflow by hand, which ends in `backend/scripts/deploy.sh` on the server. The dashboard is built in Actions and installed under pm2 (`rmirror-dashboard`, `rmirror-dashboard-staging`).
+
 ### 10.2 Deploy Updates
 
 ```bash
@@ -634,7 +628,7 @@ sudo tail -f /var/log/nginx/error.log
 2. **Add logging**: Consider Papertrail or Logtail for centralized logging
 3. **Backup automation**: Setup automated backups to Hetzner Storage Box
 4. **CI/CD**: Setup GitHub Actions for automated deployment
-5. **Scaling**: Add Redis for background job processing when needed
+5. **Scaling**: Background jobs run in the FastAPI process (database-backed queue); add workers or split the sync worker out if the queue backs up
 
 ---
 
