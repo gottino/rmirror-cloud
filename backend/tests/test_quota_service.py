@@ -177,7 +177,7 @@ def test_quota_reset(db: Session):
     assert check_quota(db, user.id) is False
 
     # Action - reset quota
-    quota = reset_quota(db, user.id, trigger_retroactive_processing=False)
+    quota = reset_quota(db, user.id)
 
     # Verify
     assert quota.used == 0

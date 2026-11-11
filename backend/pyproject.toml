@@ -86,3 +86,6 @@ disallow_untyped_defs = false
 # without this, a bare `pytest` collects them and aborts when one errors on
 # import. Run those scripts explicitly by path when needed.
 testpaths = ["tests"]
+# A coroutine that is created but never awaited is a silent bug (it hid the
+# retroactive-OCR job): fail the test run instead of warning.
+filterwarnings = ["error::RuntimeWarning"]

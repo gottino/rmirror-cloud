@@ -149,7 +149,7 @@ This project uses domain-specific `.claudecontext` files for focused sessions:
 
 **Metadata vs Content Sync**: Two sync types - `NOTEBOOK` (full content with OCR) and `NOTEBOOK_METADATA` (lightweight, updates only Notion properties). Metadata syncs 50-100x faster (~100ms vs ~5s).
 
-**Graceful Degradation**: When quota exhausted, uploads accepted, PDFs generated, OCR deferred. Pages show "OCR Pending" in dashboard. Retroactive processing when quota resets (newest pages first).
+**Graceful Degradation**: When quota exhausted, uploads accepted, PDFs generated, OCR deferred. Pages show "OCR Pending" in dashboard. Retroactive processing when quota resets (newest pages first). The sync worker does this (`_process_pending_quota_pages`, a few users/pages per poll, one worker per user via a Postgres advisory lock); request code such as `reset_quota()` must never spawn background tasks.
 
 ## Database Schema
 

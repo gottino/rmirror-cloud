@@ -287,19 +287,23 @@ def reset_quota(
     db: Session,
     user_id: int,
     quota_type: str = QuotaType.OCR,
-    trigger_retroactive_processing: bool = True,
 ) -> QuotaUsage:
     """
     Reset quota for user (start new billing period).
 
     Sets 'used' back to 0 and updates reset_at to next period.
-    Optionally triggers retroactive OCR processing for pending pages.
+
+    This only resets the counter. Pages left in ``PENDING_QUOTA`` are picked up
+    by the background sync worker (``SyncWorker._process_pending_quota_pages``),
+    which finds users whose quota has room again and OCRs their pending pages,
+    newest first. Nothing is scheduled from here: this runs inside request code
+    (lazily, from ``get_or_create_quota``), usually with no event loop, and the
+    request's session must not outlive the request.
 
     Args:
         db: Database session
         user_id: User ID
         quota_type: Type of quota to reset
-        trigger_retroactive_processing: If True, schedule background job to process pending pages
 
     Returns:
         Reset QuotaUsage instance
@@ -340,30 +344,10 @@ def reset_quota(
     db.commit()
     db.refresh(quota)
 
-    # Trigger background job to process pending pages (newest first)
-    if trigger_retroactive_processing and quota_type == QuotaType.OCR:
-        logger.info(
-            f"Quota reset for user {user_id}. Scheduling retroactive OCR processing "
-            f"for pending pages..."
-        )
-        # Schedule async job (will be picked up by background worker)
-        # NOTE: For now, this logs intent. Full implementation requires a task queue
-        # like Celery or background worker integration.
-        # TODO: Integrate with task queue when implementing scheduled quota resets
-        import asyncio
-
-        from app.jobs.process_pending_pages import process_pending_pages_for_user
-
-        try:
-            # Run in background (fire and forget)
-            asyncio.create_task(process_pending_pages_for_user(db, user_id))
-            logger.info(f"Scheduled retroactive processing for user {user_id}")
-        except RuntimeError:
-            # No event loop running (sync context) - log for manual trigger
-            logger.warning(
-                f"Cannot auto-trigger retroactive processing for user {user_id} "
-                f"(no event loop). Run manually or via scheduled task."
-            )
+    logger.info(
+        f"Quota reset for user {user_id} ({quota_type}); pending pages will be "
+        f"processed by the background worker"
+    )
 
     return quota
 
