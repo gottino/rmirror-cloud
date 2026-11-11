@@ -17,6 +17,7 @@ from app.models.notebook import Notebook
 from app.models.page import Page
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord, SyncStatus
 from app.services.sync_worker import (
+    MAX_RATE_LIMIT_DEFERRALS,
     MAX_SYNC_RETRIES,
     PARENT_GONE_GUARD,
     PROCESSING_LEASE,
@@ -843,6 +844,64 @@ class TestTypedErrorKinds:
         result = SyncResult(status=SyncStatus.RETRY, error_kind=SyncErrorKind.RATE_LIMITED)
         assert apply_sync_result(item, result, now=self.NOW) == "retry"
         assert item.status == "pending"
+
+    def _rate_limited(self, **kw):
+        return SyncResult(status=SyncStatus.RETRY, error_message="slow down",
+                          error_kind=SyncErrorKind.RATE_LIMITED, **kw)
+
+    def test_rate_limit_deferrals_are_bounded(self):
+        item = self._item()
+        for _ in range(MAX_RATE_LIMIT_DEFERRALS):
+            assert apply_sync_result(item, self._rate_limited(), now=self.NOW) == "retry"
+            assert item.retry_count == 0
+        assert json.loads(item.metadata_json)["rate_limit_deferrals"] == MAX_RATE_LIMIT_DEFERRALS
+
+        # The next one is an ordinary transient failure and uses an attempt.
+        assert apply_sync_result(item, self._rate_limited(), now=self.NOW) == "retry"
+        assert item.retry_count == 1
+        assert item.scheduled_at == self.NOW + compute_retry_delay(1)
+
+    def test_rate_limited_row_eventually_dead_letters(self):
+        item = self._item()
+        item.metadata_json = json.dumps({"rate_limit_deferrals": MAX_RATE_LIMIT_DEFERRALS})
+        outcomes = [apply_sync_result(item, self._rate_limited(), now=self.NOW)
+                    for _ in range(MAX_SYNC_RETRIES)]
+        assert outcomes[-1] == "failed"
+        assert item.status == "failed"
+
+    def test_deferral_counter_resets_after_other_outcomes(self):
+        for other in (
+            SyncResult(status=SyncStatus.SKIPPED),
+            SyncResult(status=SyncStatus.RETRY, error_kind=SyncErrorKind.TRANSIENT,
+                       error_message="boom"),
+        ):
+            item = self._item()
+            item.metadata_json = json.dumps(
+                {"parent_gone_at": "x", "rate_limit_deferrals": MAX_RATE_LIMIT_DEFERRALS})
+            apply_sync_result(item, other, now=self.NOW)
+            assert json.loads(item.metadata_json) == {"parent_gone_at": "x"}
+            # Fresh budget: the next rate-limited result is a deferral again.
+            before = item.retry_count
+            apply_sync_result(item, self._rate_limited(), now=self.NOW)
+            assert item.retry_count == before
+
+    def test_deferral_delay_grows_and_is_capped(self):
+        item = self._item()
+        delays = []
+        for _ in range(MAX_RATE_LIMIT_DEFERRALS):
+            apply_sync_result(item, self._rate_limited(), now=self.NOW)
+            delays.append((item.scheduled_at - self.NOW).total_seconds())
+        assert delays[:3] == [30, 60, 90]
+        assert delays[9:] == [300] * 11
+
+        # An explicit Retry-After wins when longer, up to the 1h cap.
+        item = self._item()
+        long = self._rate_limited(retry_after=self.NOW + timedelta(seconds=1800))
+        apply_sync_result(item, long, now=self.NOW)
+        assert item.scheduled_at == self.NOW + timedelta(seconds=1800)
+        huge = self._rate_limited(retry_after=self.NOW + timedelta(hours=5))
+        apply_sync_result(item, huge, now=self.NOW)
+        assert item.scheduled_at == self.NOW + timedelta(hours=1)
 
     @pytest.mark.parametrize("kind", [SyncErrorKind.AUTH, SyncErrorKind.PERMANENT])
     def test_auth_and_permanent_fail_without_retry(self, kind):

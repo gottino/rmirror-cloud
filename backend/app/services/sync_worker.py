@@ -12,7 +12,6 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.core.sync_engine import (
-    RATE_LIMIT_DEFAULT_DELAY,
     SyncErrorKind,
     SyncItem,
     SyncItemType,
@@ -41,6 +40,17 @@ logger = logging.getLogger(__name__)
 MAX_SYNC_RETRIES = 8
 RETRY_BASE_DELAY_SECONDS = 60
 RETRY_MAX_DELAY_SECONDS = 3600  # cap a single backoff at 1 hour
+
+# A RATE_LIMITED result defers the row without using a retry attempt. To keep a
+# permanently rate-limited row from being deferred forever, the consecutive
+# deferrals are counted in the row's metadata_json; after this many, the next
+# rate-limited result is handled as an ordinary transient failure (backoff and
+# attempt cap). Any other outcome resets the count.
+MAX_RATE_LIMIT_DEFERRALS = 20
+RATE_LIMIT_DEFERRALS_KEY = "rate_limit_deferrals"
+RATE_LIMIT_GROWTH_STEP = timedelta(seconds=30)
+RATE_LIMIT_GROWTH_STEPS_MAX = 10
+RATE_LIMIT_MAX_DELAY = timedelta(seconds=RETRY_MAX_DELAY_SECONDS)
 
 # A claimed row is 'processing' with started_at stamped at claim time and again
 # just before each item runs. A row still 'processing' this long after its
@@ -125,6 +135,7 @@ def apply_sync_result(
     now = now or datetime.utcnow()
 
     if result.status == SyncStatus.SKIPPED:
+        _set_rate_limit_deferrals(queue_item, 0)
         queue_item.status = 'completed'
         queue_item.completed_at = now
         queue_item.error_message = None
@@ -139,13 +150,22 @@ def apply_sync_result(
         kind = None
 
     if kind is SyncErrorKind.RATE_LIMITED:
-        # The provider asked us to slow down; that is not a failed attempt.
-        queue_item.status = 'pending'
-        queue_item.error_message = message
-        queue_item.scheduled_at = (
-            retry_after if retry_after and retry_after > now else now + RATE_LIMIT_DEFAULT_DELAY
-        )
-        return "retry"
+        deferrals = _get_rate_limit_deferrals(queue_item)
+        if deferrals < MAX_RATE_LIMIT_DEFERRALS:
+            # The provider asked us to slow down; that is not a failed attempt.
+            deferrals += 1
+            _set_rate_limit_deferrals(queue_item, deferrals)
+            delay = max(
+                (retry_after - now) if retry_after else timedelta(0),
+                RATE_LIMIT_GROWTH_STEP * min(deferrals, RATE_LIMIT_GROWTH_STEPS_MAX),
+            )
+            queue_item.status = 'pending'
+            queue_item.error_message = message
+            queue_item.scheduled_at = now + min(delay, RATE_LIMIT_MAX_DELAY)
+            return "retry"
+        # Deferred too often in a row: fall through to the ordinary transient path.
+    else:
+        _set_rate_limit_deferrals(queue_item, 0)
 
     if kind is not None:
         permanent = kind in (SyncErrorKind.AUTH, SyncErrorKind.PERMANENT)
@@ -169,6 +189,22 @@ def _load_json(raw: Optional[str]) -> dict:
     except (TypeError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _get_rate_limit_deferrals(queue_item: "SyncQueue") -> int:
+    value = _load_json(queue_item.metadata_json).get(RATE_LIMIT_DEFERRALS_KEY)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+def _set_rate_limit_deferrals(queue_item: "SyncQueue", count: int) -> None:
+    meta = _load_json(queue_item.metadata_json)
+    if count > 0:
+        meta[RATE_LIMIT_DEFERRALS_KEY] = count
+    elif RATE_LIMIT_DEFERRALS_KEY in meta:
+        del meta[RATE_LIMIT_DEFERRALS_KEY]
+    else:
+        return
+    queue_item.metadata_json = json.dumps(meta) if meta else None
 
 
 def handle_parent_gone(
@@ -849,6 +885,7 @@ class SyncWorker:
                     )
 
             # Mark queue item as completed
+            _set_rate_limit_deferrals(queue_item, 0)
             queue_item.status = 'completed'
             queue_item.completed_at = datetime.utcnow()
 
@@ -1016,6 +1053,7 @@ class SyncWorker:
                 )
                 db.add(sync_record)
 
+            _set_rate_limit_deferrals(queue_item, 0)
             queue_item.status = 'completed'
             queue_item.completed_at = datetime.utcnow()
 
