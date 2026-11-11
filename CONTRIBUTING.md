@@ -54,7 +54,7 @@ Design skills? Help improve the dashboard UI/UX. Share mockups in discussions fi
 
 3. **Start infrastructure**
    ```bash
-   docker-compose up -d postgres redis minio
+   docker-compose up -d
    ```
 
 4. **Backend development**
