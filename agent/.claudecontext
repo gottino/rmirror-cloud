@@ -14,7 +14,7 @@ This is the **macOS agent** for rMirror - a Python application that monitors the
 - **Click**: CLI interface
 - **Pydantic**: Configuration validation and settings management
 - **keyring**: Secure credential storage in system keychain
-- **PyInstaller**: Packaging into standalone .app bundle
+- **PyInstaller**: Packaging into standalone .app bundle (`build_macos.sh` also creates, signs and notarizes the .dmg)
 
 ## Project Structure
 
@@ -24,29 +24,35 @@ agent/
 │   ├── main.py                 # Entry point, Agent class, CLI
 │   ├── config.py               # Configuration models (Pydantic)
 │   ├── logging_config.py       # Logging setup
-│   ├── browser_utils.py        # Browser automation helpers
+│   ├── __version__.py          # Agent version (read by build_macos.sh and the CI builds)
+│   ├── browser_utils.py        # Launches the web UI in a browser (app mode)
+│   ├── updater.py              # Update check against releases/latest/version.json
 │   ├── auth/                   # Authentication management
-│   │   └── auth_manager.py     # Token storage, refresh
+│   │   └── keychain.py         # Token storage in the system keychain
 │   ├── watcher/                # File system monitoring
-│   │   ├── watcher.py          # Watchdog event handlers
-│   │   └── file_observer.py    # File change detection
+│   │   └── file_watcher.py     # Watchdog event handler + FileWatcher
 │   ├── sync/                   # Cloud sync logic
 │   │   ├── cloud_sync.py       # HTTP API calls to backend
-│   │   └── sync_manager.py     # Sync queue management
-│   ├── remarkable/             # reMarkable file parsing
-│   │   ├── parser.py           # .rm file parsing
-│   │   └── metadata.py         # Metadata extraction
+│   │   ├── queue.py            # SyncQueue (batching, retries)
+│   │   ├── metadata_sync.py    # Phase 1: notebook/page structure
+│   │   └── initial_sync.py     # First-run sync of existing notebooks
+│   ├── remarkable/             # reMarkable folder scanning
+│   │   └── metadata_scanner.py # Reads .metadata/.content files (no .rm parsing)
 │   ├── web/                    # Flask web UI
 │   │   ├── app.py              # Flask app creation
-│   │   └── routes.py           # Web routes
+│   │   ├── routes.py           # Web routes
+│   │   ├── templates/          # index.html, auth_bridge.html, auth_result.html, updates.html
+│   │   └── static/
 │   └── tray/                   # Menu bar integration
-│       └── tray_app.py         # rumps menu bar app
+│       └── menu_bar.py         # rumps menu bar app (TrayApp)
 ├── build/                      # PyInstaller build files
 ├── dist/                       # Built .app bundles
 ├── resources/                  # Icons, assets
-├── hooks/                      # PyInstaller hooks
+├── hooks/                      # PyInstaller hooks (hook-keyring.py)
 ├── rmirror.spec                # PyInstaller spec file
-├── build_macos.sh              # Build script for .app
+├── build_macos.sh              # Build script: .app, .dmg, signing, notarization
+├── release.sh                  # Upload DMG + version.json to B2, bump backend agent_latest_version
+├── b2-keychain.sh              # Store/read B2 credentials in the macOS Keychain
 ├── config.example.yaml         # Example configuration
 └── pyproject.toml              # Poetry dependencies
 ```
@@ -70,39 +76,38 @@ poetry run python -m app.main --foreground --debug
 ```bash
 poetry run python -m app.main
 ```
-- Runs as macOS menu bar app (rumps)
-- No terminal output (logs to file)
-- Menu bar icon with status, settings, quit
+- Runs as macOS menu bar app (rumps); asyncio runs in a background thread
+- Logs to `~/.config/rmirror/agent.log` (also printed to the terminal in foreground mode)
+- Menu bar icon with status, open web UI, check for updates, settings, quit
 
 ### 2. File Watcher (`app/watcher/`)
 
 Monitors reMarkable sync folder for changes:
 - Uses `watchdog` library
-- Detects new/modified `.rm` files and metadata
+- Detects new/modified/moved `.rm`, `.metadata` and `.content` files
 - Triggers upload via CloudSync
 - Runs in background thread
 
 ### 3. Cloud Sync (`app/sync/`)
 
 Handles HTTP API calls to backend:
-```python
-# Upload notebook
-POST /api/notebooks
-{
-  "notebook_uuid": "...",
-  "name": "My Notebook",
-  "created_at": "2024-01-01T00:00:00Z"
-}
+The API base is `config.api.url` (default `https://rmirror.io/api/v1`; local backend: `http://localhost:8000/v1`).
 
-# Upload page
-POST /api/pages
-{
-  "page_uuid": "...",
-  "notebook_uuid": "...",
-  "page_number": 1,
-  "rm_file_data": "...",  # Base64 encoded .rm file
-  "metadata": {...}
-}
+```python
+# Phase 1: register notebook/page structure (app/sync/metadata_sync.py)
+POST {api}/sync/metadata
+
+# Phase 2: upload one page (multipart form, raw .rm file; page_uuid = filename)
+POST {api}/processing/rm-file
+
+# Page order for a notebook (.content file)
+POST {api}/notebooks/{notebook_uuid}/content
+
+# Notebook metadata (.metadata file)
+POST {api}/processing/metadata/update
+
+# Status: GET /sync/stats, GET /quota/status, GET /users/me,
+# GET /sync/deleted-notebooks, POST /sync/deleted-notebooks/{uuid}/acknowledge
 ```
 
 ### 4. Web UI (`app/web/`)
@@ -110,48 +115,52 @@ POST /api/pages
 Flask web server for configuration:
 - Runs on `localhost:5555`
 - Shows sync status, settings
-- OAuth flow for backend authentication
+- Clerk sign-in flow (`/auth/bridge`, `/auth/callback`) for backend authentication
 - Runs in background thread (non-blocking)
 
 ### 5. Menu Bar App (`app/tray/`)
 
 macOS menu bar integration using `rumps`:
 - Shows sync status icon
-- Menu items: Status, Settings, Open Web UI, Quit
+- Menu items: Status, Open Web UI, Check for Updates, Settings, Quit
 - Must run on main thread (macOS AppKit requirement)
 
 ## Configuration
 
-Configuration in `~/.rmirror/config.yaml`:
+Configuration is read from the first existing of `~/.config/rmirror/config.yaml`, `~/.rmirror/config.yaml`, `./config.yaml` (override with `--config` or `RMIRROR_CONFIG_PATH`; `Config.save()` writes `~/.config/rmirror/config.yaml`, mode 0600). Settings can also come from `RMIRROR_*` environment variables. Models: `app/config.py`.
 
 ```yaml
-# reMarkable sync folder
-remarkable:
-  sync_folder: "/Users/username/reMarkable"
-
 # Backend API
 api:
-  base_url: "http://localhost:8000"  # or production URL
+  url: "https://rmirror.io/api/v1"  # local backend: "http://localhost:8000/v1"
+
+# reMarkable Desktop sync folder (this is the default)
+remarkable:
+  source_directory: "~/Library/Containers/com.remarkable.desktop/Data/Library/Application Support/remarkable/desktop"
+  watch_enabled: true
 
 # Web UI
 web:
-  host: "localhost"
+  enabled: true
+  host: "127.0.0.1"
   port: 5555
 
-# Logging
-logging:
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  file: "~/.rmirror/agent.log"
+# Sync behaviour (see SyncConfig in app/config.py)
+sync:
+  auto_sync: true
+  max_pages_per_notebook: null   # null = unlimited, otherwise newest pages first
 ```
+
+The debug flag (`--debug`) sets the log level; there is no `logging:` section.
 
 ## Authentication Flow
 
 The agent uses long-lived JWT tokens (30 days) obtained via Clerk OAuth:
 
 1. User clicks "Sign in" in web UI
-2. Agent opens `https://rmirror.io/agent?callback=http://localhost:{PORT}/auth/callback`
+2. With a production Clerk key (`pk_live_...`) the agent redirects to `{site}/agent?callback=http://localhost:{PORT}/auth/callback` (dashboard page `dashboard/app/agent/page.tsx`); with a dev key it serves its own `app/web/templates/auth_bridge.html` at `/auth/bridge`
 3. User authenticates with Clerk (Google OAuth)
-4. Bridge page exchanges Clerk session token for 30-day agent JWT
+4. Bridge page exchanges Clerk session token for 30-day agent JWT (`POST /auth/agent-token`)
 5. Bridge page redirects to agent callback with token
 6. Agent stores token in system keychain (secure)
 7. Token included in all API requests
@@ -160,16 +169,15 @@ The agent uses long-lived JWT tokens (30 days) obtained via Clerk OAuth:
 - Expiration: 30 days (vs ~1 hour for Clerk session tokens)
 - Type: Custom JWT with `type: "agent"` claim
 - Storage: macOS Keychain via `keyring` library
-- Refresh: Re-authenticate when token expires
+- Refresh: none; when the token expires (HTTP 401) the user signs in again via the web UI
 
 ```python
-# Store token (keyring)
-keyring.set_password("rmirror", "access_token", token)
+# app/auth/keychain.py: service "com.rmirror.agent", account = API hostname
+# (so production and staging tokens do not overwrite each other)
+config.api.token = token      # setter stores it in the keychain
+token = config.api.token      # getter reads it back
 
-# Retrieve token
-token = keyring.get_password("rmirror", "access_token")
-
-# Use in API calls
+# Use in API calls (CloudSync._get_headers)
 headers = {"Authorization": f"Bearer {token}"}
 ```
 
@@ -215,7 +223,7 @@ cd agent
 3. **Understand threading model**:
    - Main thread: rumps menu bar app (menu bar mode) or asyncio loop (foreground)
    - Background threads: Flask web server, file watcher
-4. **Check remarkable/ for file parsing** - .rm files are binary format
+4. **Check remarkable/ for folder scanning** - the agent reads `.metadata`/`.content` JSON only; `.rm` files are binary and uploaded unparsed
 
 ### Common Tasks
 
@@ -223,10 +231,11 @@ cd agent
 ```python
 # In app/sync/cloud_sync.py
 async def upload_new_thing(self, thing_data: dict):
+    await self.ensure_authenticated()
     response = await self.client.post(
-        f"{self.base_url}/api/things",
+        f"{self.config.api.url}/things",
         json=thing_data,
-        headers={"Authorization": f"Bearer {self.token}"}
+        headers=self._get_headers(),
     )
     response.raise_for_status()
     return response.json()
@@ -234,26 +243,26 @@ async def upload_new_thing(self, thing_data: dict):
 
 **Add new web UI route:**
 ```python
-# In app/web/routes.py
+# In app/web/routes.py (routes are declared inside the register function)
 @app.route('/my-page')
 def my_page():
-    return render_template('my_page.html')
+    return render_template('my_page.html')   # app/web/templates/my_page.html
 ```
 
 **Add new menu bar item:**
 ```python
-# In app/tray/tray_app.py
-@rumps.clicked("My Menu Item")
-def on_my_item(self, _):
+# In app/tray/menu_bar.py: add to the self.menu list in TrayApp.__init__
+rumps.MenuItem("My Menu Item", callback=self.on_my_item),
+
+def on_my_item(self, sender: rumps.MenuItem) -> None:
     print("Menu item clicked!")
 ```
 
 **Handle new file type:**
 ```python
-# In app/watcher/watcher.py
-def on_created(self, event):
-    if event.src_path.endswith('.mynewfile'):
-        self.process_new_file(event.src_path)
+# In app/watcher/file_watcher.py (ReMarkableEventHandler)
+# on_any_event() filters via _should_ignore_file() and derives the type in
+# _get_file_type() (the file extension); queue it through SyncQueue.add()
 ```
 
 ## Gotchas
@@ -272,17 +281,16 @@ def on_created(self, event):
    - Request in System Preferences > Security & Privacy
 
 4. **Config File Location**:
-   - Always `~/.rmirror/config.yaml`
-   - Create on first run if missing (use config.example.yaml)
+   - Preferred `~/.config/rmirror/config.yaml`; `~/.rmirror/config.yaml` and `./config.yaml` are fallbacks
+   - Missing file = defaults + `RMIRROR_*` env vars; `rmirror-agent init` writes one (config.example.yaml is a template, and its `api.url`/email/password entries are stale)
 
 5. **Token Expiration**:
-   - Backend tokens expire after 24 hours
-   - Implement token refresh in `app/auth/auth_manager.py`
+   - Agent tokens expire after 30 days; there is no refresh, `CloudSync.authenticate()` raises `CloudSyncError` on 401 and the user signs in again via the web UI
 
 6. **reMarkable File Format**:
    - `.rm` files are binary (not human-readable)
-   - Use `app/remarkable/parser.py` to extract stroke data
-   - Metadata in `.metadata` JSON files
+   - The agent does not parse them; the backend converts them (`backend/app/core/rm_converter.py`)
+   - Metadata in `.metadata` JSON files, page list in `.content`
 
 ## Integration with Backend
 
@@ -344,16 +352,16 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 - ✅ Secure token storage with keyring
 - ✅ PyInstaller .app bundle packaging
 - ✅ Initial sync of existing notebooks
-- ✅ OAuth authentication flow
+- ✅ Clerk authentication flow (30-day agent JWT)
 - ✅ Two-phase metadata-first sync (fast notebook structure, slow content upload)
 - ✅ Rate limit handling with exponential backoff
+- ✅ Selective sync (`sync.selected_notebooks`, notebook picker in the web UI)
+- ✅ Update check (menu bar "Check for Updates", `/updates` page)
 
 **In Progress:**
 - 🚧 Sync status UI improvements
 
 **Planned:**
 - ⏳ Dashboard sync progress indicator
-- ⏳ Auto-update mechanism
 - ⏳ Pause/resume sync
-- ⏳ Selective sync (choose which notebooks to upload)
 - ⏳ Windows support (cross-platform agent)
