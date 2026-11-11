@@ -38,7 +38,7 @@ def run_main(check_config, monkeypatch, tmp_path, capsys):
 
     def _run(env):
         monkeypatch.chdir(tmp_path)  # no .env here
-        for name in list(FULL_ENV) + ["POSTGRES_USER"]:
+        for name in list(FULL_ENV) + ["POSTGRES_USER", "STORAGE_BACKEND"]:
             monkeypatch.delenv(name, raising=False)
         for name, value in env.items():
             monkeypatch.setenv(name, value)
@@ -100,3 +100,9 @@ def test_values_are_never_printed(run_main):
     assert code == 1
     for value in FULL_ENV.values():
         assert value not in out
+
+
+def test_local_storage_backend_needs_no_s3_settings(run_main):
+    env = {k: v for k, v in FULL_ENV.items() if not k.startswith("S3_")}
+    code, _ = run_main({**env, "STORAGE_BACKEND": "local"})
+    assert code == 0

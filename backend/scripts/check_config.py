@@ -12,31 +12,19 @@ everything is present, 1 otherwise.
 import os
 import sys
 
-# Settings production cannot run without (environment variable names).
-REQUIRED = [
-    "SECRET_KEY",
-    "CLERK_JWKS_URL",
-    "CLERK_SECRET_KEY",
-    "CLERK_WEBHOOK_SECRET",
-    "GOOGLE_AI_API_KEY",
-    "INTEGRATION_MASTER_KEY",
-    "S3_ENDPOINT_URL",
-    "S3_ACCESS_KEY",
-    "S3_SECRET_KEY",
-    "S3_BUCKET_NAME",
-]
-
 
 def missing_settings(settings) -> list[str]:
-    """Return the names of required settings that are empty or unsuitable."""
+    """Return the names of required settings that are empty or unsuitable.
+
+    The list of required settings lives in app.config (shared with start-up).
+    """
+    from app.config import config_problems
+
     missing = []
     database_url = str(getattr(settings, "database_url", "") or "")
     if not database_url or database_url.startswith("sqlite"):
         missing.append("DATABASE_URL (must not be SQLite)")
-    for name in REQUIRED:
-        value = getattr(settings, name.lower(), None)
-        if value is None or not str(value).strip():
-            missing.append(name)
+    missing.extend(config_problems(settings)[0])
     return missing
 
 
