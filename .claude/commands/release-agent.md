@@ -27,7 +27,7 @@ Execute the following steps in order. Stop and report if any step fails.
 ### Step 2: Build with PyInstaller
 
 ```bash
-cd /Users/gottino/Documents/Development/rmirror-cloud/agent
+cd ~/Documents/Development/rmirror-cloud/agent
 rm -rf dist build/rMirror
 poetry install --with dev
 poetry run pyinstaller --clean --noconfirm rmirror.spec
@@ -40,7 +40,7 @@ Verify `dist/rMirror.app` exists.
 PyInstaller may copy files with extended attributes that break code signing.
 
 ```bash
-cd /Users/gottino/Documents/Development/rmirror-cloud/agent
+cd ~/Documents/Development/rmirror-cloud/agent
 codesign --remove-signature dist/rMirror.app 2>/dev/null || true
 xattr -cr dist/rMirror.app
 ```
@@ -48,7 +48,7 @@ xattr -cr dist/rMirror.app
 ### Step 4: Code Sign the App Bundle
 
 ```bash
-cd /Users/gottino/Documents/Development/rmirror-cloud/agent
+cd ~/Documents/Development/rmirror-cloud/agent
 codesign --force --deep --sign "Developer ID Application: Gabriele Ottino (2K34CUCVB2)" \
     --options runtime --timestamp dist/rMirror.app
 ```
@@ -61,7 +61,7 @@ codesign --verify --deep --strict dist/rMirror.app
 ### Step 5: Create DMG
 
 ```bash
-cd /Users/gottino/Documents/Development/rmirror-cloud/agent
+cd ~/Documents/Development/rmirror-cloud/agent
 VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
 rm -f "dist/rMirror-${VERSION}.dmg"
 create-dmg \
@@ -92,7 +92,7 @@ rm -rf build/icon.iconset
 ### Step 6: Sign the DMG
 
 ```bash
-cd /Users/gottino/Documents/Development/rmirror-cloud/agent
+cd ~/Documents/Development/rmirror-cloud/agent
 VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
 codesign --sign "Developer ID Application: Gabriele Ottino (2K34CUCVB2)" "dist/rMirror-${VERSION}.dmg"
 ```
@@ -100,7 +100,7 @@ codesign --sign "Developer ID Application: Gabriele Ottino (2K34CUCVB2)" "dist/r
 ### Step 7: Notarize with Apple
 
 ```bash
-cd /Users/gottino/Documents/Development/rmirror-cloud/agent
+cd ~/Documents/Development/rmirror-cloud/agent
 VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
 xcrun notarytool submit "dist/rMirror-${VERSION}.dmg" \
     --keychain-profile "rmirror-notarization" \
@@ -112,7 +112,7 @@ This may take several minutes. Wait for "status: Accepted".
 ### Step 8: Staple Notarization Ticket
 
 ```bash
-cd /Users/gottino/Documents/Development/rmirror-cloud/agent
+cd ~/Documents/Development/rmirror-cloud/agent
 VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
 xcrun stapler staple "dist/rMirror-${VERSION}.dmg"
 ```
@@ -127,7 +127,7 @@ xcrun stapler validate "dist/rMirror-${VERSION}.dmg"
 Load credentials from Keychain and upload:
 
 ```bash
-cd /Users/gottino/Documents/Development/rmirror-cloud/agent
+cd ~/Documents/Development/rmirror-cloud/agent
 eval $(./b2-keychain.sh get)
 b2 account authorize 2>/dev/null || b2 account authorize
 VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
@@ -136,7 +136,7 @@ b2 file upload rmirror-downloads "dist/rMirror-${VERSION}.dmg" "releases/v${VERS
 
 ### Step 10: Update Dashboard Download Link
 
-Edit `/Users/gottino/Documents/Development/rmirror-cloud/dashboard/app/dashboard/page.tsx`:
+Edit `~/Documents/Development/rmirror-cloud/dashboard/app/dashboard/page.tsx`:
 
 Find the line with `backblazeb2.com/file/rmirror-downloads/releases/` and update the version number to match the new release.
 
@@ -149,7 +149,7 @@ Ask the user if they want to commit and push the changes:
 
 If yes:
 ```bash
-cd /Users/gottino/Documents/Development/rmirror-cloud
+cd ~/Documents/Development/rmirror-cloud
 git add agent/pyproject.toml agent/build_macos.sh dashboard/app/dashboard/page.tsx
 git commit -m "chore: release agent v${VERSION}
 

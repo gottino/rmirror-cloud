@@ -11,7 +11,7 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - **Package Manager**: Poetry (always use `poetry run` for all commands)
 - **Queue**: SyncQueue table with background worker
 - **OCR**: Mistral OCR API (primary), Claude Vision (fallback)
-- **Deployment**: Hetzner VPS (167.235.74.51) via GitHub Actions
+- **Deployment**: Hetzner VPS (<server-ip>) via GitHub Actions
 
 ## Key Architecture Patterns
 - **Two-phase sync**: Phase 1 (metadata) creates notebook/page stubs instantly, Phase 2 (content) uploads .rm files with OCR
@@ -125,7 +125,7 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 1. Push to main branch triggers GitHub Actions
 2. Deployed to Hetzner VPS via SSH
 3. Server restarts uvicorn automatically
-4. Check deployment: `ssh deploy@167.235.74.51 'systemctl status rmirror-backend'`
+4. Check deployment: `ssh deploy@<server-ip> 'systemctl status rmirror-backend'`
 
 ## Common Tasks
 
@@ -173,8 +173,8 @@ poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ## Production Server
-- **Host**: Hetzner VPS (167.235.74.51)
-- **Access**: `ssh deploy@167.235.74.51`
+- **Host**: Hetzner VPS (<server-ip>)
+- **Access**: `ssh deploy@<server-ip>`
 - **Logs**: `/var/log/rmirror/backend.log`
 - **Service**: `systemctl status rmirror-backend`
 - **Database**: PostgreSQL on same server

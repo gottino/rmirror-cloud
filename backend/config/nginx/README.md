@@ -12,10 +12,10 @@
 
 ```bash
 # Copy config to server
-scp backend/config/nginx/rmirror-production.conf deploy@167.235.74.51:/tmp/
+scp backend/config/nginx/rmirror-production.conf deploy@<server-ip>:/tmp/
 
 # SSH to server and apply
-ssh deploy@167.235.74.51
+ssh deploy@<server-ip>
 sudo cp /tmp/rmirror-production.conf /etc/nginx/sites-available/rmirror
 sudo nginx -t  # Test configuration
 sudo systemctl reload nginx  # Apply changes
@@ -76,7 +76,7 @@ location ~* ^/(index\.html|beta\.html|styles\.css|images/|.*\.(png|jpg|jpeg|gif|
 
 To update landing pages, copy to the correct location:
 ```bash
-scp landing/beta.html deploy@167.235.74.51:/var/www/rmirror-landing/
+scp landing/beta.html deploy@<server-ip>:/var/www/rmirror-landing/
 ```
 
 Or update the deploy script to sync:
