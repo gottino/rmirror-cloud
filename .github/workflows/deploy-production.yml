@@ -9,6 +9,13 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   # Run CI tests first - production deployment requires all tests to pass
   ci:
