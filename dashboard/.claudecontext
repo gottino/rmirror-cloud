@@ -9,9 +9,10 @@ This is the **Next.js 15 dashboard** for rMirror Cloud - a web application for v
 - **Next.js 15**: React framework with App Router
 - **TypeScript**: Type-safe JavaScript
 - **Tailwind CSS**: Utility-first CSS framework
-- **Clerk**: Authentication and user management (@clerk/nextjs)
+- **Clerk**: Authentication and user management (@clerk/nextjs v6)
 - **React Markdown**: Rendering markdown content
 - **Lucide React**: Icon library
+- **Vitest** (`npm test`, tests in `__tests__/`) and **Playwright** (`npm run test:e2e`, specs in `e2e/`)
 
 ## Project Structure
 
@@ -21,10 +22,14 @@ dashboard/
 │   ├── globals.css          # Global styles
 │   ├── layout.tsx           # Root layout with Clerk provider
 │   ├── page.tsx             # Public landing page
-│   ├── dashboard/           # Authenticated dashboard (notebooks view)
-│   ├── notebooks/           # Notebook viewing pages
-│   ├── integrations/        # Integration settings
+│   ├── dashboard/           # Authenticated dashboard (notebooks view, SetupWizard)
+│   ├── notebooks/[id]/      # Notebook viewing page (incl. Markdown/PDF export)
+│   ├── integrations/        # Integration settings (Notion, Obsidian, Todoist + OAuth callbacks)
+│   ├── billing/             # Quota details and Pro tier info
 │   ├── settings/            # User settings
+│   ├── agent/               # Public bridge page: Clerk session -> agent JWT for the macOS agent
+│   ├── admin/               # Admin pages (waitlist, users)
+│   ├── legal/               # Terms and privacy
 │   ├── sign-in/             # Clerk sign-in page
 │   └── sign-up/             # Clerk sign-up page
 ├── components/              # Reusable React components
@@ -32,9 +37,11 @@ dashboard/
 │   ├── FolderSidebar.tsx    # Notebook folder navigation
 │   ├── NotebookTree.tsx     # Tree view of notebooks
 │   ├── MainContentArea.tsx  # Content display area
-│   └── Breadcrumb.tsx       # Navigation breadcrumbs
-├── lib/                     # Utility functions
+│   ├── Breadcrumb.tsx       # Navigation breadcrumbs
+│   └── Quota*.tsx, ...      # QuotaDisplay, QuotaWarning, QuotaExceededModal, OnboardingChecklist, SearchResults
+├── lib/                     # api.ts (backend client), constants.ts, quota-context.tsx, analytics.ts
 ├── public/                  # Static assets
+├── deploy/                  # package-standalone.sh, install-release.sh (used by the deploy workflows)
 ├── middleware.ts            # Clerk auth middleware
 └── tailwind.config.ts       # Tailwind configuration
 ```
@@ -44,31 +51,35 @@ dashboard/
 1. **Authentication**: Clerk-based user auth with sign-in/sign-up flows
 2. **Notebook Browser**: Tree view of synced notebooks and pages
 3. **Page Viewer**: Display OCR'd text and markdown from notebook pages
-4. **Integration Settings**: Manage Notion, Readwise connections
+4. **Integration Settings**: Manage Notion, Obsidian and Todoist connections
 5. **Responsive Design**: Tailwind CSS with mobile-first approach
 
 ## Backend API Integration
 
 The dashboard communicates with the FastAPI backend at:
-- **Local dev**: `http://localhost:8000`
-- **Production**: `https://api.rmirror.cloud` (or configured via env)
+- **Local dev**: `http://localhost:8000/v1`
+- **Production**: `https://rmirror.io/api/v1` (staging: `https://staging.rmirror.io/api/v1`)
+- Always set via `NEXT_PUBLIC_API_URL`, which already includes the `/v1` prefix; `lib/api.ts` appends resource paths to it
 
 ### Key API Endpoints Used
 
 ```typescript
-// Get user's notebooks
-GET /api/notebooks
+// Notebook tree and notebooks (ids are integer database ids)
+GET /notebooks/tree
+GET /notebooks/{id}            // includes pages with ocr_text
+GET /notebooks/{id}/export?format=markdown|pdf
 
-// Get specific notebook
-GET /api/notebooks/{notebook_uuid}
+// Page PDF
+GET /pages/{page_id}/pdf
 
-// Get page content
-GET /api/pages/{page_id}
+// Quota and search
+GET /quota/status
+GET /search
 
-// Integration management
-GET /api/integrations
-POST /api/integrations/notion/connect
-DELETE /api/integrations/{integration_id}
+// Integration management (target_name = notion | obsidian | todoist ...)
+GET /integrations/
+GET /integrations/notion/oauth/authorize
+DELETE /integrations/{target_name}
 ```
 
 ## Authentication Flow
@@ -78,7 +89,7 @@ DELETE /api/integrations/{integration_id}
 3. Frontend includes token in API requests:
    ```typescript
    headers: {
-     'Authorization': `Bearer ${await clerk.session.getToken()}`
+     'Authorization': `Bearer ${await getToken()}`   // getToken from useAuth()
    }
    ```
 4. Backend validates token and retrieves user data
@@ -90,6 +101,7 @@ DELETE /api/integrations/{integration_id}
 ```bash
 cd dashboard
 npm run dev    # Start dev server on port 3000
+npm run lint && npm test
 ```
 
 ### Environment Variables
@@ -101,20 +113,29 @@ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
 CLERK_SECRET_KEY=sk_test_...
 
 # Backend API
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_URL=http://localhost:8000/v1
 
 # Clerk URLs
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
 NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
+
+# Optional: analytics and admin/dev helpers (see .env.example)
+NEXT_PUBLIC_UMAMI_URL=
+NEXT_PUBLIC_UMAMI_WEBSITE_ID=
+NEXT_PUBLIC_ADMIN_USER_IDS=
+NEXT_PUBLIC_DEV_MODE=false
+NEXT_PUBLIC_DEV_AUTH_TOKEN=
 ```
+
+Production builds happen in GitHub Actions (`NEXT_OUTPUT=standalone`), never on the server; the values come from the workflow, not from a server `.env`.
 
 ## When Working Here
 
 ### Before Making Changes
 
-1. **Check middleware.ts** for protected routes - all pages require auth by default
+1. **Check middleware.ts** for protected routes - every page except `/`, `/sign-in`, `/sign-up`, `/legal` and `/agent` requires auth
 2. **Review app/ structure** - using App Router (not Pages Router)
 3. **Check Tailwind config** for custom theme settings
 4. **Understand component hierarchy** - Sidebar → NotebookTree → MainContentArea
@@ -139,7 +160,7 @@ function MyComponent() {
 
   const fetchData = async () => {
     const token = await getToken()
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/...`, {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/notebooks/tree`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -169,10 +190,10 @@ export function MyComponent() {
 
 2. **Clerk Auth on Server Components**:
    ```typescript
-   import { auth } from '@clerk/nextjs'
+   import { auth } from '@clerk/nextjs/server'
 
    export default async function Page() {
-     const { userId } = auth()  // Server-side auth
+     const { userId } = await auth()  // Server-side auth (Clerk v6: async)
      if (!userId) redirect('/sign-in')
    }
    ```
@@ -180,12 +201,13 @@ export function MyComponent() {
 3. **API URL Configuration**:
    - Always use `process.env.NEXT_PUBLIC_API_URL`
    - Must be prefixed with `NEXT_PUBLIC_` to be available in browser
+   - The value includes the API version prefix (`.../v1`)
 
 4. **Middleware Protected Routes**:
    - Most routes protected by default (see middleware.ts)
-   - Public routes: `/` (landing page), `/sign-in`, `/sign-up`
-   - Protected routes: `/dashboard`, `/notebooks`, `/integrations`, `/settings`
-   - API routes NOT protected (handle auth in route handler)
+   - Public routes: `/` (landing page), `/sign-in`, `/sign-up`, `/legal`, `/agent`
+   - Protected routes: everything else (`/dashboard`, `/notebooks`, `/integrations`, `/billing`, `/settings`, `/admin`)
+   - There are no Next.js API routes; the browser calls the FastAPI backend directly
 
 5. **CSS Modules vs Tailwind**:
    - Project uses **Tailwind only** - no CSS modules
@@ -222,9 +244,8 @@ The dashboard is tightly coupled with the backend API. When working on features 
 
 - **2026-01-12**: Implemented metadata-first sync UI support
   - Added `NOT_SYNCED` page status handling in PageCard component (gray placeholder with upload icon)
-  - Created SyncProgress component showing "X/Y pages synced" with progress bar
+  - Created SyncProgress component (defined inside app/notebooks/[id]/page.tsx) showing "X/Y pages synced" with progress bar
   - Updated notebook card previews to show "Syncing..." vs "OCR Pending" based on sync_progress
-  - Added SyncProgress interface to lib/api.ts
   - Backend returns sync_progress in /notebooks/tree response
   - Files: app/notebooks/[id]/page.tsx, app/dashboard/page.tsx, lib/api.ts
   - Commit: 6145364
@@ -263,14 +284,14 @@ The dashboard is tightly coupled with the backend API. When working on features 
 - ✅ Responsive sidebar navigation
 - ✅ Quota system frontend (display, warning, modal, billing page)
 - ✅ 402 error handling for quota exceeded
-- ✅ Metadata-first sync UI (NOT_SYNCED pages, SyncProgress component)
+- ✅ Metadata-first sync UI (NOT_SYNCED pages, SyncProgress in the notebook page)
+- ✅ Search, Notion/Obsidian/Todoist integrations, notebook export (Markdown/PDF), onboarding checklist, legal acceptance
+- ✅ Waitlist API (`backend/app/api/waitlist.py`) and admin pages
+- ✅ Standalone build in CI, installed under pm2 by `deploy/install-release.sh`
 
 **In Progress:**
-- 🚧 Quota system waitlist API endpoint
 - 🚧 Rich text editor for page annotations
-- 🚧 Search functionality
 
 **Planned:**
 - ⏳ Dark mode toggle
-- ⏳ Export notebooks to PDF
 - ⏳ Collaboration features (sharing notebooks)

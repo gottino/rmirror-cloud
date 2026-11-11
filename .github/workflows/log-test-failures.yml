@@ -5,6 +5,9 @@ on:
     workflows: [CI]
     types: [completed]
 
+permissions:
+  contents: read
+
 jobs:
   create-issue:
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
@@ -72,9 +75,11 @@ jobs:
         id: check-issue
         if: ${{ fromJson(steps.failed-jobs.outputs.result).createIssue }}
         uses: actions/github-script@v7
+        env:
+          FAILED_JOBS_RESULT: ${{ steps.failed-jobs.outputs.result }}
         with:
           script: |
-            const branch = '${{ fromJson(steps.failed-jobs.outputs.result).branch }}';
+            const { branch } = JSON.parse(process.env.FAILED_JOBS_RESULT);
 
             // Search for open issues with same branch
             const { data: issues } = await github.rest.issues.listForRepo({
@@ -99,10 +104,13 @@ jobs:
       - name: Create or update issue
         if: ${{ fromJson(steps.failed-jobs.outputs.result).createIssue }}
         uses: actions/github-script@v7
+        env:
+          FAILED_JOBS_RESULT: ${{ steps.failed-jobs.outputs.result }}
+          EXISTING_ISSUE_RESULT: ${{ steps.check-issue.outputs.result }}
         with:
           script: |
-            const result = ${{ steps.failed-jobs.outputs.result }};
-            const existingIssue = ${{ steps.check-issue.outputs.result }};
+            const result = JSON.parse(process.env.FAILED_JOBS_RESULT);
+            const existingIssue = JSON.parse(process.env.EXISTING_ISSUE_RESULT);
 
             // Build job list for issue body
             const jobsList = result.jobs.map(job => `
