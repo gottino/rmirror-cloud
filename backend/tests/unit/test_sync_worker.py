@@ -3,18 +3,22 @@
 Tests the worker's queue processing logic with mocked Notion sync target.
 """
 
+import json
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
+from notion_client.errors import APIResponseError
 from sqlalchemy.orm import Session
 
-from app.core.sync_engine import SyncResult
+from app.core.sync_engine import RATE_LIMIT_DEFAULT_DELAY, SyncErrorKind, SyncResult
 from app.models.notebook import Notebook
 from app.models.page import Page
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord, SyncStatus
 from app.services.sync_worker import (
     MAX_SYNC_RETRIES,
+    PARENT_GONE_GUARD,
     PROCESSING_LEASE,
     RETRY_BASE_DELAY_SECONDS,
     RETRY_MAX_DELAY_SECONDS,
@@ -22,6 +26,7 @@ from app.services.sync_worker import (
     apply_sync_failure,
     apply_sync_result,
     compute_retry_delay,
+    handle_parent_gone,
     reclaim_stale_processing,
 )
 from tests.conftest import create_user_with_quota
@@ -722,3 +727,343 @@ class TestBatchLeaseAndShutdown:
         assert by_id[first_id].status == "processing"  # left to the lease reclaim
         assert by_id[second_id].status == "pending"
         assert by_id[second_id].retry_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Typed Notion outcomes (error_kind) and retry-safe page writes
+# ---------------------------------------------------------------------------
+
+MARKER = " · page-wor"  # first 8 chars of the fixture page_uuid "page-worker-test"
+
+
+def _api_error(status, code, message="Notion error", headers=None):
+    response = httpx.Response(
+        status,
+        headers=headers or {},
+        json={"object": "error", "status": status, "code": code, "message": message},
+        request=httpx.Request("POST", "https://api.notion.com/v1/test"),
+    )
+    return APIResponseError(response, message, code)
+
+
+def _query_response(status, results=None, headers=None, code=None):
+    body = {"results": results or []} if status == 200 else {"code": code, "message": "x"}
+    return httpx.Response(
+        status, headers=headers or {}, json=body,
+        request=httpx.Request("POST", "https://api.notion.com/v1/databases/db/query"),
+    )
+
+
+def _toggle(block_id, page_number, marker=None):
+    rich_text = [{"type": "text", "text": {"content": f"📄 Page {page_number}"}}]
+    if marker:
+        rich_text.append({"type": "text", "text": {"content": marker}})
+    return {"id": block_id, "type": "toggle", "toggle": {"rich_text": rich_text}}
+
+
+def _heading():
+    return {"id": "heading", "type": "heading_2", "heading_2": {"rich_text": []}}
+
+
+def _notion_client():
+    client = MagicMock()
+    client.blocks.children.list.return_value = {"results": [_heading()], "has_more": False}
+    client.blocks.children.append.return_value = {"results": [{"id": "new-block"}]}
+    client.search.return_value = {"results": []}
+    return client
+
+
+async def _run_real_target(worker, db, queue_item, client, post=None):
+    """Run one queue item through the real NotionSyncTarget with a mocked SDK."""
+    post = post or _query_response(200)
+    post_patch = (
+        patch("app.integrations.notion_sync.httpx.post", side_effect=post)
+        if isinstance(post, Exception)
+        else patch("app.integrations.notion_sync.httpx.post", return_value=post)
+    )
+    with patch("app.integrations.notion_sync.NotionClient", return_value=client), post_patch, \
+         patch.object(IntegrationConfig, "get_config",
+                      return_value={"access_token": "test", "database_id": "db-123"}):
+        await worker._process_queue_item(db, queue_item)
+
+
+def _notebook_record(db, user, notebook, external_id="parent-1"):
+    record = SyncRecord(
+        user_id=user.id, target_name="notion", item_type="notebook",
+        item_id=str(notebook.id), external_id=external_id, content_hash="notebook",
+        status="success", notebook_uuid="nb-worker-test", synced_at=datetime.utcnow(),
+    )
+    db.add(record)
+    db.commit()
+    return record
+
+
+def _page_record(db, user, page, *, page_uuid="page-worker-test", external_id="old-block",
+                 content_hash="old_hash", page_number=1, metadata=None):
+    record = SyncRecord(
+        user_id=user.id, target_name="notion", item_type="page_text",
+        item_id=str(page.id), external_id=external_id, content_hash=content_hash,
+        status="success", page_uuid=page_uuid, notebook_uuid="nb-worker-test",
+        page_number=page_number, synced_at=datetime.utcnow(),
+        metadata_json=json.dumps(metadata) if metadata else None,
+    )
+    db.add(record)
+    db.commit()
+    return record
+
+
+class TestTypedErrorKinds:
+    NOW = datetime(2026, 6, 7, 12, 0, 0)
+
+    def _item(self, retry_count=0):
+        return SyncQueue(status="processing", retry_count=retry_count)
+
+    def test_rate_limited_honours_retry_after_without_using_a_retry(self):
+        item = self._item(retry_count=3)
+        later = self.NOW + timedelta(seconds=90)
+        result = SyncResult(status=SyncStatus.RETRY, error_message="slow down",
+                            error_kind=SyncErrorKind.RATE_LIMITED, retry_after=later)
+        outcome = apply_sync_result(item, result, now=self.NOW)
+
+        assert outcome == "retry"
+        assert item.status == "pending"
+        assert item.retry_count == 3
+        assert item.scheduled_at == later
+
+    def test_rate_limited_defaults_to_30s(self):
+        item = self._item()
+        result = SyncResult(status=SyncStatus.RETRY, error_kind=SyncErrorKind.RATE_LIMITED)
+        apply_sync_result(item, result, now=self.NOW)
+
+        assert item.scheduled_at == self.NOW + RATE_LIMIT_DEFAULT_DELAY
+        assert item.retry_count == 0
+
+    def test_rate_limited_at_retry_cap_is_not_dead_lettered(self):
+        item = self._item(retry_count=MAX_SYNC_RETRIES - 1)
+        result = SyncResult(status=SyncStatus.RETRY, error_kind=SyncErrorKind.RATE_LIMITED)
+        assert apply_sync_result(item, result, now=self.NOW) == "retry"
+        assert item.status == "pending"
+
+    @pytest.mark.parametrize("kind", [SyncErrorKind.AUTH, SyncErrorKind.PERMANENT])
+    def test_auth_and_permanent_fail_without_retry(self, kind):
+        item = self._item()
+        # Message alone would look transient to the regex fallback.
+        result = SyncResult(status=SyncStatus.RETRY, error_message="token problem", error_kind=kind)
+        assert apply_sync_result(item, result, now=self.NOW) == "failed"
+        assert item.status == "failed"
+        assert item.retry_count == 0
+
+    def test_error_kind_overrides_message_regex(self):
+        item = self._item()
+        # The regex would call this permanent ("could not find"); the kind says transient.
+        result = SyncResult(status=SyncStatus.FAILED, error_message="Could not find block",
+                            error_kind=SyncErrorKind.TRANSIENT)
+        assert apply_sync_result(item, result, now=self.NOW) == "retry"
+        assert item.retry_count == 1
+
+    def test_unhandled_parent_gone_is_transient(self):
+        item = self._item()
+        result = SyncResult(status=SyncStatus.RETRY, error_kind=SyncErrorKind.PARENT_GONE)
+        assert apply_sync_result(item, result, now=self.NOW) == "retry"
+        assert item.retry_count == 1
+
+
+class TestRetrySafeNotionWrites:
+    """Worker + real NotionSyncTarget with a mocked Notion SDK client."""
+
+    @pytest.mark.asyncio
+    async def test_rate_limited_lookup_creates_no_page_and_keeps_retries(
+        self, db, user, queue_item, notion_config, page
+    ):
+        client = _notion_client()
+        queue_item.status = "processing"
+        queue_item.retry_count = 2
+        db.commit()
+
+        before = datetime.utcnow()
+        await _run_real_target(
+            SyncWorker(), db, queue_item, client,
+            post=_query_response(429, headers={"Retry-After": "120"}, code="rate_limited"),
+        )
+
+        db.refresh(queue_item)
+        assert queue_item.status == "pending"
+        assert queue_item.retry_count == 2
+        assert before + timedelta(seconds=115) < queue_item.scheduled_at < before + timedelta(seconds=125)
+        client.pages.create.assert_not_called()
+        client.blocks.children.append.assert_not_called()
+        assert db.query(SyncRecord).count() == 0
+
+    @pytest.mark.asyncio
+    async def test_failed_append_leaves_old_block_and_record(
+        self, db, user, notebook, queue_item, notion_config, page
+    ):
+        _notebook_record(db, user, notebook)
+        record = _page_record(db, user, page)
+        queue_item.status = "processing"
+        queue_item.content_hash = "new_hash"
+        db.commit()
+        client = _notion_client()
+        client.blocks.children.list.return_value = {
+            "results": [_heading(), _toggle("old-block", 1)], "has_more": False,
+        }
+        client.blocks.children.append.side_effect = _api_error(500, "internal_server_error")
+
+        await _run_real_target(SyncWorker(), db, queue_item, client)
+
+        db.refresh(record)
+        db.refresh(queue_item)
+        client.blocks.delete.assert_not_called()
+        assert record.external_id == "old-block"
+        assert record.content_hash == "old_hash"
+        assert queue_item.status == "pending"
+        assert queue_item.retry_count == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_delete_is_remembered_and_cleaned_next_time(
+        self, db, user, notebook, queue_item, notion_config, page
+    ):
+        _notebook_record(db, user, notebook)
+        record = _page_record(db, user, page)
+        queue_item.status = "processing"
+        queue_item.content_hash = "new_hash"
+        db.commit()
+        client = _notion_client()
+        client.blocks.children.list.return_value = {
+            "results": [_heading(), _toggle("old-block", 1)], "has_more": False,
+        }
+        client.blocks.delete.side_effect = _api_error(503, "service_unavailable")
+
+        await _run_real_target(SyncWorker(), db, queue_item, client)
+
+        db.refresh(record)
+        db.refresh(queue_item)
+        assert queue_item.status == "completed"
+        assert record.external_id == "new-block"
+        assert record.content_hash == "new_hash"
+        assert json.loads(record.metadata_json) == {"stale_block_ids": ["old-block"]}
+
+        # Next sync of the page: the stale block goes first, then the current one.
+        queue_item.status = "processing"
+        queue_item.content_hash = "newer_hash"
+        db.commit()
+        client = _notion_client()
+        client.blocks.children.list.return_value = {
+            "results": [_heading(), _toggle("new-block", 1, MARKER), _toggle("old-block", 1)],
+            "has_more": False,
+        }
+        client.blocks.children.append.return_value = {"results": [{"id": "newest-block"}]}
+
+        await _run_real_target(SyncWorker(), db, queue_item, client)
+
+        db.refresh(record)
+        deleted = [c.kwargs["block_id"] for c in client.blocks.delete.call_args_list]
+        assert deleted == ["old-block", "new-block"]
+        assert record.external_id == "newest-block"
+        assert record.metadata_json is None
+
+    @pytest.mark.asyncio
+    async def test_crash_before_commit_does_not_duplicate_toggle(
+        self, db, user, notebook, queue_item, notion_config, page
+    ):
+        """An earlier attempt appended the toggle but died before recording it."""
+        _notebook_record(db, user, notebook)
+        # Another page of the notebook, recorded, with an unmarked same-numbered toggle.
+        _page_record(db, user, page, page_uuid="page-other", external_id="other-block",
+                     page_number=1)
+        queue_item.status = "processing"
+        db.commit()
+        client = _notion_client()
+        client.blocks.children.list.return_value = {
+            "results": [_heading(), _toggle("crashed-append", 1, MARKER), _toggle("other-block", 1)],
+            "has_more": False,
+        }
+
+        await _run_real_target(SyncWorker(), db, queue_item, client)
+
+        db.refresh(queue_item)
+        assert queue_item.status == "completed"
+        client.blocks.children.append.assert_called_once()
+        client.blocks.delete.assert_called_once_with(block_id="crashed-append")
+        record = db.query(SyncRecord).filter(SyncRecord.page_uuid == "page-worker-test").one()
+        assert record.external_id == "new-block"
+
+    @pytest.mark.asyncio
+    async def test_archived_notebook_page_is_recreated(
+        self, db, user, notebook, queue_item, notion_config, page
+    ):
+        _notebook_record(db, user, notebook, external_id="archived-parent")
+        _page_record(db, user, page)  # this page, synced before with other content
+        _page_record(db, user, page, page_uuid="page-other", external_id="other-block",
+                     content_hash="other_hash", page_number=2)
+        queue_item.status = "processing"
+        queue_item.content_hash = "new_hash"
+        db.commit()
+
+        # Attempt 1: the notebook page was archived in Notion.
+        client = _notion_client()
+        client.blocks.children.append.side_effect = _api_error(
+            400, "validation_error", "Can't edit block that is archived."
+        )
+        client.pages.retrieve.return_value = {"id": "archived-parent", "archived": True}
+        await _run_real_target(SyncWorker(), db, queue_item, client)
+
+        db.refresh(queue_item)
+        assert queue_item.status == "pending"
+        assert queue_item.retry_count == 0
+        assert queue_item.scheduled_at <= datetime.utcnow() + timedelta(seconds=30)
+        assert db.query(SyncRecord).filter(SyncRecord.notebook_uuid == "nb-worker-test").count() == 0
+        requeued = db.query(SyncQueue).filter(SyncQueue.page_uuid == "page-other").one()
+        assert requeued.status == "pending"
+        assert requeued.item_type == "page_text"
+
+        # Attempt 2: no notebook record, Notion confirms no live page -> new one.
+        queue_item.status = "processing"
+        db.commit()
+        client = _notion_client()
+        client.pages.create.return_value = {"id": "fresh-parent"}
+        await _run_real_target(SyncWorker(), db, queue_item, client)
+
+        db.refresh(queue_item)
+        assert queue_item.status == "completed"
+        client.pages.create.assert_called_once()
+        nb_record = db.query(SyncRecord).filter(SyncRecord.item_type == "notebook").one()
+        assert nb_record.external_id == "fresh-parent"
+        page_record = db.query(SyncRecord).filter(SyncRecord.page_uuid == "page-worker-test").one()
+        assert page_record.external_id == "new-block"
+
+    @pytest.mark.asyncio
+    async def test_parent_gone_again_within_the_hour_is_a_normal_failure(
+        self, db, user, notebook, queue_item, notion_config, page
+    ):
+        nb_record = _notebook_record(db, user, notebook)
+        queue_item.status = "processing"
+        queue_item.metadata_json = json.dumps(
+            {"parent_gone_at": (datetime.utcnow() - timedelta(minutes=10)).isoformat()}
+        )
+        db.commit()
+
+        mock_target = MagicMock()
+        mock_target.sync_item = AsyncMock(return_value=SyncResult(
+            status=SyncStatus.RETRY, error_message="gone",
+            error_kind=SyncErrorKind.PARENT_GONE,
+        ))
+        with patch("app.services.sync_worker.NotionSyncTarget", return_value=mock_target), \
+             patch.object(IntegrationConfig, "get_config",
+                          return_value={"access_token": "test", "database_id": "db-123"}):
+            await SyncWorker()._process_queue_item(db, queue_item)
+
+        db.refresh(queue_item)
+        assert queue_item.status == "pending"
+        assert queue_item.retry_count == 1  # ordinary transient failure
+        assert db.query(SyncRecord).filter(SyncRecord.id == nb_record.id).count() == 1
+
+    def test_parent_gone_guard_expires_after_an_hour(self, db, user, queue_item):
+        now = datetime(2026, 6, 7, 12, 0, 0)
+        queue_item.metadata_json = json.dumps(
+            {"parent_gone_at": (now - PARENT_GONE_GUARD - timedelta(minutes=1)).isoformat()}
+        )
+        result = SyncResult(status=SyncStatus.RETRY, error_kind=SyncErrorKind.PARENT_GONE)
+        assert handle_parent_gone(db, queue_item, result, now=now) is True
+        assert queue_item.retry_count == 0
+        assert json.loads(queue_item.metadata_json)["parent_gone_at"] == now.isoformat()
