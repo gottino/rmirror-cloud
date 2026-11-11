@@ -29,57 +29,21 @@ Authorization: Bearer <your_token>
 
 ## Authentication
 
-### Login
+Login is handled by Clerk. The backend accepts Clerk session tokens as Bearer tokens; the password endpoints (`/auth/login`, `/auth/register`) were removed.
 
-Get an access token for API authentication.
+### Create Agent Token
 
-**Endpoint:** `POST /auth/login`
+Exchange a Clerk session token for a long-lived (30-day) agent token. Used by the agent auth bridge page (`dashboard/app/agent`); agent tokens cannot mint new tokens.
 
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "your-password"
-}
-```
+**Endpoint:** `POST /auth/agent-token`
+
+**Headers:** `Authorization: Bearer <clerk_session_token>`
 
 **Response:**
 ```json
 {
   "access_token": "eyJhbGc...",
-  "token_type": "bearer",
-  "user": {
-    "id": 1,
-    "email": "user@example.com",
-    "full_name": "John Doe",
-    "is_active": true
-  }
-}
-```
-
-### Register
-
-Create a new user account.
-
-**Endpoint:** `POST /auth/register`
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "secure-password",
-  "full_name": "John Doe"
-}
-```
-
-**Response:**
-```json
-{
-  "id": 1,
-  "email": "user@example.com",
-  "full_name": "John Doe",
-  "is_active": true,
-  "created_at": "2025-11-17T12:00:00Z"
+  "token_type": "bearer"
 }
 ```
 
@@ -138,7 +102,7 @@ Get current quota status for the authenticated user.
 **Response:**
 ```json
 {
-  "quota_type": "ocr_pages",
+  "quota_type": "ocr",
   "used": 25,
   "limit": 30,
   "remaining": 5,
@@ -150,7 +114,7 @@ Get current quota status for the authenticated user.
 ```
 
 **Response Fields:**
-- `quota_type`: Type of quota (currently only "ocr_pages")
+- `quota_type`: Type of quota (currently only "ocr")
 - `used`: Number of pages processed this period
 - `limit`: Total quota limit for the period
 - `remaining`: Pages remaining (limit - used)
@@ -377,7 +341,7 @@ Process a reMarkable `.rm` file: convert to PDF, extract text via OCR, and save 
 2. Checks quota status (does not block upload if exhausted)
 3. Calculates SHA-256 hash and checks if file changed
 4. Converts .rm → SVG → PDF
-5. Sends PDF to Claude Vision for OCR (if quota available and file changed)
+5. Sends PDF to Google Gemini Vision for OCR (if quota available and file changed)
 6. Consumes quota only after successful OCR
 7. Creates/updates Notebook and Page records in database
 8. Stores `.rm` file and PDF in storage
@@ -1165,12 +1129,8 @@ import httpx
 
 BASE_URL = "http://your-server/v1"
 
-# Login
-response = httpx.post(
-    f"{BASE_URL}/auth/login",
-    json={"email": "user@example.com", "password": "password"}
-)
-token = response.json()["access_token"]
+# Use a Clerk session token (or a 30-day agent token from POST /auth/agent-token)
+token = "<token>"
 headers = {"Authorization": f"Bearer {token}"}
 
 # Get notebooks
@@ -1190,11 +1150,8 @@ todos = httpx.get(f"{BASE_URL}/todos/", headers=headers).json()
 ### cURL Example
 
 ```bash
-# Login
-TOKEN=$(curl -X POST http://your-server/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"password"}' \
-  | jq -r '.access_token')
+# Use a Clerk session token (or a 30-day agent token from POST /auth/agent-token)
+TOKEN="<token>"
 
 # List notebooks
 curl http://your-server/v1/notebooks/ \
