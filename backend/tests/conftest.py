@@ -471,7 +471,7 @@ def notion_oauth_settings():
     mock_settings.notion_client_id = "test-client-id"
     mock_settings.notion_client_secret = "test-secret"
     mock_settings.notion_redirect_uri = "http://localhost:3000/callback"
-    mock_settings.debug = True
+    mock_settings.disable_tls_verify = False
     return mock_settings
 
 

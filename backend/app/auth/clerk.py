@@ -33,22 +33,23 @@ _jwks_warned: bool = False  # Track if we've already warned about missing JWKS
 def get_jwks_client() -> Optional[PyJWKClient]:
     """Get or create JWKS client for JWT verification.
 
-    Returns None if CLERK_JWKS_URL is not configured (development mode).
+    Returns None if CLERK_JWKS_URL is not configured and
+    ALLOW_UNVERIFIED_CLERK_TOKENS is set (local development only).
     """
     global _jwks_client, _jwks_warned
     settings = get_settings()
 
     if not settings.clerk_jwks_url:
-        if not settings.debug:
+        if not settings.allow_unverified_clerk_tokens:
             raise RuntimeError(
-                "CLERK_JWKS_URL is required in production. "
+                "CLERK_JWKS_URL is required. "
                 "Set CLERK_JWKS_URL to your Clerk JWKS endpoint "
                 "(e.g., https://your-app.clerk.accounts.dev/.well-known/jwks.json)"
             )
         if not _jwks_warned:
             logger.warning(
-                "CLERK_JWKS_URL not configured - JWT signature verification disabled. "
-                "This is only allowed in debug mode."
+                "CLERK_JWKS_URL not configured - JWT signature verification disabled "
+                "because ALLOW_UNVERIFIED_CLERK_TOKENS is set (local development only)."
             )
             _jwks_warned = True
         return None
@@ -58,6 +59,59 @@ def get_jwks_client() -> Optional[PyJWKClient]:
         logger.info(f"Initialized JWKS client with URL: {settings.clerk_jwks_url}")
 
     return _jwks_client
+
+
+_JWKS_SUFFIX = "/.well-known/jwks.json"
+_issuer_warned: bool = False
+
+
+def get_expected_issuer(settings) -> Optional[str]:
+    """The ``iss`` value Clerk session tokens must carry, or None to skip the check.
+
+    CLERK_ISSUER wins. Otherwise the issuer is derived from CLERK_JWKS_URL,
+    which for a Clerk instance is "<issuer>/.well-known/jwks.json". If neither
+    gives an issuer (no Clerk configured, or a JWKS URL of another shape) the
+    check is skipped rather than guessed.
+    """
+    global _issuer_warned
+    if settings.clerk_issuer:
+        return settings.clerk_issuer.rstrip("/")
+    jwks_url = settings.clerk_jwks_url
+    if not jwks_url:
+        return None
+    if jwks_url.endswith(_JWKS_SUFFIX):
+        return jwks_url[: -len(_JWKS_SUFFIX)].rstrip("/")
+    if not _issuer_warned:
+        logger.warning(
+            "Cannot derive the Clerk issuer from CLERK_JWKS_URL; set CLERK_ISSUER "
+            "to enable issuer validation of Clerk tokens."
+        )
+        _issuer_warned = True
+    return None
+
+
+def validate_clerk_claims(decoded: dict, settings) -> bool:
+    """Check the issuer and authorised party of a decoded Clerk session token.
+
+    ``iss`` must equal the expected issuer (when one is known). ``azp``, if the
+    token has one, must be in CLERK_AUTHORIZED_PARTIES; Clerk omits it in some
+    flows, so a token without ``azp`` is accepted.
+    """
+    expected_issuer = get_expected_issuer(settings)
+    if expected_issuer is not None:
+        issuer = decoded.get("iss")
+        if not isinstance(issuer, str) or issuer.rstrip("/") != expected_issuer:
+            logger.warning("Rejected Clerk token with unexpected issuer")
+            return False
+
+    azp = decoded.get("azp")
+    if azp is not None:
+        allowed = {p.rstrip("/") for p in (settings.clerk_authorized_parties or [])}
+        if not isinstance(azp, str) or azp.rstrip("/") not in allowed:
+            logger.warning("Rejected Clerk token with unexpected authorised party")
+            return False
+
+    return True
 
 
 def get_clerk_client() -> ClientsApi:
@@ -150,11 +204,14 @@ async def get_clerk_user(
                     logger.warning("JWT signature verification failed - possible token tampering")
                     raise credentials_exception
             else:
-                # Development mode only: Decode without signature verification but still check expiration
+                # ALLOW_UNVERIFIED_CLERK_TOKENS (SQLite dev only): no signature check, still check expiry
                 decoded = jwt.decode(
                     token,
                     options={"verify_signature": False, "verify_exp": True},
                 )
+
+            if not validate_clerk_claims(decoded, settings):
+                raise credentials_exception
 
         # Record the token kind so downstream guards can restrict long-lived
         # agent tokens. Only tokens explicitly minted as agent tokens carry
@@ -197,6 +254,9 @@ async def get_clerk_user(
     except jwt.ExpiredSignatureError:
         logger.debug("JWT token has expired")
         raise credentials_exception
+    except HTTPException:
+        # Already the intended response (e.g. 401, or 404 "User not found")
+        raise
     except Exception as e:
         logger.error(f"Clerk authentication error: {e}")
         raise credentials_exception

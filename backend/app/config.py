@@ -1,9 +1,11 @@
 """Application configuration and settings."""
 
+import logging
 from functools import lru_cache
 from typing import Optional
+from urllib.parse import urlparse
 
-from pydantic import PostgresDsn, field_validator
+from pydantic import PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,13 +21,31 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "rMirror Cloud API"
+    # Only non-security behaviour (log verbosity). Security checks have their
+    # own flags below, which the app refuses to enable outside SQLite.
     debug: bool = False
     api_version: str = "v1"
 
-    @field_validator("debug", mode="before")
+    # Insecure development flags (default off). Each one relaxes one security
+    # check; see check_insecure_flags() for the start-up guard.
+    # Accept Clerk session tokens without a signature check when
+    # CLERK_JWKS_URL is not set (local development without Clerk).
+    allow_unverified_clerk_tokens: bool = False
+    # Accept Clerk webhooks without a signature when CLERK_WEBHOOK_SECRET is unset.
+    allow_unsigned_webhooks: bool = False
+    # Skip TLS certificate verification on Notion OAuth/API calls.
+    disable_tls_verify: bool = False
+
+    @field_validator(
+        "debug",
+        "allow_unverified_clerk_tokens",
+        "allow_unsigned_webhooks",
+        "disable_tls_verify",
+        mode="before",
+    )
     @classmethod
     def parse_debug(cls, v):
-        """Handle empty string for debug field (defaults to False)."""
+        """Handle empty string for boolean flags (defaults to False)."""
         if v == "" or v is None:
             return False
         if isinstance(v, bool):
@@ -107,6 +127,14 @@ class Settings(BaseSettings):
     clerk_secret_key: Optional[str] = None
     clerk_jwks_url: Optional[str] = None
     clerk_webhook_secret: Optional[str] = None
+    # Expected ``iss`` claim of Clerk session tokens. When unset it is derived
+    # from CLERK_JWKS_URL by stripping "/.well-known/jwks.json".
+    clerk_issuer: Optional[str] = None
+    # Accepted ``azp`` (authorised party) values of Clerk session tokens, as a
+    # JSON list like CORS_ORIGINS, e.g. ["https://rmirror.io"]. When unset it
+    # defaults to CORS_ORIGINS plus the origin of DASHBOARD_URL. Setting it
+    # replaces that default. Tokens without an ``azp`` claim are accepted.
+    clerk_authorized_parties: Optional[list[str]] = None
 
     # CORS
     cors_origins: list[str] = [
@@ -169,6 +197,51 @@ class Settings(BaseSettings):
     # notebook back to back; 120/minute (2 pages a second) lets the agent
     # work through a large library without stalling while still capping abuse.
     rate_limit_upload: str = "120/minute"
+
+    @model_validator(mode="after")
+    def default_clerk_authorized_parties(self) -> "Settings":
+        """Default the Clerk ``azp`` allow-list to the CORS and dashboard origins."""
+        if self.clerk_authorized_parties is None:
+            parties = [o.rstrip("/") for o in self.cors_origins]
+            parsed = urlparse(self.dashboard_url)
+            if parsed.scheme and parsed.netloc:
+                parties.append(f"{parsed.scheme}://{parsed.netloc}")
+            self.clerk_authorized_parties = list(dict.fromkeys(parties))
+        return self
+
+    def enabled_insecure_flags(self) -> list[str]:
+        """Names (as environment variables) of the insecure flags that are on."""
+        flags = {
+            "ALLOW_UNVERIFIED_CLERK_TOKENS": self.allow_unverified_clerk_tokens,
+            "ALLOW_UNSIGNED_WEBHOOKS": self.allow_unsigned_webhooks,
+            "DISABLE_TLS_VERIFY": self.disable_tls_verify,
+        }
+        return [name for name, enabled in flags.items() if enabled]
+
+
+def check_insecure_flags(settings: "Settings") -> None:
+    """Refuse insecure flags outside local SQLite development; warn when allowed.
+
+    Called once at start-up (app/main.py).
+
+    Raises:
+        RuntimeError: if any insecure flag is on while DATABASE_URL is not SQLite.
+    """
+    enabled = settings.enabled_insecure_flags()
+    if not enabled:
+        return
+    names = ", ".join(enabled)
+    if not settings.database_url.startswith("sqlite"):
+        raise RuntimeError(
+            f"Refusing to start: insecure setting(s) {names} enabled while "
+            "DATABASE_URL is not SQLite. These flags are for local development "
+            "only; unset them (or set them to false)."
+        )
+    logging.getLogger(__name__).warning(
+        "!!! INSECURE DEVELOPMENT SETTINGS ENABLED: %s. "
+        "Never use these outside local development. !!!",
+        names,
+    )
 
 
 @lru_cache

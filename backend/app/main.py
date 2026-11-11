@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api import api_router
-from app.config import get_settings
+from app.config import check_insecure_flags, get_settings
 from app.database import get_db
 from app.logging_config import configure_logging
 from app.middleware.rate_limit import install_rate_limiting
@@ -21,6 +21,9 @@ settings = get_settings()
 # Configure structured JSON logging before anything else
 configure_logging(debug=settings.debug)
 logger = logging.getLogger(__name__)
+
+# Refuse insecure development flags outside SQLite (warns loudly when allowed)
+check_insecure_flags(settings)
 
 
 @asynccontextmanager
