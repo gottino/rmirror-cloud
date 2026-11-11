@@ -131,13 +131,14 @@ def test_app_start_allows_insecure_flag_with_sqlite():
     assert result.returncode == 0, result.stderr
 
 
-def test_authorized_parties_default_to_cors_and_dashboard_origins():
+def test_authorized_parties_unset_by_default_and_default_origins_derived():
     settings = Settings(
         secret_key="x",
         cors_origins=["http://localhost:3000", "http://localhost:5555/"],
         dashboard_url="https://dashboard.example.test/some/path",
     )
-    assert settings.clerk_authorized_parties == [
+    assert settings.clerk_authorized_parties is None
+    assert settings.default_authorized_parties() == [
         "http://localhost:3000",
         "http://localhost:5555",
         "https://dashboard.example.test",
@@ -327,17 +328,58 @@ def test_token_without_azp_accepted(probe, clerk_user, fake_jwks):
     assert resp.status_code == 200
 
 
-def test_azp_default_list_accepts_dashboard_origin(probe, clerk_user, fake_jwks):
-    settings = Settings(
-        secret_key="test-secret-key",
-        database_url="sqlite:///:memory:",
-        clerk_jwks_url=_JWKS_URL,
-        dashboard_url="https://dash.example.test",
-    )
+@pytest.fixture
+def azp_warnings(caplog):
+    from app.auth import clerk
+
+    clerk._azp_warned.clear()
+    caplog.set_level(logging.WARNING, logger="app.auth.clerk")
+    yield lambda: [r for r in caplog.records if "authorised party" in r.getMessage()
+                   and "not among" in r.getMessage()]
+    clerk._azp_warned.clear()
+
+
+def test_unset_list_accepts_unknown_azp_and_warns_once(
+    probe, clerk_user, fake_jwks, azp_warnings
+):
+    token = _signed(clerk_user.clerk_user_id, iss=_ISSUER, azp="https://www.other.example.test")
+    for _ in range(3):
+        resp = _get(probe, token, clerk_jwks_url=_JWKS_URL)
+        assert resp.status_code == 200
+    warnings = azp_warnings()
+    assert len(warnings) == 1
+    assert "CLERK_AUTHORIZED_PARTIES" in warnings[0].getMessage()
+    # A different value is logged separately.
+    other = _signed(clerk_user.clerk_user_id, iss=_ISSUER, azp="https://second.example.test")
+    assert _get(probe, other, clerk_jwks_url=_JWKS_URL).status_code == 200
+    assert len(azp_warnings()) == 2
+
+
+def test_unset_list_known_azp_accepted_without_warning(
+    probe, clerk_user, fake_jwks, azp_warnings
+):
     token = _signed(clerk_user.clerk_user_id, iss=_ISSUER, azp="https://dash.example.test")
-    with patch("app.auth.clerk.get_settings", return_value=settings):
-        resp = probe.get("/probe", headers={"Authorization": f"Bearer {token}"})
+    resp = _get(
+        probe, token, clerk_jwks_url=_JWKS_URL, dashboard_url="https://dash.example.test/x"
+    )
     assert resp.status_code == 200
+    assert azp_warnings() == []
+
+
+def test_unset_list_token_without_azp_accepted(probe, clerk_user, fake_jwks, azp_warnings):
+    token = _signed(clerk_user.clerk_user_id, iss=_ISSUER)
+    assert _get(probe, token, clerk_jwks_url=_JWKS_URL).status_code == 200
+    assert azp_warnings() == []
+
+
+def test_unset_list_warned_set_is_bounded(azp_warnings):
+    from app.auth import clerk
+
+    settings = _settings()
+    for i in range(clerk._AZP_WARNED_MAX + 20):
+        clerk.validate_clerk_claims({"azp": f"https://h{i}.example.test"}, settings)
+    assert len(clerk._azp_warned) == clerk._AZP_WARNED_MAX
+    assert len(azp_warnings()) == clerk._AZP_WARNED_MAX
 
 
 def test_unknown_user_gets_404_not_401(probe, fake_jwks):

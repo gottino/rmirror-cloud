@@ -89,7 +89,6 @@ jobs:
           CLERK_SECRET_KEY=${{ secrets.STAGING_CLERK_SECRET_KEY }}
           CLERK_WEBHOOK_SECRET=${{ secrets.STAGING_CLERK_WEBHOOK_SECRET }}
           CLERK_JWKS_URL=${{ secrets.STAGING_CLERK_JWKS_URL }}
-          CLERK_AUTHORIZED_PARTIES=["https://staging.rmirror.io","http://localhost:3000","http://localhost:5555","http://127.0.0.1:5555"]
           GOOGLE_AI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
           S3_ENDPOINT_URL=${{ secrets.B2_ENDPOINT_URL }}
           S3_ACCESS_KEY=${{ secrets.B2_ACCESS_KEY_ID }}

@@ -5,7 +5,7 @@ from functools import lru_cache
 from typing import Optional
 from urllib.parse import urlparse
 
-from pydantic import PostgresDsn, field_validator, model_validator
+from pydantic import PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -131,9 +131,11 @@ class Settings(BaseSettings):
     # from CLERK_JWKS_URL by stripping "/.well-known/jwks.json".
     clerk_issuer: Optional[str] = None
     # Accepted ``azp`` (authorised party) values of Clerk session tokens, as a
-    # JSON list like CORS_ORIGINS, e.g. ["https://rmirror.io"]. When unset it
-    # defaults to CORS_ORIGINS plus the origin of DASHBOARD_URL. Setting it
-    # replaces that default. Tokens without an ``azp`` claim are accepted.
+    # JSON list like CORS_ORIGINS, e.g. ["https://rmirror.io"]. Opt-in: when
+    # unset (the default) ``azp`` is not enforced; a token whose ``azp`` is not
+    # in ``default_authorized_parties()`` only logs a warning. When set to a
+    # non-empty list, tokens with any other ``azp`` are rejected. Tokens without
+    # an ``azp`` claim are always accepted.
     clerk_authorized_parties: Optional[list[str]] = None
 
     # CORS
@@ -198,16 +200,17 @@ class Settings(BaseSettings):
     # work through a large library without stalling while still capping abuse.
     rate_limit_upload: str = "120/minute"
 
-    @model_validator(mode="after")
-    def default_clerk_authorized_parties(self) -> "Settings":
-        """Default the Clerk ``azp`` allow-list to the CORS and dashboard origins."""
-        if self.clerk_authorized_parties is None:
-            parties = [o.rstrip("/") for o in self.cors_origins]
-            parsed = urlparse(self.dashboard_url)
-            if parsed.scheme and parsed.netloc:
-                parties.append(f"{parsed.scheme}://{parsed.netloc}")
-            self.clerk_authorized_parties = list(dict.fromkeys(parties))
-        return self
+    def default_authorized_parties(self) -> list[str]:
+        """Origins expected as ``azp``: CORS origins plus the DASHBOARD_URL origin.
+
+        Used only to decide which unlisted ``azp`` values are worth a warning
+        while CLERK_AUTHORIZED_PARTIES is unset; it is never enforced.
+        """
+        parties = [o.rstrip("/") for o in self.cors_origins]
+        parsed = urlparse(self.dashboard_url)
+        if parsed.scheme and parsed.netloc:
+            parties.append(f"{parsed.scheme}://{parsed.netloc}")
+        return list(dict.fromkeys(parties))
 
     def enabled_insecure_flags(self) -> list[str]:
         """Names (as environment variables) of the insecure flags that are on."""

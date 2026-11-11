@@ -63,6 +63,8 @@ def get_jwks_client() -> Optional[PyJWKClient]:
 
 _JWKS_SUFFIX = "/.well-known/jwks.json"
 _issuer_warned: bool = False
+_AZP_WARNED_MAX = 50
+_azp_warned: set[str] = set()  # distinct unexpected azp values already logged
 
 
 def get_expected_issuer(settings) -> Optional[str]:
@@ -90,12 +92,30 @@ def get_expected_issuer(settings) -> Optional[str]:
     return None
 
 
+def _warn_unlisted_azp(azp: str, settings) -> None:
+    """Log once per distinct ``azp`` (bounded) that is outside the default origins."""
+    value = azp.rstrip("/")
+    if value in settings.default_authorized_parties() or value in _azp_warned:
+        return
+    if len(_azp_warned) >= _AZP_WARNED_MAX:
+        return
+    _azp_warned.add(value)
+    logger.warning(
+        "Clerk token authorised party %r is not among the expected origins "
+        "(CORS_ORIGINS, DASHBOARD_URL); it was accepted. Set "
+        "CLERK_AUTHORIZED_PARTIES to enforce an allow-list.",
+        value[:200],
+    )
+
+
 def validate_clerk_claims(decoded: dict, settings) -> bool:
     """Check the issuer and authorised party of a decoded Clerk session token.
 
-    ``iss`` must equal the expected issuer (when one is known). ``azp``, if the
-    token has one, must be in CLERK_AUTHORIZED_PARTIES; Clerk omits it in some
-    flows, so a token without ``azp`` is accepted.
+    ``iss`` must equal the expected issuer (when one is known). ``azp`` is only
+    enforced when CLERK_AUTHORIZED_PARTIES is set to a non-empty list: then a
+    token's ``azp``, if it has one, must be in it. When unset, an ``azp`` outside
+    the derived default origins is accepted but logged once per distinct value.
+    Clerk omits ``azp`` in some flows, so a token without it is always accepted.
     """
     expected_issuer = get_expected_issuer(settings)
     if expected_issuer is not None:
@@ -106,10 +126,14 @@ def validate_clerk_claims(decoded: dict, settings) -> bool:
 
     azp = decoded.get("azp")
     if azp is not None:
-        allowed = {p.rstrip("/") for p in (settings.clerk_authorized_parties or [])}
-        if not isinstance(azp, str) or azp.rstrip("/") not in allowed:
-            logger.warning("Rejected Clerk token with unexpected authorised party")
-            return False
+        configured = settings.clerk_authorized_parties
+        if configured:
+            allowed = {p.rstrip("/") for p in configured}
+            if not isinstance(azp, str) or azp.rstrip("/") not in allowed:
+                logger.warning("Rejected Clerk token with unexpected authorised party")
+                return False
+        elif isinstance(azp, str):
+            _warn_unlisted_azp(azp, settings)
 
     return True
 
