@@ -5,9 +5,8 @@ import { usePathname } from 'next/navigation';
 import Image from 'next/image';
 import { HomeIcon, Puzzle, X, MessageSquare, Mail, Shield } from 'lucide-react';
 import { useAuth } from '@clerk/nextjs';
-import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
-import { useEffect, useState } from 'react';
-import { getAgentStatus, type AgentStatus } from '@/lib/api';
+import { isDevAuthMode } from '@/lib/useApiToken';
+import { useAgentStatus } from '@/lib/useAgentStatus';
 
 interface SidebarProps {
   open?: boolean;
@@ -19,35 +18,14 @@ const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',')
 export default function Sidebar({ open = true, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { isSignedIn, userId } = useAuth();
-  const getToken = useApiToken();
-  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
 
   // Development mode bypass — only works on localhost, backend still enforces auth
   const isDevelopmentMode = isDevAuthMode()
     && typeof window !== 'undefined' && window.location.hostname === 'localhost';
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
 
-  const fetchAgentStatus = async () => {
-    if (!effectiveIsSignedIn) return;
-
-    try {
-      const token = await getToken();
-
-      if (!token) return;
-
-      const status = await getAgentStatus(token);
-      setAgentStatus(status);
-    } catch (err) {
-      console.error('Error fetching agent status:', err);
-    }
-  };
-
-  useEffect(() => {
-    fetchAgentStatus();
-    // Poll every 60 seconds
-    const interval = setInterval(fetchAgentStatus, 60000);
-    return () => clearInterval(interval);
-  }, [effectiveIsSignedIn]);
+  // Poll every 60 seconds
+  const agentStatus = useAgentStatus({ enabled: !!effectiveIsSignedIn, pollMs: 60000 });
 
   const isActive = (path: string) => {
     if (path === '/') {

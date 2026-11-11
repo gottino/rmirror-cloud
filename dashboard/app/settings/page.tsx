@@ -8,17 +8,7 @@ import { Settings, Download, Trash2, AlertTriangle, Menu, Loader2 } from 'lucide
 import Sidebar from '@/components/Sidebar';
 import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import { trackEvent } from '@/lib/analytics';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
-
-interface DataSummary {
-  notebooks: number;
-  pages: number;
-  files: number;
-  integrations: string[];
-  member_since: string | null;
-  subscription: string;
-}
+import { getAccountDataSummary, exportAccountData, deleteAccount, type AccountDataSummary } from '@/lib/api';
 
 export default function SettingsPage() {
   const { isSignedIn, signOut } = useAuth();
@@ -26,7 +16,7 @@ export default function SettingsPage() {
   const { user: clerkUser } = useUser();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [dataSummary, setDataSummary] = useState<DataSummary | null>(null);
+  const [dataSummary, setDataSummary] = useState<AccountDataSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -53,13 +43,7 @@ export default function SettingsPage() {
 
       try {
         const token = await getAuthToken();
-        const response = await fetch(`${API_URL}/account/data-summary`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setDataSummary(data);
-        }
+        setDataSummary(await getAccountDataSummary(token));
       } catch (err) {
         console.error('Error fetching data summary:', err);
       } finally {
@@ -73,21 +57,13 @@ export default function SettingsPage() {
     setExporting(true);
     try {
       const token = await getAuthToken();
-      const response = await fetch(`${API_URL}/account/export`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!response.ok) {
-        throw new Error('Export failed');
-      }
+      const { blob, filename } = await exportAccountData(token);
 
       trackEvent({ name: 'data_exported' });
-      const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = response.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1]
+      a.download = filename
         || `rmirror-export-${new Date().toISOString().split('T')[0]}.zip`;
       document.body.appendChild(a);
       a.click();
@@ -105,19 +81,7 @@ export default function SettingsPage() {
     setDeleteError('');
     try {
       const token = await getAuthToken();
-      const response = await fetch(`${API_URL}/account`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ confirmation: deleteConfirmation }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.detail || 'Deletion failed');
-      }
+      await deleteAccount(token, deleteConfirmation);
 
       // Sign out and redirect to landing page
       if (signOut) {

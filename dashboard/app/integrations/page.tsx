@@ -58,15 +58,12 @@ export default function IntegrationsPage() {
   async function loadIntegrations() {
     try {
       const token = await getToken();
-      console.log('Got token:', token ? 'yes' : 'no');
       if (!token) {
         setError('No authentication token available');
         return;
       }
 
-      console.log('Fetching integrations...');
       const data = await getIntegrations(token);
-      console.log('Integrations loaded:', data);
       setIntegrations(data);
 
       // Also load Obsidian status
@@ -101,9 +98,7 @@ export default function IntegrationsPage() {
         return;
       }
 
-      console.log('Getting Notion OAuth URL...');
       const { authorization_url } = await getNotionOAuthUrl(token);
-      console.log('Redirecting to:', authorization_url);
       trackEvent({ name: 'integration_setup_started', data: { service: 'notion' } });
       window.location.href = authorization_url;
     } catch (err) {
