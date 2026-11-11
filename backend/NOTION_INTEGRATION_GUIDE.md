@@ -493,8 +493,8 @@ GET  /v1/sync/status/{target_name}                    # Get status
 ## Security Considerations
 
 1. **State Parameter**: CSRF protection in OAuth flow
-   - TODO: Store state in Redis/session cache
-   - Validate on callback
+   - The state is an HMAC-signed token encoding the user id and an expiry (`_create_oauth_state` in `app/api/notion_oauth.py`), so no server-side store is needed
+   - Validated on callback
 
 2. **Token Encryption**: All tokens encrypted with user-specific keys
    - Uses Fernet symmetric encryption

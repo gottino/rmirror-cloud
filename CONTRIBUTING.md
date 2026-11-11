@@ -22,7 +22,7 @@ Have an idea? [Start a discussion](https://github.com/gottino/rmirror-cloud/disc
 Documentation PRs are always welcome! Look for typos, unclear sections, or missing guides.
 
 ### 🔌 Add Connectors
-Want to integrate a new service? Check out [docs/connectors.md](docs/connectors.md) for the connector interface.
+Want to integrate a new service? Look at `SyncTarget` in `backend/app/core/sync_engine.py` and `backend/app/integrations/notion_sync.py` for the connector interface.
 
 ### 🧪 Write Tests
 Improving test coverage is hugely valuable. See the `tests/` directories in each component.
@@ -34,9 +34,9 @@ Design skills? Help improve the dashboard UI/UX. Share mockups in discussions fi
 
 ### Prerequisites
 - **For Backend:** Python 3.11+, Poetry
-- **For Agent:** Rust 1.70+, Node.js 18+
-- **For Dashboard:** Node.js 18+
-- **For All:** Docker & Docker Compose
+- **For Agent:** Python 3.11+, Poetry (macOS app; see `agent/README.md`)
+- **For Dashboard:** Node.js 20+
+- **Optional:** Docker & Docker Compose (PostgreSQL/MinIO; the backend uses SQLite by default)
 
 ### Quick Start
 
@@ -49,12 +49,12 @@ Design skills? Help improve the dashboard UI/UX. Share mockups in discussions fi
 2. **Set up environment**
    ```bash
    cp .env.example .env
-   # Edit .env with your Claude API key
+   # Edit .env with your Google AI (Gemini) API key and Clerk keys
    ```
 
-3. **Start infrastructure**
+3. **Start infrastructure (optional)**
    ```bash
-   docker-compose up -d
+   docker-compose up -d   # PostgreSQL and MinIO; skip to use SQLite
    ```
 
 4. **Backend development**
@@ -75,8 +75,8 @@ Design skills? Help improve the dashboard UI/UX. Share mockups in discussions fi
 6. **Agent development**
    ```bash
    cd agent
-   npm install
-   npm run tauri dev
+   poetry install
+   poetry run python -m app.main --foreground --debug   # web UI on http://localhost:5555
    ```
 
 ### Running Tests
@@ -92,14 +92,13 @@ npm test
 
 # Agent tests
 cd agent
-npm test
-cargo test
+poetry run pytest
 ```
 
 ## Code Style
 
 ### Python (Backend)
-- **Style:** Follow PEP 8, use Black formatter
+- **Style:** Follow PEP 8, use Black formatter and ruff (backend and agent)
 - **Type hints:** Required for all functions
 - **Docstrings:** Use Google style
 - **Imports:** Sort with isort
@@ -122,7 +121,7 @@ def process_page(page_id: str, user_id: str) -> dict:
     pass
 ```
 
-### TypeScript (Dashboard & Agent)
+### TypeScript (Dashboard)
 - **Style:** Prettier with default config
 - **Linting:** ESLint
 - **Types:** Avoid `any`, use proper types
@@ -136,16 +135,6 @@ interface PageResult {
 
 async function processPage(pageId: string): Promise<PageResult> {
   // Implementation
-}
-```
-
-### Rust (Agent)
-- **Style:** rustfmt with default config
-- **Linting:** clippy
-
-```rust
-pub async fn upload_file(path: PathBuf, api_key: &str) -> Result<UploadResponse, Error> {
-    // Implementation
 }
 ```
 

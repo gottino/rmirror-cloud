@@ -19,21 +19,21 @@ Start the local development environment with backend, agent, and dashboard servi
 
 ### Starting All Services (default)
 
-Run these three commands in **parallel background shells**:
+Run these three commands in **parallel background shells** (paths are relative to the repository root):
 
 1. **Backend** (FastAPI on port 8000):
    ```bash
-   cd ~/Documents/Development/rmirror-cloud/backend && poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   cd backend && poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 2. **Dashboard** (Next.js on port 3000):
    ```bash
-   cd ~/Documents/Development/rmirror-cloud/dashboard && npm run dev
+   cd dashboard && npm run dev
    ```
 
 3. **Agent** (Flask web UI on port 5555):
    ```bash
-   cd ~/Documents/Development/rmirror-cloud/agent && poetry run python -m app.main --foreground --debug
+   cd agent && poetry run python -m app.main --foreground --debug
    ```
 
 ### Starting Individual Components
@@ -63,7 +63,8 @@ Report to the user:
 
 ## Prerequisites
 
-- Backend: Poetry installed, dependencies installed (`poetry install` in backend/)
+- Backend: Poetry installed, dependencies installed (`poetry install` in backend/); uses SQLite (`backend/rmirror.db`) by default
+- Dashboard needs `dashboard/.env.local` with `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` and `NEXT_PUBLIC_API_URL=http://localhost:8000/v1` (see `dashboard/.env.example`)
 - Dashboard: npm installed, dependencies installed (`npm install` in dashboard/)
 - Agent: Poetry installed, dependencies installed (`poetry install` in agent/)
 
@@ -73,4 +74,4 @@ Report to the user:
 |-----------|------|------------------------------|
 | Backend   | 8000 | http://localhost:8000        |
 | Dashboard | 3000 | http://localhost:3000        |
-| Agent     | 9090 | http://localhost:5555        |
+| Agent     | 5555 | http://localhost:5555        |
