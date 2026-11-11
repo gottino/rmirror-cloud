@@ -1,6 +1,5 @@
 """Menu bar application using rumps."""
 
-import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +7,10 @@ import rumps
 
 from app.browser_utils import launch_browser_app_mode
 from app.config import Config
+from app.tray.status import StatusRelay
+
+# How often the main thread applies status text posted from other threads
+STATUS_FLUSH_SECONDS = 0.25
 
 
 class TrayApp(rumps.App):
@@ -33,6 +36,12 @@ class TrayApp(rumps.App):
         # Create status menu item
         self.status_item = rumps.MenuItem("Status: Starting...")
 
+        # update_status() is called from other threads; AppKit objects may only
+        # be touched on the main thread, so a rumps timer (main thread) applies
+        # the newest posted text.
+        self._status_relay = StatusRelay(self._apply_status)
+        self._status_timer = rumps.Timer(self._flush_status, STATUS_FLUSH_SECONDS)
+
         # Build menu
         self.menu = [
             self.status_item,
@@ -45,9 +54,23 @@ class TrayApp(rumps.App):
         ]
 
     def update_status(self, status: str) -> None:
-        """Update the status displayed in the menu."""
+        """Update the status displayed in the menu. Safe to call from any thread."""
         self.status = status
+        self._status_relay.post(status)
+
+    def _apply_status(self, status: str) -> None:
+        """Show status in the menu (main thread only)."""
         self.status_item.title = f"Status: {status}"
+
+    def _flush_status(self, sender: object = None) -> None:
+        """rumps timer callback (main thread): apply the newest posted status."""
+        self._status_relay.flush()
+
+    def run(self, **options: object) -> None:
+        """Start the status timer and run the app (blocks; main thread)."""
+        self._flush_status()
+        self._status_timer.start()
+        super().run(**options)
 
     def update_sync_count(self, count: int) -> None:
         """Update the sync count."""
@@ -72,15 +95,9 @@ class TrayApp(rumps.App):
         """Quit the application."""
         import os
 
-        # Stop the agent if it exists
+        # Stop the agent (watcher, HTTP client, event loop thread) if it exists
         if self.agent:
-            # Create a new event loop for cleanup
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(self.agent.stop())
-            finally:
-                loop.close()
+            self.agent.shutdown()
 
         # Quit the rumps application
         rumps.quit_application()

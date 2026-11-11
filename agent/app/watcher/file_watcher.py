@@ -158,17 +158,10 @@ class ReMarkableEventHandler(FileSystemEventHandler):
 
         print(f"📝 Detected change: {file_path.name} (UUID: {notebook_uuid}, type: {file_type})")
 
-        # Add to sync queue using the same pattern as rm-int-src
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._handle_file_change(file_path, notebook_uuid, file_type))
-        except RuntimeError:
-            # No event loop running - create a new one for this operation
-            asyncio.run(self._handle_file_change(file_path, notebook_uuid, file_type))
-
-    async def _handle_file_change(self, file_path: Path, notebook_uuid: str, file_type: str):
-        """Handle file change asynchronously."""
-        await self.sync_queue.add(file_path, notebook_uuid, file_type)
+        # Hand the change to the sync queue. This runs on the watchdog thread;
+        # note_change() only touches a lock-guarded dict, so no event loop is
+        # needed here (the queue worker on the agent loop picks it up).
+        self.sync_queue.note_change(file_path, notebook_uuid, file_type)
 
 
 def scan_for_changes(

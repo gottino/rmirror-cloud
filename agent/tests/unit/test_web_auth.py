@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
+from app.agent_loop import AgentLoop
 from app.config import Config
 from app.logging_config import RedactQuerySecretsFilter
 from app.sync.cloud_sync import CloudSync
@@ -41,8 +42,16 @@ def cloud_sync(config):
 
 
 @pytest.fixture
-def app(config, cloud_sync):
-    flask_app = create_app(config, cloud_sync, agent=None)
+def agent_loop():
+    loop = AgentLoop()
+    loop.start()
+    yield loop
+    loop.stop()
+
+
+@pytest.fixture
+def app(config, cloud_sync, agent_loop):
+    flask_app = create_app(config, cloud_sync, agent=None, agent_loop=agent_loop)
     flask_app.config["TESTING"] = True
     return flask_app
 

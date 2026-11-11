@@ -3,7 +3,6 @@ Tests for the start-up rescan (scan_for_changes), the first-run baseline rule,
 and recording initial-sync uploads in the manifest.
 """
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -177,7 +176,7 @@ class TestWatcherEvents:
         added = []
 
         class Recorder:
-            async def add(self, file_path, notebook_uuid, file_type):
+            def note_change(self, file_path, notebook_uuid, file_type):
                 added.append((file_path, notebook_uuid, file_type))
                 return True
 
@@ -238,8 +237,7 @@ class TestWatcherEvents:
             handler.on_any_event(FileMovedEvent(str(source / "tmp"), str(path)))
             now[0] += 0.1
 
-        # Called from inside a running loop, the handler schedules add() as tasks
-        await asyncio.sleep(0)
+        # The handler notes changes synchronously (no event loop needed)
         now[0] += config.sync.cooldown_seconds
         stats = await sync_queue._run_once()
         assert stats["uploaded"] == 2
