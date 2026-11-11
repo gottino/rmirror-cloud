@@ -29,7 +29,7 @@ Focus on WHAT changed and WHY, not personal details.
 
 **Bad:**
 ```
-fix: update deploy script for 167.235.74.51
+fix: update deploy script for <server-ip>
 ```
 
 **Good:**
