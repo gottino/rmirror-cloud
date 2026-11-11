@@ -90,8 +90,23 @@ class TodoistSyncTarget(SyncTarget):
                 response.raise_for_status()
                 task_data = response.json()
                 task_id = str(task_data["id"])
+                self.logger.info(f"Created Todoist task: {task_id} - '{todo_text[:50]}'")
 
-            self.logger.info(f"Created Todoist task: {task_id} - '{todo_text[:50]}'")
+                completed = bool(todo_data.get("completed"))
+                if completed:
+                    # A checked box arrives as a completed (closed) task.
+                    error = await self._set_completed(client, task_id, True)
+                    if error:
+                        # The task exists: report its id so the worker records
+                        # it (as open) and the retry closes it instead of
+                        # creating a second task.
+                        return SyncResult(
+                            status=SyncStatus.RETRY,
+                            target_id=task_id,
+                            error_message=f"Created task but could not close it: {error}",
+                            metadata={"completed": False},
+                        )
+
             return SyncResult(
                 status=SyncStatus.SUCCESS,
                 target_id=task_id,
@@ -99,6 +114,7 @@ class TodoistSyncTarget(SyncTarget):
                     "action": "task_created",
                     "project_id": self.project_id,
                     "labels": labels,
+                    "completed": completed,
                 },
             )
 
@@ -133,25 +149,63 @@ class TodoistSyncTarget(SyncTarget):
             "description": "\n".join(description_parts),
         }
 
+        completed = bool(todo_data.get("completed"))
+        previous_completed = bool(todo_data.get("previous_completed", False))
+
         try:
             async with httpx.AsyncClient() as client:
+                if previous_completed and not completed:
+                    # Reopen first: a closed task is reopened, then updated.
+                    error = await self._set_completed(client, external_id, False)
+                    if error:
+                        return SyncResult(status=SyncStatus.RETRY, error_message=error)
+
                 response = await client.post(
                     f"{TODOIST_API_URL}/tasks/{external_id}",
                     headers=self._headers(),
                     json=payload,
                 )
+                if response.status_code == 429:
+                    return SyncResult(
+                        status=SyncStatus.RETRY,
+                        error_message="Rate limited by Todoist",
+                    )
                 response.raise_for_status()
+
+                if completed and not previous_completed:
+                    error = await self._set_completed(client, external_id, True)
+                    if error:
+                        return SyncResult(status=SyncStatus.RETRY, error_message=error)
 
             self.logger.info(f"Updated Todoist task: {external_id}")
             return SyncResult(
                 status=SyncStatus.SUCCESS,
                 target_id=external_id,
-                metadata={"action": "updated"},
+                metadata={"action": "updated", "completed": completed},
             )
 
         except Exception as e:
             self.logger.error(f"Error updating Todoist task: {e}")
             return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
+
+    async def _set_completed(
+        self, client: httpx.AsyncClient, task_id: str, completed: bool
+    ) -> Optional[str]:
+        """Close (completed) or reopen a task. Returns an error message, or None."""
+        action = "close" if completed else "reopen"
+        try:
+            response = await client.post(
+                f"{TODOIST_API_URL}/tasks/{task_id}/{action}",
+                headers=self._headers(),
+            )
+            if response.status_code == 429:
+                return "Rate limited by Todoist"
+            response.raise_for_status()
+        except Exception as e:
+            self.logger.error(f"Could not {action} Todoist task {task_id}: {e}")
+            return f"Could not {action} task: {e}"
+        self.logger.info(f"Todoist task {task_id}: {action}d")
+        return None
 
     async def delete_item(self, external_id: str) -> SyncResult:
         """Delete a Todoist task."""

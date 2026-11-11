@@ -8,10 +8,12 @@ from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.integrations.registry import PAGE_TEXT, TODO, supports
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
+from app.services.sync_queue import queue_stored_todos
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +180,19 @@ async def trigger_initial_sync(
         - notebooks_created: Number of notebook pages created in Notion
     """
     logger.info(f"Triggering initial sync for user {user_id} to {target_name}")
+
+    if not supports(target_name, PAGE_TEXT):
+        # A todo target (notion-todos) gets the user's stored todos, not pages.
+        queued = (
+            queue_stored_todos(db, user_id, [target_name]) if supports(target_name, TODO) else 0
+        )
+        logger.info(f"Initial sync for user {user_id} to {target_name}: queued {queued} todos")
+        return {
+            "queued_count": queued,
+            "skipped_count": 0,
+            "total_pages": 0,
+            "notebooks_created": 0,
+        }
 
     pages_query = _completed_pages_query(db, user_id)
     if max_items:

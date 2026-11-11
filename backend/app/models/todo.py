@@ -7,6 +7,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
+REMOVED_FROM_PAGE = "page"
+REMOVED_BY_USER = "user"
+
 
 class Todo(Base):
     """Extracted todo items/tasks from handwritten notes.
@@ -50,6 +53,14 @@ class Todo(Base):
 
     # Position data (bounding box as JSON)
     bounding_box: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Soft removal. The todo stays in the table (and its task in Todoist or
+    # Notion is left alone) so a later extraction of the same page matches it
+    # instead of creating it again. Reasons: REMOVED_FROM_PAGE (the line is no
+    # longer on the page; undone if it comes back) and REMOVED_BY_USER (deleted
+    # in the dashboard; never undone by extraction).
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    removed_reason: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

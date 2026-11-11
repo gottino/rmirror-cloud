@@ -7,7 +7,7 @@ that create similar but slightly different todo text variations.
 
 Key features:
 1. Fuzzy string matching to detect similar todos
-2. Confidence-based replacement (keep higher confidence versions)
+2. One-to-one matching of new todos to stored ones; stored todos left unmatched are reported
 3. Positional awareness using bounding box proximity
 4. Smart similarity scoring with customizable thresholds
 """
@@ -32,7 +32,6 @@ class TodoCandidate:
     confidence: float = 1.0
     bounding_box: Optional[Dict] = None  # {x, y, width, height}
     existing_id: Optional[int] = None  # If this matches an existing todo
-    similarity_score: float = 0.0  # Similarity to existing todos
     date_extracted: Optional[str] = None
     completed: bool = False
 
@@ -213,73 +212,30 @@ class IntelligentTodoDeduplicator:
         similarities.sort(key=lambda x: x[1], reverse=True)
         return similarities
 
-    def should_replace_existing(
-        self, new_todo: TodoCandidate, existing_todo: Dict, similarity_score: float
-    ) -> bool:
-        """
-        Determine if an existing todo should be replaced by a new candidate.
-
-        Replacement criteria:
-        1. New todo has higher confidence (even minimal improvement)
-        2. Similarity is high (> 0.85) and confidence is equal or better
-        3. New todo appears to be OCR improvement based on common patterns
-        """
-        existing_confidence = existing_todo.get("confidence", 0.0)
-
-        # Replace if new todo has any confidence improvement with high similarity
-        if similarity_score > 0.85 and new_todo.confidence > existing_confidence:
-            logger.debug(
-                f"Replacing due to confidence improvement: {existing_confidence:.2f} -> {new_todo.confidence:.2f} (similarity: {similarity_score:.3f})"
-            )
-            return True
-
-        # Replace if similarity is very high even with equal confidence
-        if similarity_score > 0.95:
-            logger.debug(
-                f"Replacing due to very high similarity ({similarity_score:.3f})"
-            )
-            return True
-
-        # Check if this looks like an OCR pattern improvement
-        if similarity_score > 0.85:
-            # Check if the new todo corrects common OCR patterns
-            existing_text = existing_todo.get("text", "").lower()
-            new_text = new_todo.text.lower()
-
-            # Pattern improvements (these suggest better OCR)
-            improvements = [
-                ("rn", "m"),  # rn often misread as m
-                ("cl", "d"),  # cl often misread as d
-                ("ii", "n"),  # double i as n
-                ("rnii", "mn"),  # complex cases
-            ]
-
-            for bad_pattern, good_pattern in improvements:
-                if bad_pattern in existing_text and good_pattern in new_text:
-                    # Allow small confidence drop for pattern improvements
-                    if new_todo.confidence >= existing_confidence - 0.05:
-                        logger.debug(
-                            f"Replacing due to OCR pattern improvement: {bad_pattern} -> {good_pattern}"
-                        )
-                        return True
-
-        return False
-
     def deduplicate_todos_for_page(
         self, new_todos: List[TodoCandidate], existing_todos: List[Dict]
     ) -> Tuple[List[TodoCandidate], List[int]]:
         """
-        Deduplicate new todos against existing ones for a specific page.
+        Match a page's newly extracted todos against its stored ones.
+
+        Each stored todo is matched by at most one new todo (the first similar
+        one), so two identical lines stay two todos.
 
         Returns:
-            - List of todos to insert/update
-            - List of existing todo IDs to delete
+            - Every new todo. One that matched a stored todo (the same todo,
+              possibly with changed text) has ``existing_id`` set.
+            - IDs of stored todos no new todo matched: they are no longer on
+              the page.
         """
         final_todos = []
-        todos_to_delete = []
+        matched_ids = set()
 
         for new_todo in new_todos:
-            similar_todos = self.find_similar_todos(new_todo, existing_todos)
+            similar_todos = [
+                (existing, score)
+                for existing, score in self.find_similar_todos(new_todo, existing_todos)
+                if existing.get("id") not in matched_ids
+            ]
 
             if not similar_todos:
                 # No similar todos found, add as new
@@ -289,21 +245,19 @@ class IntelligentTodoDeduplicator:
 
             # Find best match
             best_match, best_similarity = similar_todos[0]
+            new_todo.existing_id = best_match.get("id")
+            matched_ids.add(new_todo.existing_id)
 
-            if self.should_replace_existing(new_todo, best_match, best_similarity):
-                # Replace existing todo
-                new_todo.existing_id = best_match.get("id")
-                final_todos.append(new_todo)
-                logger.info(
-                    f"Replacing todo (similarity: {best_similarity:.3f}): '{best_match.get('text', '')[:50]}...' -> '{new_todo.text[:50]}...'"
-                )
-            else:
-                # Keep existing todo, skip new one
-                logger.info(
-                    f"Keeping existing todo (similarity: {best_similarity:.3f}): '{best_match.get('text', '')[:50]}...'"
-                )
-                continue
+            logger.debug(
+                f"Matched todo (similarity: {best_similarity:.3f}): '{best_match.get('text', '')[:50]}...' -> '{new_todo.text[:50]}...'"
+            )
+            final_todos.append(new_todo)
 
+        todos_to_delete = [
+            existing["id"]
+            for existing in existing_todos
+            if existing.get("id") is not None and existing["id"] not in matched_ids
+        ]
         return final_todos, todos_to_delete
 
 
