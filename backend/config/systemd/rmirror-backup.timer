@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the rMirror database backup daily
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=30min
+Persistent=true
+Unit=rmirror-backup.service
+
+[Install]
+WantedBy=timers.target
