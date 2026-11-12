@@ -99,6 +99,8 @@ test_data/
 
 # Database dumps and migration scripts
 backend/dumps/
+# Commit recorded by backend/scripts/deploy.sh for /health
+backend/.deploy-commit
 backend/migrate_to_production*.py
 scripts/
 rm-irror-design-system/
