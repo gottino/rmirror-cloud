@@ -60,7 +60,20 @@ echo ""
 echo -e "${YELLOW}1/8 Creating database backup...${NC}"
 mkdir -p "$BACKUP_DIR"
 BACKUP_FILE="$BACKUP_DIR/rmirror_$(date +%Y%m%d_%H%M%S).sql.gz"
-sudo -u postgres pg_dump rmirror | gzip > "$BACKUP_FILE"
+# pipefail: a failing pg_dump must not be hidden by gzip's exit status
+set -o pipefail
+if ! sudo -u postgres pg_dump rmirror | gzip > "$BACKUP_FILE"; then
+    rm -f "$BACKUP_FILE"
+    echo -e "${RED}❌ Database backup failed; aborting deploy${NC}"
+    exit 1
+fi
+BACKUP_SIZE=$(stat -c %s "$BACKUP_FILE")
+if [ "$BACKUP_SIZE" -lt 1024 ]; then
+    rm -f "$BACKUP_FILE"
+    echo -e "${RED}❌ Database backup is empty or too small ($BACKUP_SIZE bytes); aborting deploy${NC}"
+    exit 1
+fi
+find "$BACKUP_DIR" -maxdepth 1 -name 'rmirror_*.sql.gz' -mtime +14 -delete
 echo -e "${GREEN}✅ Database backed up to: $BACKUP_FILE${NC}"
 echo ""
 

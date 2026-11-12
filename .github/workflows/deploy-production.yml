@@ -97,8 +97,26 @@ jobs:
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
         run: |
-          ssh -i ~/.ssh/deploy_key -p $SERVER_PORT $SERVER_USER@$SERVER_HOST \
-            "sudo -u postgres pg_dump rmirror | gzip > /var/backups/rmirror/pre-deploy-\$(date +%Y%m%d_%H%M%S).sql.gz" || echo "Backup warning - continuing deployment"
+          # The script runs in a REMOTE bash (quoted heredoc: nothing is expanded
+          # locally). Any failure makes ssh exit non-zero and stops the deploy.
+          ssh -i ~/.ssh/deploy_key -p $SERVER_PORT $SERVER_USER@$SERVER_HOST 'bash -s' <<'REMOTE_EOF'
+          set -euo pipefail
+          dir=/var/backups/rmirror
+          file="$dir/pre-deploy-$(date +%Y%m%d_%H%M%S).sql.gz"
+          if ! sudo -n -u postgres pg_dump rmirror | gzip > "$file"; then
+            rm -f "$file"
+            echo "pg_dump failed; aborting deploy" >&2
+            exit 1
+          fi
+          size=$(stat -c %s "$file")
+          if [ "$size" -lt 1024 ]; then
+            rm -f "$file"
+            echo "pre-deploy dump is empty or too small ($size bytes); aborting deploy" >&2
+            exit 1
+          fi
+          echo "Pre-deploy dump OK ($size bytes)"
+          find "$dir" -maxdepth 1 -name 'pre-deploy-*.sql.gz' -mtime +14 -delete
+          REMOTE_EOF
 
       - name: Deploy to server
         env:
