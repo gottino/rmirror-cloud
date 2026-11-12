@@ -34,6 +34,7 @@ PLACEHOLDERS = {
     "postgres_user": "rmirror",
     "postgres_password": "change-me",
     "redis_url": "redis://localhost:6379/0",
+    "storage_backend": "local",
     "s3_endpoint_url": "http://localhost:9000",
     "s3_access_key": "your-s3-access-key",
     "s3_secret_key": "your-s3-secret-key",

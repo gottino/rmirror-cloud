@@ -156,8 +156,8 @@ ssh deploy@YOUR_SERVER_IP
 cd /var/www/rmirror-cloud
 ./deploy.sh
 
-# Or deploy specific branch
-./deploy.sh develop
+# Or deploy a specific commit (must be on origin/main)
+./backend/scripts/deploy.sh <commit-sha>
 ```
 
 **Use this when:**
@@ -171,22 +171,21 @@ cd /var/www/rmirror-cloud
 
 ### 8-Step Deployment Process
 
-1. **Database Backup** - Creates timestamped PostgreSQL backup
-2. **Pull Code** - Gets latest code from git
-3. **Install Dependencies** - Runs `poetry install`
-4. **Run Migrations** - Applies database changes with Alembic
-5. **Check Config** - Verifies environment variables
-6. **Run Tests** - Optional test suite (if present)
-7. **Restart Service** - Restarts systemd service
-8. **Health Check** - Verifies app is responding
+1. **Check Config** - `scripts/check_config.py`; aborts before any change if a required setting is missing
+2. **Database Backup** - Creates timestamped PostgreSQL backup
+3. **Check Out Commit** - The given SHA (detached), or origin/main with a warning
+4. **Install Dependencies** - Runs `poetry install`
+5. **Run Migrations** - Applies database changes with Alembic
+6. **Restart Service** - Restarts systemd service
+7. **Health Check** - Polls /health for up to 60s; on failure the previous commit is restored and restarted
+8. **Dashboard** - Installs the prebuilt dashboard (no tests run on the server; CI gates the workflow)
 
 ### Safety Features
 
 - ✅ **Zero-downtime**: Service restart is fast (~2 seconds)
-- ✅ **Automatic rollback**: Easy to revert to previous commit
+- ✅ **Automatic rollback**: Previous commit restored if migration, restart or health check fails (migrations are not undone)
 - ✅ **Database backup**: Before every deployment
 - ✅ **Health checks**: Fails if app doesn't start
-- ✅ **Test validation**: Aborts if tests fail
 
 ---
 
@@ -200,8 +199,7 @@ If something goes wrong, rollback is simple:
 # On server
 cd /var/www/rmirror-cloud
 git log --oneline -5  # Find commit to rollback to
-git checkout COMMIT_HASH
-./deploy.sh
+./backend/scripts/deploy.sh COMMIT_HASH
 ```
 
 ### Option 2: Rollback Database Only
@@ -329,13 +327,7 @@ Add Slack/Discord notifications to GitHub Actions:
 
 ### Skip Tests in Emergency
 
-Edit `deploy.sh` on server, comment out the test step:
-
-```bash
-# 6. Run tests (optional)
-# echo -e "${YELLOW}6/8 Running tests...${NC}"
-# ...skip tests...
-```
+`deploy.sh` no longer runs tests on the server; CI runs them before the deploy workflows.
 
 ### Custom Post-Deployment Tasks
 
