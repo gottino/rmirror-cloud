@@ -86,7 +86,8 @@ class Settings(BaseSettings):
         # Default to SQLite
         return "sqlite:///./rmirror.db"
 
-    # S3/MinIO Storage (optional - uses local storage if not configured)
+    # S3/MinIO Storage. Outside debug, local storage needs STORAGE_BACKEND=local.
+    storage_backend: Optional[str] = None  # "s3" or "local"; unset = S3 if configured
     s3_endpoint_url: Optional[str] = None
     s3_access_key: Optional[str] = None
     s3_secret_key: Optional[str] = None
@@ -237,6 +238,81 @@ def check_insecure_flags(settings: "Settings") -> None:
         "!!! INSECURE DEVELOPMENT SETTINGS ENABLED: %s. "
         "Never use these outside local development. !!!",
         names,
+    )
+
+
+# Settings that must be set outside debug mode (environment variable names).
+# This is the single list used by the start-up check and scripts/check_config.py.
+REQUIRED_OUTSIDE_DEBUG = [
+    "SECRET_KEY",
+    "CLERK_JWKS_URL",
+    "CLERK_SECRET_KEY",
+    "CLERK_WEBHOOK_SECRET",
+    "GOOGLE_AI_API_KEY",
+    "INTEGRATION_MASTER_KEY",
+]
+
+# Required unless STORAGE_BACKEND=local.
+REQUIRED_FOR_S3 = [
+    "S3_ENDPOINT_URL",
+    "S3_ACCESS_KEY",
+    "S3_SECRET_KEY",
+    "S3_BUCKET_NAME",
+]
+
+# Integrations without an on/off switch: switched on by setting any of their
+# values, after which all of them are required.
+INTEGRATION_GROUPS = {
+    "Notion": ["NOTION_CLIENT_ID", "NOTION_CLIENT_SECRET", "NOTION_REDIRECT_URI"],
+    "Todoist": ["TODOIST_CLIENT_ID", "TODOIST_CLIENT_SECRET", "TODOIST_REDIRECT_URI"],
+}
+
+
+def _is_unset(settings, name: str) -> bool:
+    value = getattr(settings, name.lower(), None)
+    return value is None or not str(value).strip()
+
+
+def config_problems(settings) -> tuple[list[str], list[str]]:
+    """Return (missing, warnings) for the settings a non-debug run needs.
+
+    Only setting NAMES are returned, never values. `missing` makes start-up
+    fail outside debug; `warnings` are optional features that are not set up.
+    """
+    missing = [n for n in REQUIRED_OUTSIDE_DEBUG if _is_unset(settings, n)]
+
+    backend = (settings.storage_backend or "").strip().lower()
+    if backend not in ("", "s3", "local"):
+        missing.append("STORAGE_BACKEND (must be 's3' or 'local')")
+    elif backend != "local":
+        missing.extend(n for n in REQUIRED_FOR_S3 if _is_unset(settings, n))
+
+    warnings = []
+    if _is_unset(settings, "RESEND_API_KEY"):
+        warnings.append("RESEND_API_KEY (email is disabled)")
+    for label, names in INTEGRATION_GROUPS.items():
+        unset = [n for n in names if _is_unset(settings, n)]
+        if len(unset) == len(names):
+            warnings.append(f"{label} integration is not configured")
+        else:
+            missing.extend(unset)
+    return missing, warnings
+
+
+def validate_startup(settings, logger) -> None:
+    """Fail start-up outside debug when required settings are missing."""
+    missing, warnings = config_problems(settings)
+    if warnings:
+        logger.warning("Optional features not configured: %s", "; ".join(warnings))
+    if not missing:
+        return
+    names = ", ".join(missing)
+    if settings.debug:
+        logger.warning("Debug mode: continuing with missing settings: %s", names)
+        return
+    raise RuntimeError(
+        f"Missing or invalid settings: {names}. Set them in the environment or "
+        ".env (see .env.example), or set DEBUG=true for local development."
     )
 
 
