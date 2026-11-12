@@ -298,6 +298,39 @@ poetry run alembic downgrade -1
 poetry run alembic current
 ```
 
+### Minimal Mode (backend only, one outside account)
+
+The smallest working backend needs SQLite, local file storage and a Google AI
+(Gemini) key. No Clerk, S3, email or integration accounts. This is for trying
+the API on your own machine: with `DEBUG=true` and no Clerk settings, token
+signatures are not verified, so never expose it to a network.
+
+```bash
+cd backend
+poetry install
+cp .env.example .env
+# In .env set: DEBUG=true, STORAGE_BACKEND=local, SECRET_KEY, GOOGLE_AI_API_KEY
+# (DATABASE_URL=sqlite:///./rmirror.db is already the default)
+
+# Create the tables (alembic upgrade does not run on SQLite) and mark them current
+poetry run python -c "import app.models; from app.database import Base, engine; Base.metadata.create_all(engine)"
+poetry run alembic stamp head
+
+poetry run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Check `http://localhost:8000/health`. Uploaded files go to `backend/storage/`.
+
+**What start-up checks:** with `DEBUG=false` the backend refuses to start and
+lists every missing setting by name (never the values): `GOOGLE_AI_API_KEY`,
+`CLERK_JWKS_URL`, `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SECRET`,
+`INTEGRATION_MASTER_KEY` and either the four `S3_*` settings or
+`STORAGE_BACKEND=local`. Email (`RESEND_API_KEY`) and the Notion and Todoist
+integrations are optional and only logged as warnings when unset; an
+integration with some but not all of its settings is an error. In debug mode
+everything is a warning. `backend/scripts/check_config.py` runs the same check
+before a deploy.
+
 ### Dashboard Setup
 
 ```bash

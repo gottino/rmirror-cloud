@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api import api_router
-from app.config import get_settings
+from app.config import get_settings, validate_startup
 from app.database import get_db
 from app.logging_config import configure_logging
 from app.middleware.rate_limit import get_rate_limit_key
@@ -52,6 +52,7 @@ limiter = Limiter(key_func=get_rate_limit_key)
 async def lifespan(app: FastAPI):
     """Handle application lifecycle events."""
     # Startup
+    validate_startup(settings, logger)
     logger.info("Starting rMirror Cloud API")
 
     # Start background sync worker
