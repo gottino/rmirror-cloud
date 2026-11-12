@@ -86,7 +86,8 @@ jobs:
 
           echo "=== Pulling latest code ==="
           git fetch origin main
-          git reset --hard origin/main
+          git checkout --force --detach ${{ github.sha }}
+          git rev-parse HEAD > backend/.deploy-commit  # reported by /health
 
           echo "=== Creating backend .env ==="
           cat > backend/.env << 'ENVEOF'
@@ -96,20 +97,20 @@ jobs:
           CLERK_SECRET_KEY=${{ secrets.STAGING_CLERK_SECRET_KEY }}
           CLERK_WEBHOOK_SECRET=${{ secrets.STAGING_CLERK_WEBHOOK_SECRET }}
           CLERK_JWKS_URL=${{ secrets.STAGING_CLERK_JWKS_URL }}
-          GOOGLE_AI_API_KEY=${{ secrets.GOOGLE_AI_API_KEY }}
+          GOOGLE_AI_API_KEY=${{ secrets.STAGING_GOOGLE_AI_API_KEY || secrets.GOOGLE_AI_API_KEY }}
           S3_ENDPOINT_URL=${{ secrets.B2_ENDPOINT_URL }}
-          S3_ACCESS_KEY=${{ secrets.B2_ACCESS_KEY_ID }}
-          S3_SECRET_KEY=${{ secrets.B2_SECRET_ACCESS_KEY }}
-          S3_BUCKET_NAME=${{ secrets.B2_BUCKET_NAME }}
+          S3_ACCESS_KEY=${{ secrets.STAGING_B2_ACCESS_KEY_ID || secrets.B2_ACCESS_KEY_ID }}
+          S3_SECRET_KEY=${{ secrets.STAGING_B2_SECRET_ACCESS_KEY || secrets.B2_SECRET_ACCESS_KEY }}
+          S3_BUCKET_NAME=${{ secrets.STAGING_B2_BUCKET_NAME || secrets.B2_BUCKET_NAME }}
           S3_REGION=${{ secrets.B2_REGION }}
           S3_KEY_PREFIX=staging/
-          NOTION_CLIENT_ID=${{ secrets.NOTION_CLIENT_ID }}
-          NOTION_CLIENT_SECRET=${{ secrets.NOTION_CLIENT_SECRET }}
+          NOTION_CLIENT_ID=${{ secrets.STAGING_NOTION_CLIENT_ID || secrets.NOTION_CLIENT_ID }}
+          NOTION_CLIENT_SECRET=${{ secrets.STAGING_NOTION_CLIENT_SECRET || secrets.NOTION_CLIENT_SECRET }}
           NOTION_REDIRECT_URI=https://staging.rmirror.io/integrations/notion/callback
-          TODOIST_CLIENT_ID=${{ secrets.TODOIST_CLIENT_ID }}
-          TODOIST_CLIENT_SECRET=${{ secrets.TODOIST_CLIENT_SECRET }}
+          TODOIST_CLIENT_ID=${{ secrets.STAGING_TODOIST_CLIENT_ID || secrets.TODOIST_CLIENT_ID }}
+          TODOIST_CLIENT_SECRET=${{ secrets.STAGING_TODOIST_CLIENT_SECRET || secrets.TODOIST_CLIENT_SECRET }}
           TODOIST_REDIRECT_URI=https://staging.rmirror.io/integrations/todoist/callback
-          RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+          RESEND_API_KEY=${{ secrets.STAGING_RESEND_API_KEY || secrets.RESEND_API_KEY }}
           INTEGRATION_MASTER_KEY=${{ secrets.STAGING_INTEGRATION_MASTER_KEY }}
           ADMIN_USER_IDS=${{ secrets.ADMIN_USER_IDS }}
           CLERK_PUBLISHABLE_KEY=${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
