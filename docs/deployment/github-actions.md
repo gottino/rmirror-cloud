@@ -8,10 +8,10 @@ This guide walks you through setting up automated deployment to your Hetzner pro
 
 When a deployment runs (on push to `main` for staging, or a manual run for production), GitHub Actions will:
 1. Connect to your Hetzner server via SSH
-2. Pull the latest code
+2. Check out the exact commit of the workflow run (production) and check the config
 3. Install dependencies
 4. Run database migrations
-5. Run tests
+5. (no tests on the server; CI runs them before the deploy)
 6. Restart the application
 7. Perform health checks
 
@@ -232,13 +232,13 @@ The deployment will go through these stages:
 ### 6.3 What Happens on the Server
 
 The `deploy.sh` script will:
-1. Backup database
-2. Pull latest code from git
-3. Install dependencies (poetry)
-4. Run database migrations (alembic)
-5. Run tests (pytest)
+1. Check the config of the commit it was given (`deploy.sh <sha>`; aborts before any change if a required setting is missing)
+2. Backup database
+3. Check out that commit (detached)
+4. Install dependencies (poetry)
+5. Run database migrations (alembic)
 6. Restart application (systemd)
-7. Health check (curl to /health)
+7. Health check (polls /health for up to 60s); on failure it checks the previous commit out again and restarts it (migrations are not undone)
 
 ## Step 7: Manual Deployment (Optional)
 

@@ -443,3 +443,66 @@ class TestHealthEndpoint:
             assert data["database"] == "error"
         finally:
             app.dependency_overrides.clear()
+
+
+class TestHealthCommit:
+    """The /health JSON reports the deployed git commit."""
+
+    SHA = "0123456789abcdef0123456789abcdef01234567"
+
+    def _health(self, db: Session) -> dict:
+        from app.main import app
+
+        def override_get_db():
+            yield db
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            return TestClient(app).get("/health").json()
+        finally:
+            app.dependency_overrides.clear()
+
+    def _reset(self):
+        from app.main import deployed_commit
+
+        deployed_commit.cache_clear()
+
+    def test_commit_from_env(self, db: Session, monkeypatch):
+        monkeypatch.setenv("DEPLOY_COMMIT", self.SHA)
+        self._reset()
+        try:
+            assert self._health(db)["commit"] == self.SHA
+        finally:
+            self._reset()
+
+    def test_commit_from_file(self, db: Session, monkeypatch, tmp_path):
+        import app.main as main
+
+        commit_file = tmp_path / ".deploy-commit"
+        commit_file.write_text(self.SHA + "\n")
+        monkeypatch.delenv("DEPLOY_COMMIT", raising=False)
+        monkeypatch.setattr(main, "DEPLOY_COMMIT_FILE", commit_file)
+        self._reset()
+        try:
+            assert self._health(db)["commit"] == self.SHA
+        finally:
+            self._reset()
+
+    def test_commit_unknown_without_file_or_env(self, db: Session, monkeypatch, tmp_path):
+        import app.main as main
+
+        monkeypatch.delenv("DEPLOY_COMMIT", raising=False)
+        monkeypatch.setattr(main, "DEPLOY_COMMIT_FILE", tmp_path / "missing")
+        self._reset()
+        try:
+            assert self._health(db)["commit"] == "unknown"
+        finally:
+            self._reset()
+
+    def test_non_sha_value_is_not_echoed(self, db: Session, monkeypatch):
+        monkeypatch.setenv("DEPLOY_COMMIT", "<script>")
+        self._reset()
+        try:
+            assert self._health(db)["commit"] == "unknown"
+        finally:
+            self._reset()
