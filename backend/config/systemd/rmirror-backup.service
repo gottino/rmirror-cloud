@@ -1,0 +1,16 @@
+# Nightly database backup. Install to /etc/systemd/system/ (see docs/deployment/backups.md).
+[Unit]
+Description=rMirror nightly database backup
+After=postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User=deploy
+# Create this file yourself (mode 600, owner deploy). It is not in the repository.
+# Variables are documented at the top of backend/scripts/backup-db.sh.
+EnvironmentFile=/etc/rmirror/backup.env
+# Path of the checked-out repository on the server.
+ExecStart=/var/www/rmirror-cloud/backend/scripts/backup-db.sh
+Nice=10
+IOSchedulingClass=idle
