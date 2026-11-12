@@ -7,6 +7,7 @@ Provides fixtures for:
 - Test data factories
 """
 
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Generator
@@ -16,6 +17,11 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+
+# Tests store files on local disk (explicit outside debug).
+os.environ.setdefault("STORAGE_BACKEND", "local")
+# The real app lifespan validates settings; tests run in debug mode.
+os.environ.setdefault("DEBUG", "true")
 
 from app.database import Base
 from app.models.notebook import Notebook
