@@ -526,15 +526,10 @@ sudo tail -f /var/log/postgresql/postgresql-16-main.log
 ```bash
 # Manual backup
 sudo -u postgres pg_dump rmirror > backup_$(date +%Y%m%d).sql
-
-# Automated daily backups (add to cron)
-sudo crontab -e
 ```
 
-Add:
-```
-0 2 * * * sudo -u postgres pg_dump rmirror | gzip > /var/backups/rmirror_$(date +\%Y\%m\%d).sql.gz
-```
+Nightly off-site backups (systemd timer), the restore drill, swap and monitoring
+are covered in [backups.md](backups.md).
 
 ### Monitor Resource Usage
 
@@ -626,7 +621,7 @@ sudo tail -f /var/log/nginx/error.log
 
 1. **Setup monitoring**: Add health check endpoint and use Uptime Robot (free)
 2. **Add logging**: Consider Papertrail or Logtail for centralized logging
-3. **Backup automation**: Setup automated backups to Hetzner Storage Box
+3. **Backups and monitoring**: follow [backups.md](backups.md)
 4. **CI/CD**: Setup GitHub Actions for automated deployment
 5. **Scaling**: Background jobs run in the FastAPI process (database-backed queue); add workers or split the sync worker out if the queue backs up
 
