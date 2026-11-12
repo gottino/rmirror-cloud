@@ -86,7 +86,8 @@ jobs:
 
           echo "=== Pulling latest code ==="
           git fetch origin main
-          git reset --hard origin/main
+          git checkout --force --detach ${{ github.sha }}
+          git rev-parse HEAD > backend/.deploy-commit  # reported by /health
 
           echo "=== Creating backend .env ==="
           cat > backend/.env << 'ENVEOF'
