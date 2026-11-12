@@ -149,7 +149,7 @@ if sudo systemctl is-active --quiet "$SERVICE_NAME"; then
 else
     echo -e "${RED}❌ Service failed to start!${NC}"
     echo -e "${RED}   Checking logs...${NC}"
-    sudo journalctl -u "$SERVICE_NAME" -n 20 --no-pager
+    sudo journalctl -u "$SERVICE_NAME" --no-pager -n 200
     exit 1
 fi
 echo ""
