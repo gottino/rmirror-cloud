@@ -1,0 +1,19 @@
+# Example systemd drop-in that caps memory of the backend services so that a
+# runaway process is killed instead of taking the whole 4 GB server down.
+#
+# Install one copy per unit, for example:
+#   /etc/systemd/system/rmirror.service.d/memory-limits.conf
+#   /etc/systemd/system/rmirror-staging.service.d/memory-limits.conf
+# then: sudo systemctl daemon-reload && sudo systemctl restart <unit>
+#
+# The values below are SUGGESTIONS ONLY. Production and staging share one 4 GB
+# server together with PostgreSQL, nginx and the dashboard (pm2). Measure real
+# usage first (systemctl status <unit>, systemd-cgtop) and tune them.
+# MemoryHigh throttles the service; MemoryMax is the hard limit (OOM kill).
+[Service]
+# Production (rmirror): suggestion
+MemoryHigh=1G
+MemoryMax=1300M
+# For rmirror-staging use smaller values, for example:
+# MemoryHigh=512M
+# MemoryMax=700M
