@@ -222,15 +222,16 @@ def user_with_quota():
     return create_user_with_quota
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def reset_rate_limiter():
     """Reset the rate limiter state between tests.
 
     This fixture clears the in-memory storage used by SlowAPI
-    to ensure rate limits don't persist between tests.
+    to ensure rate limits don't persist between tests. It is autouse because
+    the app shares one limiter (and a default limit on every route), so
+    requests from one test would otherwise count against the next.
     """
-    # Import the limiter from the processing module
-    from app.api.processing import limiter
+    from app.middleware.rate_limit import limiter
 
     # Clear the limiter storage before test
     if hasattr(limiter, '_storage') and limiter._storage:
