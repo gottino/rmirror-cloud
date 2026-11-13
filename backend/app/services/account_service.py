@@ -5,6 +5,7 @@ import re
 import zipfile
 from datetime import datetime
 from io import BytesIO
+from typing import BinaryIO
 
 import httpx
 from sqlalchemy.orm import Session
@@ -70,7 +71,20 @@ class AccountService:
     async def generate_data_export(
         user_id: int, db: Session, storage: StorageService
     ) -> bytes:
-        """Generate a ZIP file containing all user data."""
+        """Generate a ZIP file containing all user data, in memory.
+
+        The export endpoint uses write_data_export with a temporary file
+        instead, so a large export is not held in memory.
+        """
+        buffer = BytesIO()
+        await AccountService.write_data_export(user_id, db, storage, buffer)
+        return buffer.getvalue()
+
+    @staticmethod
+    async def write_data_export(
+        user_id: int, db: Session, storage: StorageService, fileobj: BinaryIO
+    ) -> None:
+        """Write a ZIP file containing all user data to ``fileobj``."""
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             raise ValueError("User not found")
@@ -82,8 +96,7 @@ class AccountService:
             .all()
         )
 
-        zip_buffer = BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(fileobj, "w", zipfile.ZIP_DEFLATED) as zf:
             # README
             zf.writestr(
                 "rmirror-export/README.txt",
@@ -210,8 +223,6 @@ class AccountService:
                 json.dumps(metadata, indent=2, ensure_ascii=False),
             )
 
-        zip_buffer.seek(0)
-        return zip_buffer.read()
 
     @staticmethod
     async def delete_account(

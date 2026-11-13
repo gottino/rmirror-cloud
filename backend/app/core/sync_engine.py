@@ -18,12 +18,31 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
+from enum import Enum
 from typing import Any, Dict, Optional
 
 from app.models.sync_record import SyncItemType, SyncStatus
 
 logger = logging.getLogger(__name__)
+
+
+# Wait this long after a rate limit when the provider gives no Retry-After.
+RATE_LIMIT_DEFAULT_DELAY = timedelta(seconds=30)
+
+
+class SyncErrorKind(str, Enum):
+    """Why a sync attempt failed, as classified by the target itself.
+
+    The sync worker acts on this when a target sets it, and only falls back to
+    matching the error text when it is absent.
+    """
+
+    RATE_LIMITED = "rate_limited"  # retry at retry_after; does not use up a retry
+    AUTH = "auth"  # token revoked or access removed: permanent for the item
+    PARENT_GONE = "parent_gone"  # the notebook's page in the target is archived/missing
+    PERMANENT = "permanent"  # bad request; retrying cannot help
+    TRANSIENT = "transient"  # network / provider 5xx; retry with backoff
 
 
 @dataclass
@@ -33,16 +52,13 @@ class SyncResult:
     status: SyncStatus
     target_id: Optional[str] = None  # External ID in target system
     error_message: Optional[str] = None
-    retry_after: Optional[datetime] = None
+    retry_after: Optional[datetime] = None  # naive UTC; earliest time to retry
     metadata: Dict[str, Any] = field(default_factory=dict)
+    error_kind: Optional[SyncErrorKind] = None
 
     @property
     def success(self) -> bool:
         return self.status == SyncStatus.SUCCESS
-
-    @property
-    def should_retry(self) -> bool:
-        return self.status == SyncStatus.RETRY
 
 
 @dataclass
@@ -56,18 +72,6 @@ class SyncItem:
     source_table: str  # Which table this came from
     created_at: datetime
     updated_at: datetime
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            "item_type": self.item_type.value,
-            "item_id": self.item_id,
-            "content_hash": self.content_hash,
-            "data": self.data,
-            "source_table": self.source_table,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
-        }
 
 
 class SyncTarget(ABC):
@@ -185,36 +189,6 @@ class ContentFingerprint:
     """
 
     @staticmethod
-    def for_notebook(notebook_data: Dict[str, Any]) -> str:
-        """
-        Generate content fingerprint for a notebook.
-
-        Args:
-            notebook_data: Notebook content dictionary
-
-        Returns:
-            SHA-256 hash of the normalized content
-        """
-        # Extract core content that defines uniqueness
-        title = notebook_data.get("title", notebook_data.get("notebook_name", ""))
-        text_content = notebook_data.get("text_content", "")
-        page_count = notebook_data.get("page_count", 0)
-        last_opened_at = notebook_data.get("last_opened_at", "")
-        last_modified_at = notebook_data.get("last_modified_at", "")
-
-        # Create normalized content string
-        content_parts = [
-            f"title:{title}",
-            f"pages:{page_count}",
-            f"content:{text_content[:1000]}",  # First 1000 chars to keep hash stable
-            f"last_opened:{last_opened_at}",  # Include metadata timestamps
-            f"last_modified:{last_modified_at}",
-        ]
-
-        content_str = "|".join(content_parts)
-        return hashlib.sha256(content_str.encode("utf-8")).hexdigest()
-
-    @staticmethod
     def for_notebook_metadata(notebook_data: Dict[str, Any]) -> str:
         """
         Generate content fingerprint for notebook metadata only (lightweight).
@@ -236,87 +210,15 @@ class ContentFingerprint:
         last_modified_at = notebook_data.get("last_modified_at", "")
 
         # Create normalized metadata string (no content)
+        # The notebook uuid is part of the hash: identical metadata of two
+        # notebooks must not dedupe against each other in the sync queue.
         content_parts = [
+            f"notebook:{notebook_data.get('notebook_uuid', '')}",
             f"title:{title}",
             f"pages:{page_count}",
             f"path:{full_path}",
             f"last_opened:{last_opened_at}",
             f"last_modified:{last_modified_at}",
-        ]
-
-        content_str = "|".join(content_parts)
-        return hashlib.sha256(content_str.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def for_page(page_data: Dict[str, Any]) -> str:
-        """
-        Generate content fingerprint for a single page.
-
-        Args:
-            page_data: Page content dictionary
-
-        Returns:
-            SHA-256 hash of the normalized content
-        """
-        notebook_uuid = page_data.get("notebook_uuid", "")
-        page_number = page_data.get("page_number", 0)
-        text = page_data.get("text", "")
-
-        # Create normalized content string
-        content_parts = [
-            f"notebook:{notebook_uuid}",
-            f"page:{page_number}",
-            f"text:{text}",
-        ]
-
-        content_str = "|".join(content_parts)
-        return hashlib.sha256(content_str.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def for_todo(todo_data: Dict[str, Any]) -> str:
-        """
-        Generate content fingerprint for a todo item.
-
-        Args:
-            todo_data: Todo content dictionary
-
-        Returns:
-            SHA-256 hash of the normalized content
-        """
-        text = todo_data.get("text", "")
-        notebook_uuid = todo_data.get("notebook_uuid", "")
-        page_number = todo_data.get("page_number", 0)
-
-        content_parts = [
-            f"text:{text}",
-            f"notebook:{notebook_uuid}",
-            f"page:{page_number}",
-        ]
-
-        content_str = "|".join(content_parts)
-        return hashlib.sha256(content_str.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def for_highlight(highlight_data: Dict[str, Any]) -> str:
-        """
-        Generate content fingerprint for a highlight.
-
-        Args:
-            highlight_data: Highlight content dictionary
-
-        Returns:
-            SHA-256 hash of the normalized content
-        """
-        text = highlight_data.get("text", "")
-        corrected_text = highlight_data.get("corrected_text", "")
-        source_file = highlight_data.get("source_file", "")
-        page_number = highlight_data.get("page_number", 0)
-
-        content_parts = [
-            f"text:{text}",
-            f"corrected:{corrected_text}",
-            f"source:{source_file}",
-            f"page:{page_number}",
         ]
 
         content_str = "|".join(content_parts)

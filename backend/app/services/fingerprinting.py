@@ -4,7 +4,6 @@ Generates hashes and signatures for content to detect changes and prevent duplic
 """
 
 import hashlib
-import re
 from typing import Optional
 
 
@@ -27,44 +26,6 @@ def generate_content_hash(content: str) -> str:
         True
     """
     return hashlib.sha256(content.strip().encode()).hexdigest()
-
-
-def generate_fuzzy_signature(text: str) -> str:
-    """
-    Generate fuzzy signature for approximate matching.
-
-    Creates a normalized representation of text that's resilient to:
-    - Case changes
-    - Punctuation variations
-    - Word order changes (sorted alphabetically)
-
-    Useful for detecting duplicate todos despite OCR variations.
-
-    Args:
-        text: Text to generate signature for
-
-    Returns:
-        Fuzzy signature (lowercase, no punctuation, sorted words joined by '_')
-
-    Example:
-        >>> sig1 = generate_fuzzy_signature("Buy milk!")
-        >>> sig2 = generate_fuzzy_signature("buy MILK")
-        >>> sig3 = generate_fuzzy_signature("MILK buy")
-        >>> sig1 == sig2 == sig3
-        True
-    """
-    # Lowercase
-    text_lower = text.lower()
-
-    # Remove punctuation and extra whitespace
-    text_clean = re.sub(r'[^\w\s]', '', text_lower)
-
-    # Split into words and sort
-    words = text_clean.split()
-    words_sorted = sorted(words)
-
-    # Join with underscore
-    return '_'.join(words_sorted)
 
 
 def fingerprint_page(
@@ -105,106 +66,29 @@ def fingerprint_page(
 
 def fingerprint_todo(
     todo_text: str,
-    notebook_uuid: str,
-    page_number: Optional[int] = None
-) -> tuple[str, str]:
-    """
-    Generate both content hash and fuzzy signature for a todo.
-
-    Returns both exact hash (for strict matching) and fuzzy signature
-    (for detecting OCR variations).
-
-    Args:
-        todo_text: Todo text content
-        notebook_uuid: UUID of notebook containing the todo
-        page_number: Optional page number
-
-    Returns:
-        Tuple of (content_hash, fuzzy_signature)
-
-    Example:
-        >>> hash, fuzzy = fingerprint_todo(
-        ...     todo_text="Buy milk!",
-        ...     notebook_uuid="abc-123",
-        ...     page_number=5
-        ... )
-        >>> fuzzy
-        'buy_milk'
-    """
-    # Generate fuzzy signature
-    fuzzy_sig = generate_fuzzy_signature(todo_text)
-
-    # Generate content hash including context
-    if page_number is not None:
-        content = f"{fuzzy_sig}:{notebook_uuid}:{page_number}"
-    else:
-        content = f"{fuzzy_sig}:{notebook_uuid}"
-
-    content_hash = generate_content_hash(content)
-
-    return content_hash, fuzzy_sig
-
-
-def fingerprint_highlight(
-    original_text: str,
-    corrected_text: str,
-    source_file: str,
-    page_num: int
+    completed: bool,
+    notebook_uuid: Optional[str],
+    page_number: Optional[int] = None,
 ) -> str:
-    """
-    Generate content hash for a highlight.
+    """Content hash of what a todo target shows for a todo.
 
-    Includes both original and corrected text, plus location context.
-
-    Args:
-        original_text: Original highlighted text
-        corrected_text: User-corrected text (if any)
-        source_file: Source file path or identifier
-        page_num: Page number
-
-    Returns:
-        SHA-256 hash of highlight with context
+    Covers the exact text and the completed state, so an edited text or a
+    newly checked box gives a new hash and the todo is synced again, plus the
+    notebook and page it came from (shown in the task's description).
+    De-duplication itself is per todo and target (``sync_records.item_id``),
+    so two todos with the same text never hide each other.
 
     Example:
-        >>> hash = fingerprint_highlight(
-        ...     original_text="handwritten text",
-        ...     corrected_text="corrected version",
-        ...     source_file="notebook.pdf",
-        ...     page_num=3
-        ... )
+        >>> fingerprint_todo("Buy milk", False, "abc-123", 5) != fingerprint_todo(
+        ...     "Buy milk", True, "abc-123", 5)
+        True
     """
-    content = f"{original_text}:{corrected_text}:{source_file}:{page_num}"
-    return generate_content_hash(content)
-
-
-def fingerprint_notebook_metadata(
-    notebook_uuid: str,
-    title: str,
-    folder_path: Optional[str] = None
-) -> str:
-    """
-    Generate content hash for notebook metadata.
-
-    Used to detect title changes or structure changes.
-
-    Args:
-        notebook_uuid: UUID of the notebook
-        title: Notebook title
-        folder_path: Optional folder path
-
-    Returns:
-        SHA-256 hash of notebook metadata
-
-    Example:
-        >>> hash = fingerprint_notebook_metadata(
-        ...     notebook_uuid="abc-123",
-        ...     title="Meeting Notes",
-        ...     folder_path="/Work/2025"
-        ... )
-    """
-    if folder_path:
-        content = f"{notebook_uuid}:{title}:{folder_path}"
-    else:
-        content = f"{notebook_uuid}:{title}"
-
+    content = "|".join(
+        [
+            f"text:{(todo_text or '').strip()}",
+            f"completed:{1 if completed else 0}",
+            f"notebook:{notebook_uuid or ''}",
+            f"page:{'' if page_number is None else page_number}",
+        ]
+    )
     return generate_content_hash(content)

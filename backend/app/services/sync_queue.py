@@ -3,13 +3,19 @@
 Provides functions to queue sync operations when OCR completes or catch-up sync is needed.
 """
 
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 from typing import Optional
 
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
+from app.core.sync_engine import ContentFingerprint
+from app.integrations.registry import NOTEBOOK_METADATA, PAGE_TEXT, TODO, targets_supporting
+from app.models.notebook import Notebook
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
-from app.services.fingerprinting import fingerprint_highlight, fingerprint_page, fingerprint_todo
+from app.models.todo import Todo
+from app.services.fingerprinting import fingerprint_page, fingerprint_todo
 
 
 def queue_sync(
@@ -24,7 +30,7 @@ def queue_sync(
     page_number: Optional[int] = None,
     priority: int = 5,
     metadata: Optional[dict] = None,
-) -> SyncQueue:
+) -> Optional[SyncQueue]:
     """
     Queue an item for sync to an external service.
 
@@ -48,7 +54,8 @@ def queue_sync(
         metadata: Optional metadata dict
 
     Returns:
-        Created SyncQueue entry
+        The pending or processing SyncQueue entry for this item, or None when
+        the item is already synced with this content (nothing is queued).
 
     Example:
         >>> queue_entry = queue_sync(
@@ -68,14 +75,16 @@ def queue_sync(
     # For page_text items, check by page_uuid (reMarkable's unique page identifier)
     # This ensures we update existing pages rather than creating duplicates
     if item_type == 'page_text' and page_uuid:
-        # Check if already queued for this specific page
+        # Check if already queued for this specific page. Only a 'pending' row can
+        # still absorb new content; a 'processing' row keeps the content it
+        # started with, so changed content gets its own new pending row below.
         existing_queue = (
             db.query(SyncQueue)
             .filter(
                 SyncQueue.page_uuid == page_uuid,
                 SyncQueue.target_name == target_name,
                 SyncQueue.user_id == user_id,
-                SyncQueue.status.in_(['pending', 'processing']),
+                SyncQueue.status == 'pending',
             )
             .first()
         )
@@ -105,28 +114,87 @@ def queue_sync(
         )
 
         if existing_sync and existing_sync.content_hash == content_hash:
-            # Already synced successfully with same content, no need to queue
-            # Create a completed queue entry for tracking
-            queue_entry = SyncQueue(
-                user_id=user_id,
-                item_type=item_type,
-                item_id=item_id,
-                content_hash=content_hash,
-                page_uuid=page_uuid,
-                notebook_uuid=notebook_uuid,
-                page_number=page_number,
-                target_name=target_name,
-                status='completed',
-                priority=priority,
-                metadata_json=json.dumps(metadata) if metadata else None,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-                completed_at=existing_sync.synced_at,
-            )
-            db.add(queue_entry)
-            db.commit()
-            return queue_entry
+            # Already synced with the same content: nothing to queue, and no
+            # row is written (the sync record already says it is in sync).
+            return None
         # If existing_sync exists but content_hash is different, we'll queue it for update
+    elif item_type == NOTEBOOK_METADATA and notebook_uuid:
+        # One pending row per notebook and target: the agent reports metadata on
+        # every open, and the worker rebuilds the payload from the notebook when
+        # it runs, so a pending row just takes the newest hash. Its retry
+        # schedule is kept, so frequent opens do not defeat the backoff.
+        existing_queue = (
+            db.query(SyncQueue)
+            .filter(
+                SyncQueue.user_id == user_id,
+                SyncQueue.target_name == target_name,
+                SyncQueue.item_type == NOTEBOOK_METADATA,
+                SyncQueue.notebook_uuid == notebook_uuid,
+                SyncQueue.status == 'pending',
+            )
+            .first()
+        )
+        if existing_queue:
+            if existing_queue.content_hash != content_hash:
+                existing_queue.content_hash = content_hash
+                existing_queue.updated_at = datetime.utcnow()
+                db.commit()
+            return existing_queue
+
+        # The worker keeps one record per notebook and target with the hash it
+        # last wrote; unchanged metadata is not queued again.
+        existing_sync = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == user_id,
+                SyncRecord.target_name == target_name,
+                SyncRecord.item_type == NOTEBOOK_METADATA,
+                SyncRecord.notebook_uuid == notebook_uuid,
+                SyncRecord.status == 'success',
+            )
+            .first()
+        )
+        if existing_sync and existing_sync.content_hash == content_hash:
+            return None
+    elif item_type == TODO:
+        # One pending row per todo and target; the worker reads the todo when
+        # it runs, so a pending row just takes the newest hash.
+        existing_queue = (
+            db.query(SyncQueue)
+            .filter(
+                SyncQueue.user_id == user_id,
+                SyncQueue.target_name == target_name,
+                SyncQueue.item_type == TODO,
+                SyncQueue.item_id == item_id,
+                SyncQueue.status == 'pending',
+            )
+            .first()
+        )
+        if existing_queue:
+            if existing_queue.content_hash != content_hash:
+                existing_queue.content_hash = content_hash
+                existing_queue.updated_at = datetime.utcnow()
+                if existing_queue.retry_count:
+                    existing_queue.retry_count = 0
+                    existing_queue.scheduled_at = datetime.utcnow()
+                db.commit()
+            return existing_queue
+
+        # The sync record of this todo for this target says what the target
+        # has; completed queue rows are pruned and are not consulted.
+        existing_sync = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == user_id,
+                SyncRecord.target_name == target_name,
+                SyncRecord.item_type == TODO,
+                SyncRecord.item_id == item_id,
+                SyncRecord.status == 'success',
+            )
+            .first()
+        )
+        if existing_sync and existing_sync.content_hash == content_hash:
+            return None
     else:
         # For other item types, use content_hash for deduplication
         existing_queue = (
@@ -157,27 +225,8 @@ def queue_sync(
         )
 
         if existing_sync:
-            # Already synced successfully, no need to queue
-            # Create a completed queue entry for tracking
-            queue_entry = SyncQueue(
-                user_id=user_id,
-                item_type=item_type,
-                item_id=item_id,
-                content_hash=content_hash,
-                page_uuid=page_uuid,
-                notebook_uuid=notebook_uuid,
-                page_number=page_number,
-                target_name=target_name,
-                status='completed',
-                priority=priority,
-                metadata_json=json.dumps(metadata) if metadata else None,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-                completed_at=existing_sync.synced_at,
-            )
-            db.add(queue_entry)
-            db.commit()
-            return queue_entry
+            # Already synced successfully: nothing to queue, no row written.
+            return None
 
     # Create new queue entry
     queue_entry = SyncQueue(
@@ -216,7 +265,7 @@ def queue_page_sync(
 
     Called when OCR completes for a page.
     Only queues to integrations that support page text (notion, etc.).
-    Does NOT queue to todo-only integrations (notion-todos, todoist, ticktick).
+    Does NOT queue to todo-only integrations (notion-todos, todoist).
 
     Args:
         db: Database session
@@ -243,18 +292,13 @@ def queue_page_sync(
     # Generate content hash
     content_hash = fingerprint_page(notebook_uuid, page_number, ocr_text, page_uuid)
 
-    # Integrations excluded from push-based page sync queue.
-    # - Todo-only integrations only receive todo items
-    # - Pull-based integrations (obsidian) handle their own sync via polling endpoints
-    EXCLUDED_FROM_PAGE_SYNC = ['notion-todos', 'todoist', 'ticktick', 'obsidian']
-
-    # Get all enabled integrations that support page syncs
+    # Get all enabled integrations that accept page text (target registry)
     integrations = (
         db.query(IntegrationConfig)
         .filter(
             IntegrationConfig.user_id == user_id,
             IntegrationConfig.is_enabled == True,
-            ~IntegrationConfig.target_name.in_(EXCLUDED_FROM_PAGE_SYNC),
+            IntegrationConfig.target_name.in_(targets_supporting(PAGE_TEXT)),
         )
         .all()
     )
@@ -273,133 +317,185 @@ def queue_page_sync(
             page_number=page_number,
             priority=3,  # Higher priority for fresh content
         )
-        queued_entries.append(queue_entry)
+        if queue_entry is not None:
+            queued_entries.append(queue_entry)
 
     return queued_entries
+
+
+def enabled_todo_targets(db: Session, user_id: int) -> list[str]:
+    """Names of the user's enabled integrations that accept todos (target registry)."""
+    rows = (
+        db.query(IntegrationConfig.target_name)
+        .filter(
+            IntegrationConfig.user_id == user_id,
+            IntegrationConfig.is_enabled == True,  # noqa: E712
+            IntegrationConfig.target_name.in_(targets_supporting(TODO)),
+        )
+        .all()
+    )
+    return [row.target_name for row in rows]
 
 
 def queue_todo_sync(
     db: Session,
-    user_id: int,
-    todo_id: int,
-    todo_text: str,
-    notebook_uuid: str,
-    page_number: Optional[int] = None,
-    page_uuid: Optional[str] = None,
+    todo: Todo,
+    notebook_uuid: Optional[str],
+    target_names: Optional[list[str]] = None,
+    priority: int = 2,
 ) -> list[SyncQueue]:
-    """
-    Queue todo sync to all enabled todo-specific integrations.
+    """Queue one todo for every enabled integration that accepts todos.
 
-    Only queues to integrations that support todos (notion-todos, todoist, ticktick, etc.).
-    Does NOT queue to general notebook integrations (notion).
+    Only todo targets (notion-todos, todoist) get rows, never notebook targets.
+    A removed todo is not queued. Nothing is queued for a target whose sync
+    record already has this todo's text and completed state (see queue_sync).
+    Makes no external calls.
 
     Args:
-        db: Database session
-        user_id: User ID
-        todo_id: Todo database ID
-        todo_text: Todo text content
-        notebook_uuid: Notebook UUID
-        page_number: Optional page number
-        page_uuid: Optional reMarkable page UUID
+        target_names: the user's enabled todo targets when the caller already
+            has them (``enabled_todo_targets``); looked up when None.
 
     Returns:
-        List of created SyncQueue entries
+        The pending queue rows, new or reused.
     """
-    # Generate content hash and fuzzy signature
-    content_hash, _ = fingerprint_todo(todo_text, notebook_uuid, page_number)
+    if todo.removed_at is not None:
+        return []
+    if target_names is None:
+        target_names = enabled_todo_targets(db, todo.user_id)
 
-    # Define which integration types support todos
-    # These are dedicated todo integrations, NOT general notebook integrations
-    TODO_INTEGRATION_TYPES = ['notion-todos', 'todoist', 'ticktick']
-
-    # Get all enabled integrations that support todos
-    integrations = (
-        db.query(IntegrationConfig)
-        .filter(
-            IntegrationConfig.user_id == user_id,
-            IntegrationConfig.is_enabled == True,
-            IntegrationConfig.target_name.in_(TODO_INTEGRATION_TYPES),
-        )
-        .all()
-    )
+    content_hash = fingerprint_todo(todo.text, todo.completed, notebook_uuid, todo.page_number)
 
     queued_entries = []
-    for integration in integrations:
+    for target_name in target_names:
         queue_entry = queue_sync(
             db=db,
-            user_id=user_id,
-            item_type='todo',
-            item_id=str(todo_id),
+            user_id=todo.user_id,
+            item_type=TODO,
+            item_id=str(todo.id),
             content_hash=content_hash,
-            target_name=integration.target_name,
-            page_uuid=page_uuid,
+            target_name=target_name,
             notebook_uuid=notebook_uuid,
-            page_number=page_number,
-            priority=2,  # Higher priority for todos
+            page_number=todo.page_number,
+            priority=priority,
         )
-        queued_entries.append(queue_entry)
+        if queue_entry is not None:
+            queued_entries.append(queue_entry)
 
     return queued_entries
 
 
-def queue_highlight_sync(
-    db: Session,
-    user_id: int,
-    highlight_id: int,
-    original_text: str,
-    corrected_text: str,
-    source_file: str,
-    page_num: int,
-    notebook_uuid: Optional[str] = None,
-    page_uuid: Optional[str] = None,
-) -> list[SyncQueue]:
+def queue_stored_todos(
+    db: Session, user_id: int, target_names: Optional[list[str]] = None
+) -> int:
+    """Queue the user's stored, not removed todos that a todo target does not have yet.
+
+    Used when a todo target is connected (Todoist project selected, Notion
+    todos database chosen) and by the ``POST /todos/extract`` backfill.
+    De-duplicated per todo and target against ``sync_records`` (queue_sync),
+    so running it again queues nothing new. Makes no external calls.
+
+    Returns the number of pending queue rows (new or reused).
     """
-    Queue highlight sync to all enabled integrations.
+    if target_names is None:
+        target_names = enabled_todo_targets(db, user_id)
+    if not target_names:
+        return 0
 
-    Args:
-        db: Database session
-        user_id: User ID
-        highlight_id: Highlight database ID
-        original_text: Original highlighted text
-        corrected_text: User-corrected text
-        source_file: Source file identifier
-        page_num: Page number
-        notebook_uuid: Optional notebook UUID
-        page_uuid: Optional reMarkable page UUID
+    rows = (
+        db.query(Todo, Notebook.notebook_uuid)
+        .join(Notebook, Todo.notebook_id == Notebook.id)
+        .filter(Todo.user_id == user_id, Todo.removed_at.is_(None))
+        .order_by(Todo.id)
+        .all()
+    )
+    queued = 0
+    for todo, notebook_uuid in rows:
+        # Backfill runs behind fresh todos.
+        queued += len(queue_todo_sync(db, todo, notebook_uuid, target_names, priority=8))
+    return queued
 
-    Returns:
-        List of created SyncQueue entries
+
+def _page_count_from_content(content_json: Optional[str]) -> int:
+    """Page count from a notebook's .content data (pageCount, else its page list)."""
+    if not content_json:
+        return 0
+    try:
+        content_data = json.loads(content_json)
+    except (TypeError, ValueError):
+        return 0
+    if not isinstance(content_data, dict):
+        return 0
+    page_count = content_data.get("pageCount")
+    if isinstance(page_count, int):
+        return page_count
+    pages = content_data.get("pages") or (content_data.get("cPages") or {}).get("pages") or []
+    return len(pages) if isinstance(pages, list) else 0
+
+
+def notebook_metadata_payload(notebook: Notebook) -> dict:
+    """Properties-only data for a notebook_metadata sync (no page content)."""
+    # reMarkable's own lastModified (ms since epoch); notebook.updated_at changes
+    # on every database write, so it is not used here.
+    last_modified_at = None
+    if notebook.metadata_json:
+        try:
+            meta = json.loads(notebook.metadata_json)
+            if meta.get("lastModified"):
+                last_modified_at = datetime.fromtimestamp(
+                    int(meta["lastModified"]) / 1000.0
+                ).isoformat()
+        except (ValueError, KeyError, TypeError, AttributeError):
+            pass
+
+    title = notebook.visible_name or "Untitled Notebook"
+    return {
+        "notebook_uuid": notebook.notebook_uuid,
+        "notebook_name": title,
+        "title": title,
+        "page_count": _page_count_from_content(notebook.content_json),
+        "full_path": notebook.full_path or "",
+        "last_opened_at": notebook.last_opened.isoformat() if notebook.last_opened else None,
+        "last_modified_at": last_modified_at,
+    }
+
+
+def queue_notebook_metadata_sync(db: Session, notebook: Notebook) -> list[SyncQueue]:
+    """Queue a properties-only update of the notebook for every target that accepts one.
+
+    The worker rebuilds the payload from the database when it runs, so a row
+    always writes the notebook's latest metadata. There is at most one pending
+    row per notebook and target, and none when the target already has this
+    metadata (see queue_sync). Makes no external calls.
+
+    Returns the pending queue rows, new or reused.
     """
-    # Generate content hash
-    content_hash = fingerprint_highlight(original_text, corrected_text, source_file, page_num)
+    content_hash = ContentFingerprint.for_notebook_metadata(notebook_metadata_payload(notebook))
 
-    # Get all enabled integrations
     integrations = (
         db.query(IntegrationConfig)
         .filter(
-            IntegrationConfig.user_id == user_id,
-            IntegrationConfig.is_enabled == True,
+            IntegrationConfig.user_id == notebook.user_id,
+            IntegrationConfig.is_enabled == True,  # noqa: E712
+            IntegrationConfig.target_name.in_(targets_supporting(NOTEBOOK_METADATA)),
         )
         .all()
     )
 
-    queued_entries = []
+    queued = []
     for integration in integrations:
-        queue_entry = queue_sync(
+        entry = queue_sync(
             db=db,
-            user_id=user_id,
-            item_type='highlight',
-            item_id=str(highlight_id),
+            user_id=notebook.user_id,
+            item_type=NOTEBOOK_METADATA,
+            item_id=notebook.notebook_uuid,
             content_hash=content_hash,
             target_name=integration.target_name,
-            page_uuid=page_uuid,
-            notebook_uuid=notebook_uuid,
-            page_number=page_num,
-            priority=4,  # Normal priority
+            notebook_uuid=notebook.notebook_uuid,
+            priority=5,
         )
-        queued_entries.append(queue_entry)
-
-    return queued_entries
+        if entry is not None:
+            queued.append(entry)
+    return queued
 
 
 def get_next_sync_items(db: Session, limit: int = 10) -> list[SyncQueue]:
@@ -437,3 +533,58 @@ def get_next_sync_items(db: Session, limit: int = 10) -> list[SyncQueue]:
         .limit(limit)
         .all()
     )
+
+
+def prune_sync_queue(
+    db: Session,
+    *,
+    completed_days: int,
+    failed_days: int,
+    now: Optional[datetime] = None,
+    batch_size: int = 500,
+    max_batches: int = 10,
+) -> int:
+    """Delete finished queue rows older than their retention period.
+
+    Only 'completed' rows (by ``completed_at``, falling back to
+    ``updated_at``) and 'failed' rows (by ``updated_at``) are deleted; pending
+    and processing rows are never touched. Deletes at most
+    ``batch_size * max_batches`` rows per call, committing after each batch,
+    so one run never holds a long lock. A retention of 0 or less disables
+    pruning for that status.
+
+    Returns the number of rows deleted.
+    """
+    now = now or datetime.utcnow()
+    conditions = []
+    if completed_days > 0:
+        conditions.append(
+            and_(
+                SyncQueue.status == 'completed',
+                func.coalesce(SyncQueue.completed_at, SyncQueue.updated_at)
+                < now - timedelta(days=completed_days),
+            )
+        )
+    if failed_days > 0:
+        conditions.append(
+            and_(
+                SyncQueue.status == 'failed',
+                SyncQueue.updated_at < now - timedelta(days=failed_days),
+            )
+        )
+
+    deleted = 0
+    for condition in conditions:
+        for _ in range(max_batches):
+            ids = [
+                row.id
+                for row in db.query(SyncQueue.id).filter(condition).limit(batch_size).all()
+            ]
+            if not ids:
+                break
+            db.query(SyncQueue).filter(SyncQueue.id.in_(ids)).delete(synchronize_session=False)
+            db.commit()
+            deleted += len(ids)
+            if len(ids) < batch_size:
+                break
+    return deleted

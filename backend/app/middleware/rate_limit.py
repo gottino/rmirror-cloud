@@ -1,32 +1,55 @@
-"""User-aware rate limiting middleware.
+"""Shared, user-aware rate limiting.
 
-This module provides rate limiting that distinguishes between:
-- Authenticated users: Rate limited by user ID (generous limits)
-- Unauthenticated requests: Rate limited by IP address (stricter limits)
+There is one ``Limiter`` for the whole app (``limiter`` below); every router
+decorates its endpoints with it and ``app.main`` installs it.
 
-This allows logged-in users to use the dashboard normally while
-still protecting against abuse from unauthenticated sources.
+Keys
+    ``get_rate_limit_key`` returns ``user:<id>`` when an auth dependency has
+    resolved the user for this request (``get_clerk_user`` and
+    ``get_obsidian_user`` store the id on ``request.state``), and the client
+    IP otherwise. It never decodes tokens itself.
+
+Where limits are checked
+    * Routes with an explicit ``@limiter.limit(...)`` are checked by the
+      decorator when the endpoint is called, i.e. after FastAPI has run the
+      route's dependencies. Authenticated routes are therefore keyed per user.
+      Requests that fail authentication never reach the decorator.
+    * Every other route gets ``settings.rate_limit_default`` from
+      ``SlowAPIASGIMiddleware``. The middleware runs before authentication, so
+      the default limit is always keyed by client IP.
+
+Storage
+    ``settings.rate_limit_storage_uri`` (default ``memory://``). Production
+    has no Redis and ``limits`` has no PostgreSQL backend, so counters live in
+    each uvicorn worker process: with 2 workers a client can make up to twice
+    each configured limit. Swap the URI for a shared backend to tighten this.
 """
 
 import logging
 
-from fastapi import Request
+from fastapi import FastAPI, Request
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIASGIMiddleware
 from slowapi.util import get_remote_address
 
-from app.auth.jwt import decode_access_token
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Attribute on ``request.state`` that the auth dependencies set to the
+# authenticated user's id.
+RATE_LIMIT_USER_ATTR = "rate_limit_user_id"
+
+
+def set_rate_limit_user(request: Request, user_id: int) -> None:
+    """Record the authenticated user so the limiter keys this request by user."""
+    setattr(request.state, RATE_LIMIT_USER_ATTR, user_id)
 
 
 def get_rate_limit_key(request: Request) -> str:
     """
-    Get rate limit key based on authentication status.
-
-    For authenticated requests: uses "user:{user_id}" as key
-    For unauthenticated requests: uses IP address as key
-
-    This allows authenticated users to have per-user rate limits
-    while unauthenticated requests are limited by IP.
+    Rate limit key: ``user:<id>`` once auth has resolved the user, else the IP.
 
     Args:
         request: FastAPI request object
@@ -34,56 +57,37 @@ def get_rate_limit_key(request: Request) -> str:
     Returns:
         Rate limit key string
     """
-    # Try to extract user ID from Authorization header
-    auth_header = request.headers.get("Authorization", "")
-
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]  # Remove "Bearer " prefix
-        try:
-            payload = decode_access_token(token)
-            if payload and "sub" in payload:
-                user_id = payload["sub"]
-                return f"user:{user_id}"
-        except Exception:
-            # Token invalid or expired - fall through to IP-based limiting
-            pass
-
-    # Fall back to IP-based limiting for unauthenticated requests
+    user_id = getattr(request.state, RATE_LIMIT_USER_ATTR, None)
+    if user_id is not None:
+        return f"user:{user_id}"
     return get_remote_address(request)
 
 
-# Rate limit strings for different contexts
-# Format: "X per Y" where Y is minute, hour, day, etc.
+_settings = get_settings()
 
-# Authenticated user limits (generous - per user)
-AUTHENTICATED_LIMIT = "300/minute"  # 5 requests per second average
+# Limit strings, format "X/period". Values come from settings (see config.py).
+DEFAULT_LIMIT = _settings.rate_limit_default
+UNAUTHENTICATED_LIMIT = _settings.rate_limit_unauthenticated
+WEBHOOK_LIMIT = _settings.rate_limit_webhook
+OBSIDIAN_SYNC_LIMIT = _settings.rate_limit_obsidian_sync
+UPLOAD_LIMIT = _settings.rate_limit_upload
 
-# Unauthenticated limits (strict - per IP)
-UNAUTHENTICATED_LIMIT = "30/minute"  # 0.5 requests per second average
-
-# Auth endpoint limits (very strict - prevent brute force)
+# Auth endpoint limits (very strict - token minting)
 AUTH_ENDPOINT_LIMIT = "10/minute"
 
+# The single limiter shared by every router. key_style="endpoint" gives each
+# endpoint function one bucket per key, instead of one per URL (which would
+# give every distinct path parameter its own budget).
+limiter = Limiter(
+    key_func=get_rate_limit_key,
+    default_limits=[DEFAULT_LIMIT],
+    storage_uri=_settings.rate_limit_storage_uri,
+    key_style="endpoint",
+)
 
-def get_dynamic_limit(request: Request) -> str:
-    """
-    Get the appropriate rate limit based on authentication status.
 
-    Args:
-        request: FastAPI request object
-
-    Returns:
-        Rate limit string (e.g., "300/minute")
-    """
-    auth_header = request.headers.get("Authorization", "")
-
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-        try:
-            payload = decode_access_token(token)
-            if payload and "sub" in payload:
-                return AUTHENTICATED_LIMIT
-        except Exception:
-            pass
-
-    return UNAUTHENTICATED_LIMIT
+def install_rate_limiting(app: FastAPI) -> None:
+    """Attach the shared limiter, its 429 handler and the default-limit middleware."""
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIASGIMiddleware)

@@ -142,7 +142,7 @@ class TestQueueSync:
         assert entry1.content_hash == "new_hash"
 
     def test_queue_sync_skips_already_synced(self, db, user):
-        """If already synced with same content_hash, return completed entry."""
+        """If already synced with same content_hash, queue nothing and write no row."""
         from app.services.sync_queue import queue_sync
 
         # Create a successful sync record
@@ -169,29 +169,73 @@ class TestQueueSync:
             target_name="notion",
             page_uuid="page-uuid-synced",
         )
-        assert entry.status == "completed"
+        assert entry is None
+        assert db.query(SyncQueue).count() == 0
 
-    def test_queue_sync_dedup_by_content_hash_for_non_page(self, db, user):
-        """Non-page_text items should dedup by content_hash."""
+    def test_queue_sync_inserts_new_pending_row_when_existing_is_processing(self, db, user):
+        """An in-flight row keeps its content; new content gets a new pending row."""
+        from app.services.sync_queue import queue_sync
+
+        inflight = queue_sync(
+            db=db, user_id=user.id, item_type="page_text", item_id="1",
+            content_hash="old_hash", target_name="notion", page_uuid="page-uuid-inflight",
+        )
+        inflight.status = "processing"
+        inflight.started_at = datetime.utcnow()
+        db.commit()
+
+        fresh = queue_sync(
+            db=db, user_id=user.id, item_type="page_text", item_id="1",
+            content_hash="new_hash", target_name="notion", page_uuid="page-uuid-inflight",
+        )
+
+        assert fresh.id != inflight.id
+        assert fresh.status == "pending"
+        assert fresh.content_hash == "new_hash"
+        db.refresh(inflight)
+        assert inflight.status == "processing"
+        assert inflight.content_hash == "old_hash"
+
+    def test_queue_sync_dedup_by_content_hash_for_other_types(self, db, user):
+        """Item types without their own rule (highlight) dedup by content_hash."""
         from app.services.sync_queue import queue_sync
 
         entry1 = queue_sync(
             db=db,
             user_id=user.id,
-            item_type="todo",
+            item_type="highlight",
             item_id="1",
-            content_hash="todo_hash",
-            target_name="notion-todos",
+            content_hash="hl_hash",
+            target_name="readwise",
         )
         entry2 = queue_sync(
             db=db,
             user_id=user.id,
-            item_type="todo",
+            item_type="highlight",
             item_id="2",
-            content_hash="todo_hash",
-            target_name="notion-todos",
+            content_hash="hl_hash",
+            target_name="readwise",
         )
         assert entry1.id == entry2.id
+
+    def test_queue_sync_todos_are_deduplicated_per_todo(self, db, user):
+        """Two todos with the same hash are two items; one todo has one pending row."""
+        from app.services.sync_queue import queue_sync
+
+        def q(item_id, content_hash):
+            return queue_sync(
+                db=db,
+                user_id=user.id,
+                item_type="todo",
+                item_id=item_id,
+                content_hash=content_hash,
+                target_name="notion-todos",
+            )
+
+        first = q("1", "todo_hash")
+        assert q("2", "todo_hash").id != first.id
+        again = q("1", "new_hash")
+        assert again.id == first.id and again.content_hash == "new_hash"
 
 
 class TestQueuePageSync:
@@ -244,38 +288,87 @@ class TestQueuePageSync:
         assert entries == []
 
 
-class TestQueueTodoSync:
-    """Tests for queue_todo_sync routing."""
+def _todo(db, user, notebook, text="Buy groceries", completed=False):
+    from app.models.todo import Todo
 
-    def test_queues_to_todo_integrations(self, db, user, notion_todos_integration):
+    todo = Todo(
+        user_id=user.id,
+        notebook_id=notebook.id,
+        page_number=1,
+        title=text,
+        text=text,
+        completed=completed,
+    )
+    db.add(todo)
+    db.commit()
+    return todo
+
+
+class TestQueueTodoSync:
+    """Tests for queue_todo_sync routing and per-todo de-duplication."""
+
+    def test_queues_to_todo_integrations(self, db, user, notebook, notion_todos_integration):
         """queue_todo_sync should queue to todo-specific integrations."""
         from app.services.sync_queue import queue_todo_sync
 
-        entries = queue_todo_sync(
-            db=db,
-            user_id=user.id,
-            todo_id=1,
-            todo_text="Buy groceries",
-            notebook_uuid="nb-uuid",
-            page_number=1,
-        )
+        entries = queue_todo_sync(db, _todo(db, user, notebook), "nb-uuid")
         assert len(entries) == 1
         assert entries[0].target_name == "notion-todos"
 
-    def test_excludes_notebook_integrations(self, db, user, notion_integration, notion_todos_integration):
+    def test_excludes_notebook_integrations(
+        self, db, user, notebook, notion_integration, notion_todos_integration
+    ):
         """queue_todo_sync should not queue to general notebook integrations."""
         from app.services.sync_queue import queue_todo_sync
 
-        entries = queue_todo_sync(
-            db=db,
-            user_id=user.id,
-            todo_id=1,
-            todo_text="Buy groceries",
-            notebook_uuid="nb-uuid",
-        )
+        entries = queue_todo_sync(db, _todo(db, user, notebook), "nb-uuid")
         target_names = [e.target_name for e in entries]
         assert "notion-todos" in target_names
         assert "notion" not in target_names
+
+    def test_same_text_in_two_todos_is_queued_for_both(
+        self, db, user, notebook, notion_todos_integration
+    ):
+        """De-duplication is per todo, not per content hash."""
+        from app.services.sync_queue import queue_todo_sync
+
+        first = queue_todo_sync(db, _todo(db, user, notebook, "Call Bob"), "nb-uuid")
+        second = queue_todo_sync(db, _todo(db, user, notebook, "Call Bob"), "nb-uuid")
+        assert len(first) == 1 and len(second) == 1
+        assert first[0].id != second[0].id
+
+    def test_synced_todo_is_requeued_only_when_it_changed(
+        self, db, user, notebook, notion_todos_integration
+    ):
+        """sync_records decide: same text and state -> nothing; checked -> queued."""
+        from app.services.fingerprinting import fingerprint_todo
+        from app.services.sync_queue import queue_todo_sync
+
+        todo = _todo(db, user, notebook)
+        db.add(
+            SyncRecord(
+                user_id=user.id,
+                target_name="notion-todos",
+                item_type="todo",
+                item_id=str(todo.id),
+                content_hash=fingerprint_todo(todo.text, False, "nb-uuid", 1),
+                external_id="page-1",
+                status="success",
+            )
+        )
+        db.commit()
+
+        assert queue_todo_sync(db, todo, "nb-uuid") == []
+        todo.completed = True
+        db.commit()
+        entries = queue_todo_sync(db, todo, "nb-uuid")
+        assert len(entries) == 1
+        # A second change while still pending reuses the row.
+        todo.text = "Buy groceries today"
+        db.commit()
+        again = queue_todo_sync(db, todo, "nb-uuid")
+        assert [e.id for e in again] == [entries[0].id]
+        assert db.query(SyncQueue).filter_by(item_type="todo").count() == 1
 
 
 class TestGetNextSyncItems:
