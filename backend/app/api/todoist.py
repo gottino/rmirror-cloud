@@ -1,9 +1,5 @@
 """API endpoints for Todoist OAuth flow and project management."""
 
-import base64
-import hashlib
-import hmac
-import json
 import logging
 import time
 from datetime import datetime
@@ -14,8 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth import signing
 from app.auth.clerk import get_clerk_active_user, reject_agent_token
-from app.config import get_settings
 from app.core.sync_engine import ContentFingerprint
 from app.database import get_db
 from app.models.notebook import Notebook
@@ -33,30 +29,16 @@ router = APIRouter(
 _OAUTH_STATE_EXPIRY_SECONDS = 600  # 10 minutes
 
 
-def _create_oauth_state(user_id: int, secret_key: str) -> str:
+def _create_oauth_state(user_id: int) -> str:
     """Create an HMAC-signed OAuth state token encoding user_id and expiration."""
-    payload = json.dumps({"uid": user_id, "exp": int(time.time()) + _OAUTH_STATE_EXPIRY_SECONDS})
-    payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode()
-    signature = hmac.new(secret_key.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
-    return f"{payload_b64}.{signature}"
+    payload = {"uid": user_id, "exp": int(time.time()) + _OAUTH_STATE_EXPIRY_SECONDS}
+    return signing.sign(payload, signing.derive_key(signing.TODOIST_OAUTH_STATE_PURPOSE))
 
 
-def _validate_oauth_state(state: str, secret_key: str) -> Optional[int]:
+def _validate_oauth_state(state: str) -> Optional[int]:
     """Validate an HMAC-signed OAuth state token. Returns user_id if valid, None otherwise."""
-    try:
-        parts = state.split(".")
-        if len(parts) != 2:
-            return None
-        payload_b64, signature = parts
-        expected_sig = hmac.new(secret_key.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(signature, expected_sig):
-            return None
-        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-        if payload.get("exp", 0) < int(time.time()):
-            return None
-        return payload.get("uid")
-    except Exception:
-        return None
+    payload = signing.verify(state, [signing.derive_key(signing.TODOIST_OAUTH_STATE_PURPOSE)])
+    return payload.get("uid") if payload is not None else None
 
 
 # --- Pydantic Models ---
@@ -106,8 +88,7 @@ async def get_authorization_url(
     """Generate Todoist OAuth authorization URL."""
     try:
         oauth_service = TodoistOAuthService()
-        settings = get_settings()
-        state = _create_oauth_state(current_user.id, settings.secret_key)
+        state = _create_oauth_state(current_user.id)
         authorization_url = oauth_service.get_authorization_url(state)
         return OAuthUrlResponse(authorization_url=authorization_url, state=state)
     except Exception as e:
@@ -123,10 +104,8 @@ async def oauth_callback(
 ):
     """Handle OAuth callback from Todoist. Exchanges code for access token."""
     try:
-        settings = get_settings()
-
         # Validate state
-        state_user_id = _validate_oauth_state(request.state, settings.secret_key)
+        state_user_id = _validate_oauth_state(request.state)
         if state_user_id is None or state_user_id != current_user.id:
             raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 

@@ -9,16 +9,14 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api import api_router
-from app.config import get_settings, validate_startup
+from app.config import check_insecure_flags, get_settings, validate_startup
 from app.database import get_db
 from app.logging_config import configure_logging
-from app.middleware.rate_limit import get_rate_limit_key
+from app.middleware.rate_limit import install_rate_limiting
 from app.middleware.request_context import RequestContextMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
@@ -27,6 +25,9 @@ settings = get_settings()
 # Configure structured JSON logging before anything else
 configure_logging(debug=settings.debug)
 logger = logging.getLogger(__name__)
+
+# Refuse insecure development flags outside SQLite (warns loudly when allowed)
+check_insecure_flags(settings)
 
 # Written by scripts/deploy.sh before it restarts the service.
 DEPLOY_COMMIT_FILE = Path(__file__).resolve().parent.parent / ".deploy-commit"
@@ -42,10 +43,6 @@ def deployed_commit() -> str:
         except OSError:
             value = ""
     return value if re.fullmatch(r"[0-9a-f]{7,40}", value) else "unknown"
-
-
-# Rate limiter setup - uses user ID for authenticated requests, IP for unauthenticated
-limiter = Limiter(key_func=get_rate_limit_key)
 
 
 @asynccontextmanager
@@ -85,9 +82,10 @@ app = FastAPI(
     **api_docs_kwargs(settings),
 )
 
-# Add rate limiter to app state
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# Shared rate limiter: per-route limits keyed by user, and a default limit
+# (per client IP) for every other route. Added first so CORS and security
+# headers also wrap 429 responses.
+install_rate_limiting(app)
 
 # Configure CORS
 app.add_middleware(
