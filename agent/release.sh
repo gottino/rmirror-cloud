@@ -42,6 +42,17 @@ if [ ! -f "$DMG_PATH" ]; then
     exit 1
 fi
 
+if [ -e "dist/.unsigned" ]; then
+    echo -e "${RED}✗${NC} dist/ holds an --unsigned build; refusing to release"
+    echo -e "   Rebuild with CODESIGN_IDENTITY set (without --unsigned)"
+    exit 1
+fi
+
+if ! xcrun stapler validate "$DMG_PATH" > /dev/null 2>&1; then
+    echo -e "${RED}✗${NC} DMG is not notarized/stapled (xcrun stapler validate failed); refusing to release"
+    exit 1
+fi
+
 if ! command -v b2 &> /dev/null; then
     echo -e "${RED}✗${NC} b2 CLI not installed"
     echo -e "   Run: brew install b2-tools"
