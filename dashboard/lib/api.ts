@@ -15,9 +15,10 @@ if (typeof window !== 'undefined') {
 async function handleApiResponse<T>(response: Response): Promise<T> {
   // Check for 402 Payment Required (quota exceeded)
   if (response.status === 402) {
-    const errorData = await response.json();
-    if (errorData.quota) {
-      throw new QuotaExceededError(errorData.quota);
+    // Backend contract: {"detail": {"message": "...", "quota": {...}}}
+    const errorData = await response.json().catch(() => null);
+    if (errorData?.detail?.quota) {
+      throw new QuotaExceededError(errorData.detail.quota);
     }
     throw new Error('Quota exceeded');
   }
