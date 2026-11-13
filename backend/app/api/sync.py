@@ -23,6 +23,7 @@ from app.models.page import OcrStatus, Page
 from app.models.sync_record import IntegrationConfig, SyncItemType, SyncQueue, SyncRecord
 from app.models.user import User
 from app.services.sync_worker import apply_sync_failure, apply_sync_result
+from app.utils.files import parse_uuid
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["sync"])
@@ -65,6 +66,13 @@ class SyncStatsResponse(BaseModel):
 # ============================================================================
 
 
+# The agent sends its whole library in one request, and a large library can hold
+# a few thousand notebooks. These caps sit well above that; they exist to reject
+# absurd payloads, not to shape normal use.
+MAX_METADATA_NOTEBOOKS = 5000
+MAX_PAGES_PER_NOTEBOOK = 5000
+
+
 class NotebookMetadataItem(BaseModel):
     """Metadata for a single notebook to sync."""
 
@@ -72,7 +80,11 @@ class NotebookMetadataItem(BaseModel):
     visible_name: str = Field(..., description="Display name of the notebook")
     parent_uuid: Optional[str] = Field(None, description="Parent folder UUID, if any")
     document_type: str = Field("notebook", description="Document type (notebook, pdf, epub, folder)")
-    pages: List[str] = Field(default_factory=list, description="Ordered list of page UUIDs from .content file")
+    pages: List[str] = Field(
+        default_factory=list,
+        max_length=MAX_PAGES_PER_NOTEBOOK,
+        description="Ordered list of page UUIDs from .content file",
+    )
     # Optional metadata fields
     pinned: Optional[bool] = None
     deleted: Optional[bool] = None
@@ -91,7 +103,7 @@ class MetadataSyncRequest(BaseModel):
     """
 
     notebooks: List[NotebookMetadataItem] = Field(
-        ..., description="List of notebooks with their page structure"
+        ..., max_length=MAX_METADATA_NOTEBOOKS, description="List of notebooks with their page structure"
     )
 
 
@@ -103,6 +115,7 @@ class MetadataSyncResponse(BaseModel):
     notebooks_updated: int = Field(..., description="Number of existing notebooks updated")
     pages_registered: int = Field(..., description="Total number of page stubs registered")
     pages_already_synced: int = Field(..., description="Pages that already have content")
+    skipped: int = Field(0, description="Notebooks and pages skipped because their id was not a UUID")
     message: str
 
 
@@ -145,13 +158,37 @@ async def sync_metadata(
     notebooks_updated = 0
     pages_registered = 0
     pages_already_synced = 0
+    skipped = 0
 
     try:
         for nb_data in sync_request.notebooks:
+            # Ids become storage keys later: skip anything that is not a UUID
+            # instead of failing the whole batch. Never log the raw value.
+            try:
+                nb_uuid = parse_uuid(nb_data.uuid)
+            except ValueError:
+                logger.warning(
+                    f"Skipping notebook with invalid uuid (length {len(nb_data.uuid)}) "
+                    f"for user {current_user.id}"
+                )
+                skipped += 1
+                continue
+
+            page_uuids = []
+            for raw_page in nb_data.pages:
+                try:
+                    page_uuids.append(parse_uuid(raw_page))
+                except ValueError:
+                    logger.warning(
+                        f"Skipping page with invalid uuid (length {len(raw_page)}) "
+                        f"for user {current_user.id}"
+                    )
+                    skipped += 1
+
             # Find or create notebook
             notebook = db.query(Notebook).filter(
                 Notebook.user_id == current_user.id,
-                Notebook.notebook_uuid == nb_data.uuid
+                Notebook.notebook_uuid == nb_uuid
             ).first()
 
             if notebook:
@@ -173,12 +210,12 @@ async def sync_metadata(
                     notebook.last_opened_page = nb_data.last_opened_page
                 notebook.last_synced_at = datetime.utcnow()
                 notebooks_updated += 1
-                logger.debug(f"Updated notebook: {nb_data.visible_name} ({nb_data.uuid})")
+                logger.debug(f"Updated notebook: {nb_data.visible_name} ({nb_uuid})")
             else:
                 # Create new notebook
                 notebook = Notebook(
                     user_id=current_user.id,
-                    notebook_uuid=nb_data.uuid,
+                    notebook_uuid=nb_uuid,
                     visible_name=nb_data.visible_name,
                     parent_uuid=nb_data.parent_uuid,
                     document_type=nb_data.document_type,
@@ -197,18 +234,18 @@ async def sync_metadata(
                 db.add(notebook)
                 db.flush()  # Get the notebook ID
                 notebooks_created += 1
-                logger.debug(f"Created notebook: {nb_data.visible_name} ({nb_data.uuid})")
+                logger.debug(f"Created notebook: {nb_data.visible_name} ({nb_uuid})")
 
             # Store page UUIDs in content_json for reference
-            if nb_data.pages:
+            if page_uuids:
                 content_data = {
-                    "pages": nb_data.pages,
-                    "pageCount": len(nb_data.pages),
+                    "pages": page_uuids,
+                    "pageCount": len(page_uuids),
                 }
                 notebook.content_json = json.dumps(content_data)
 
             # Process page stubs
-            for page_idx, page_uuid in enumerate(nb_data.pages):
+            for page_idx, page_uuid in enumerate(page_uuids):
                 # Find existing page
                 page = db.query(Page).filter(
                     Page.notebook_id == notebook.id,
@@ -268,6 +305,7 @@ async def sync_metadata(
             notebooks_updated=notebooks_updated,
             pages_registered=pages_registered,
             pages_already_synced=pages_already_synced,
+            skipped=skipped,
             message=f"Synced {notebooks_created + notebooks_updated} notebooks with {total_pages} pages",
         )
 

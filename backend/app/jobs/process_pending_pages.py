@@ -21,6 +21,7 @@ from app.models.notebook import Notebook
 from app.models.page import OcrStatus, Page
 from app.models.quota_usage import QuotaType, QuotaUsage
 from app.services import quota_service
+from app.services.page_events import on_ocr_completed
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +48,10 @@ async def process_pending_pages_for_user(
     more pending pages than quota allows (e.g., 50 pending, 30 quota), they get
     their most recent work OCR'd first, not their oldest pages.
 
-    Quota is checked before each page and consumed only after its OCR
-    succeeded; processing stops as soon as the quota runs out.
+    One unit of quota is reserved atomically before each page's OCR and given
+    back if OCR fails or finds no text; processing stops as soon as a
+    reservation is refused. Each OCR'd page then goes through
+    ``on_ocr_completed`` (Obsidian hash, integration syncs), like an upload.
 
     Callers that can run concurrently (the sync worker in each uvicorn process)
     must hold the user's claim (``_user_claim``) while calling this.
@@ -96,11 +99,11 @@ async def process_pending_pages_for_user(
     failed_count = 0
 
     for page in pending_pages:
-        # Check quota before each page (stop if exhausted)
-        if not quota_service.check_quota(db, user_id):
+        # Reserve quota before each page (stop if exhausted)
+        if not quota_service.reserve_quota(db, user_id):
             logger.info(
                 f"Quota exhausted after processing {processed_count} pages for user {user_id}. "
-                f"Remaining {len(pending_pages) - processed_count} pages still pending."
+                f"Remaining {len(pending_pages) - processed_count - failed_count} pages still pending."
             )
             break
 
@@ -112,46 +115,42 @@ async def process_pending_pages_for_user(
             # Run OCR
             logger.debug(f"Running OCR for page {page.id}")
             ocr_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
-
-            # Update page
-            page.ocr_text = ocr_text
-            page.ocr_status = OcrStatus.COMPLETED
-            page.ocr_completed_at = datetime.utcnow()
-
-            # Consume quota
-            quota_service.consume_quota(db, user_id, amount=1)
-            processed_count += 1
-
-            logger.info(
-                f"Processed pending page {page.id} for user {user_id} "
-                f"({processed_count}/{len(pending_pages)})"
-            )
-
-            db.commit()
-
-        except quota_service.QuotaExceededError:
-            # Quota exhausted during processing (race condition)
-            logger.warning(
-                f"Quota exhausted while processing page {page.id} for user {user_id}"
-            )
-            db.rollback()
-            break
-
         except Exception as e:
             logger.error(
                 f"Failed to process pending page {page.id} for user {user_id}: {e}",
                 exc_info=True,
             )
-            # Mark as failed but continue processing other pages
-            page.ocr_status = OcrStatus.FAILED
-            page.ocr_error = str(e)[:500]  # Limit error message length
-            failed_count += 1
-
+            db.rollback()
+            # Give the reserved unit back; mark failed but continue with other pages
             try:
+                quota_service.release_quota(db, user_id)
+                page.ocr_status = OcrStatus.FAILED
+                page.ocr_error = str(e)[:500]  # Limit error message length
                 db.commit()
             except Exception as commit_error:
-                logger.error(f"Failed to commit error status: {commit_error}")
+                logger.error(f"Failed to record OCR failure: {commit_error}")
                 db.rollback()
+            failed_count += 1
+            continue
+
+        if not ocr_text:
+            # A blank page is a legitimate result; don't charge for it.
+            quota_service.release_quota(db, user_id)
+
+        page.ocr_text = ocr_text
+        page.ocr_status = OcrStatus.COMPLETED
+        page.ocr_completed_at = datetime.utcnow()
+        db.commit()
+        processed_count += 1
+
+        logger.info(
+            f"Processed pending page {page.id} for user {user_id} "
+            f"({processed_count}/{len(pending_pages)})"
+        )
+
+        # Same follow-up as an upload: Obsidian hash + queue for integrations
+        notebook = db.get(Notebook, page.notebook_id)
+        on_ocr_completed(db, page, notebook)
 
     logger.info(
         f"Retroactive processing complete for user {user_id}: "
@@ -168,7 +167,7 @@ def _users_with_processable_pages(
     """User ids (> after_user_id, ascending) with PENDING_QUOTA pages and quota room.
 
     "Room" means unlimited, ``used < limit``, or a period that has ended:
-    ``check_quota`` resets the latter lazily, so it counts as available here.
+    ``reserve_quota`` resets the latter lazily, so it counts as available here.
     """
     now = datetime.utcnow()
     rows = (

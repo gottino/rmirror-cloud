@@ -16,6 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
+from app.config import get_settings
 from app.core.pdf_service import PDFService
 from app.database import get_db
 from app.dependencies import get_storage_service
@@ -35,7 +36,13 @@ from app.schemas.notebook import (
 from app.schemas.page import Page as PageSchema
 from app.services import quota_service
 from app.storage import StorageService
-from app.utils.files import calculate_file_hash, get_document_type, validate_file_type
+from app.utils.files import (
+    calculate_file_hash,
+    get_document_type,
+    read_upload_limited,
+    require_uuid,
+    validate_upload_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,12 +68,12 @@ async def upload_notebook(
     Returns:
         Notebook record and upload confirmation
     """
-    # Validate file type
-    extension = validate_file_type(file, [".pdf", ".epub"])
+    # Validate extension, size (413 if too large) and content type (400)
+    settings = get_settings()
+    extension, file_content = await validate_upload_file(
+        file, settings.allowed_file_types, settings.max_upload_size
+    )
     document_type = get_document_type(extension)
-
-    # Read file content
-    file_content = await file.read()
     file_size = len(file_content)
 
     # Calculate file hash
@@ -898,6 +905,8 @@ async def upload_content_file(
     Returns:
         Success message with page count
     """
+    notebook_uuid = require_uuid(notebook_uuid, "notebook UUID")
+
     # Validate file type
     if not content_file.filename or not content_file.filename.endswith(".content"):
         raise HTTPException(
@@ -921,9 +930,13 @@ async def upload_content_file(
             detail="Notebook not found",
         )
 
+    # Read with a size limit outside the try block so a 413 is not turned into a 500
+    content_data = await read_upload_limited(
+        content_file, get_settings().max_metadata_file_size, ".content file"
+    )
+
     try:
-        # Read and parse the .content file
-        content_data = await content_file.read()
+        # Parse the .content file
         content_json = json.loads(content_data)
 
         # Store the raw content JSON
