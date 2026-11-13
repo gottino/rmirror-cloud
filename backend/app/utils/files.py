@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+import re
 from typing import BinaryIO, Optional
 
 from fastapi import HTTPException, UploadFile, status
@@ -19,6 +20,72 @@ except ImportError:
         "python-magic not available (libmagic not installed). "
         "MIME type validation will be skipped."
     )
+
+
+_UUID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+
+
+def parse_uuid(value: str) -> str:
+    """Return the lowercase form of a standard 8-4-4-4-12 hex UUID.
+
+    Raises ValueError for anything else, so client-supplied identifiers never
+    reach file paths or storage keys unchecked.
+    """
+    if not isinstance(value, str) or not _UUID_RE.fullmatch(value.lower()):
+        raise ValueError("Expected a UUID (8-4-4-4-12 hex digits)")
+    return value.lower()
+
+
+def require_uuid(value: str, what: str) -> str:
+    """Like parse_uuid, but raise HTTP 400 naming what was invalid."""
+    try:
+        return parse_uuid(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid {what}: expected a UUID.",
+        )
+
+
+UPLOAD_READ_CHUNK_SIZE = 64 * 1024
+
+
+async def read_upload_limited(file: UploadFile, max_bytes: int, what: str) -> bytes:
+    """Read an uploaded file, refusing (HTTP 413) anything over ``max_bytes``.
+
+    The upload is read in 64 KiB chunks and rejected as soon as the running
+    total exceeds the limit, so at most ``max_bytes`` plus one chunk is ever
+    held in memory. A size already known from the request (``file.size``) is
+    checked before reading anything.
+    """
+    too_large = HTTPException(
+        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        detail=f"{what} is too large. Maximum size: {_format_size(max_bytes)}.",
+    )
+    if file.size is not None and file.size > max_bytes:
+        raise too_large
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(UPLOAD_READ_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise too_large
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _format_size(num_bytes: int) -> str:
+    if num_bytes >= 1024 * 1024:
+        return f"{num_bytes / (1024 * 1024):.1f} MB"
+    if num_bytes >= 1024:
+        return f"{num_bytes / 1024:.1f} KB"
+    return f"{num_bytes} bytes"
 
 
 def calculate_file_hash(file: BinaryIO) -> str:
@@ -187,16 +254,12 @@ async def validate_upload_file(
     # Validate extension
     extension = validate_file_type(file, allowed_extensions)
 
-    # Read file content
-    content = await file.read()
+    # Read file content, rejecting oversized uploads while reading
+    if max_size_bytes:
+        content = await read_upload_limited(file, max_size_bytes, "File")
+    else:
+        content = await file.read()
     await file.seek(0)  # Reset for potential re-reading
-
-    # Validate file size
-    if max_size_bytes and len(content) > max_size_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File too large. Maximum size: {max_size_bytes / (1024*1024):.1f}MB",
-        )
 
     # Validate MIME type (use first 2048 bytes for detection)
     validate_mime_type(content[:2048], allowed_extensions, file.filename)
