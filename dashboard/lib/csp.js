@@ -8,7 +8,7 @@
 // middleware to set the CSP per request and every page to render dynamically.
 // The named hosts below still limit where scripts and requests can go.
 
-const DEFAULT_API_URL = 'https://rmirror.io/api/v1'; // same fallback as lib/api.ts
+const DEFAULT_API_URL = 'https://rmirror.io/api/v1'; // same fallback as lib/apiClient.ts
 
 const CLERK_DEV_INSTANCES = 'https://*.clerk.accounts.dev';
 const CLERK_IMAGES = 'https://img.clerk.com';

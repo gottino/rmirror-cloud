@@ -7,17 +7,16 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import { ChevronRight, ChevronDown, Download, FileText, FileDown, Calendar, Clock, CloudUpload, Menu, Search, X, Loader2, Trash2 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
-import { getNotebook, getNotebookPages, getIntegrations, QuotaExceededError, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
+import { getNotebook, getNotebookPages, getIntegrations, getPagePdf, exportNotebook, QuotaExceededError, searchNotebooks, type NotebookWithPages, type Page, type QuotaStatus, type SearchResponse } from '@/lib/api';
 import { useNotebookPages, useLoadMoreSentinel, type FetchPagesWindow } from '@/lib/useNotebookPages';
 import { useObjectUrl } from '@/lib/useObjectUrl';
+import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import Sidebar from '@/components/Sidebar';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
 import { DeleteNotebookModal } from '@/components/DeleteNotebookModal';
 import { useQuota } from '@/lib/quota-context';
 import { Skeleton } from '@/components/Skeleton';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
 
 interface PageCardProps {
   page: Page;
@@ -58,19 +57,8 @@ const PageCard = memo(function PageCard({ page, getToken, copied, setCopiedPageI
       // Fetch PDF with authentication
       setLoadingPdf(true);
       try {
-        const url = `${API_URL}/pages/${page.id}/pdf`;
         const token = await getToken();
-        const response = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to load PDF');
-        }
-
-        setPdfBlob(await response.blob());
+        setPdfBlob(await getPagePdf(token, page.id));
       } catch (error) {
         console.error('Error loading PDF:', error);
       } finally {
@@ -364,7 +352,8 @@ function NotebookPageContent() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { getToken, isSignedIn } = useAuth();
+  const { isSignedIn } = useAuth();
+  const getToken = useApiToken();
   const [notebook, setNotebook] = useState<NotebookWithPages | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -396,19 +385,17 @@ function NotebookPageContent() {
   const searchDebounceTimer = useRef<NodeJS.Timeout>();
 
   // Development mode: use JWT token from localStorage
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  const isDevelopmentMode = isDevAuthMode();
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
 
   // Always fetch a fresh token at the point of use (Clerk tokens are short-lived)
   const getFreshToken = useCallback(async (): Promise<string> => {
-    const token = isDevelopmentMode
-      ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-      : await getToken();
+    const token = await getToken();
     if (!token) {
       throw new Error('Failed to get authentication token');
     }
     return token;
-  }, [isDevelopmentMode, getToken]);
+  }, [getToken]);
 
   useEffect(() => {
     if (!effectiveIsSignedIn) {
@@ -511,62 +498,11 @@ function NotebookPageContent() {
 
     try {
       const token = await getFreshToken();
-      const response = await fetch(`${API_URL}/notebooks/${notebook.id}/export?format=${format}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      // Check for quota exceeded (402)
-      if (response.status === 402) {
-        const errorData = await response.json();
-        if (errorData.detail?.quota) {
-          setQuotaModalData(errorData.detail.quota);
-          setQuotaModalOpen(true);
-          return;
-        }
-        throw new Error('Quota exceeded');
-      }
-
-      if (!response.ok) {
-        // Try to parse JSON error response
-        const contentType = response.headers.get('content-type');
-        let errorMessage = `Export failed (${response.status})`;
-
-        if (contentType?.includes('application/json')) {
-          try {
-            const errorData = await response.json();
-            errorMessage = errorData.detail || errorMessage;
-          } catch {
-            // Fallback to text
-          }
-        } else {
-          const errorText = await response.text();
-          if (errorText) {
-            try {
-              const parsed = JSON.parse(errorText);
-              errorMessage = parsed.detail || errorText;
-            } catch {
-              errorMessage = errorText;
-            }
-          }
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      // Get filename from Content-Disposition header or generate one
-      const contentDisposition = response.headers.get('Content-Disposition');
-      let filename = `${notebook.visible_name || 'notebook'}.${format === 'markdown' ? 'md' : 'pdf'}`;
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="([^"]+)"/);
-        if (match) {
-          filename = match[1];
-        }
-      }
+      const { blob, filename: suggested } = await exportNotebook(token, notebook.id, format);
+      const filename = suggested
+        || `${notebook.visible_name || 'notebook'}.${format === 'markdown' ? 'md' : 'pdf'}`;
 
       // Download the file
-      const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -576,6 +512,12 @@ function NotebookPageContent() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err) {
+      // Quota exhausted: show the upgrade modal instead of an error
+      if (err instanceof QuotaExceededError) {
+        setQuotaModalData(err.quota);
+        setQuotaModalOpen(true);
+        return;
+      }
       console.error('Export error:', err);
       setExportError(err instanceof Error ? err.message : 'Export failed');
     } finally {
@@ -617,9 +559,7 @@ function NotebookPageContent() {
       setIsNotebookSearchMode(true);
 
       try {
-        const token = isDevelopmentMode
-          ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-          : await getToken();
+        const token = await getToken();
 
         if (!token || !notebook) return;
 
@@ -635,7 +575,7 @@ function NotebookPageContent() {
         setNotebookSearchLoading(false);
       }
     }, 300);
-  }, [isDevelopmentMode, getToken, notebook]);
+  }, [getToken, notebook]);
 
   const clearNotebookSearch = () => {
     setNotebookSearchQuery('');
@@ -1153,11 +1093,7 @@ function NotebookPageContent() {
           page_count: totalPages,
         } : null}
         hasNotion={hasNotion}
-        getToken={async () => {
-          const isDev = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
-          if (isDev) return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
-          return await getToken();
-        }}
+        getToken={getToken}
         onDeleted={() => router.push('/dashboard')}
       />
     </div>
