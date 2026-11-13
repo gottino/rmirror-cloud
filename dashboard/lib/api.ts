@@ -1,44 +1,35 @@
 /**
- * API client for rMirror backend
+ * API client for rMirror backend.
+ *
+ * Every request goes through `apiFetch` (lib/apiClient.ts); components call
+ * these functions and never build backend URLs themselves.
  */
+import { apiFetch, ApiError, filenameFromResponse, type ApiFetchOptions } from './apiClient';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
+export { ApiError, QuotaExceededError } from './apiClient';
 
-// Debug: log API URL on client side
-if (typeof window !== 'undefined') {
-  console.log('API_URL configured as:', API_URL);
-}
-
-/**
- * Handle API response and check for quota exceeded errors
- */
-async function handleApiResponse<T>(response: Response): Promise<T> {
-  // Check for 402 Payment Required (quota exceeded)
-  if (response.status === 402) {
-    const errorData = await response.json();
-    if (errorData.quota) {
-      throw new QuotaExceededError(errorData.quota);
+/** Rethrow a 403 from an admin endpoint with the message the admin pages show. */
+async function adminFetch<T>(path: string, options: ApiFetchOptions): Promise<T> {
+  try {
+    return await apiFetch<T>(path, options);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 403) {
+      throw new ApiError(403, 'Admin access required', err.detail, err.statusText);
     }
-    throw new Error('Quota exceeded');
+    throw err;
   }
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || `API error: ${response.status}`);
-  }
-
-  return response.json();
 }
 
-// Export for use in components
-export class QuotaExceededError extends Error {
-  quota: QuotaStatus;
+/** `{success, message}` body returned by several integration endpoints. */
+export interface SuccessMessageResponse {
+  success: boolean;
+  message: string;
+}
 
-  constructor(quota: QuotaStatus) {
-    super('Quota exceeded');
-    this.name = 'QuotaExceededError';
-    this.quota = quota;
-  }
+/** A downloaded file and the filename the backend suggested, if any. */
+export interface DownloadedFile {
+  blob: Blob;
+  filename: string | null;
 }
 
 export interface Notebook {
@@ -57,11 +48,21 @@ export interface Notebook {
   last_synced_at: string | null;
 }
 
+/** Values of backend app/models/page.py `OcrStatus`. */
+export type OcrStatus =
+  | 'not_synced'
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+  | 'pending_quota';
+
 export interface Page {
   id: number;
   notebook_id: number;
   page_number: number;
-  ocr_status: string;
+  ocr_status: OcrStatus;
   ocr_text: string | null;
   ocr_error: string | null;
   pdf_s3_key: string | null;
@@ -69,8 +70,25 @@ export interface Page {
   updated_at: string;
 }
 
+export interface NotebookPageCounts {
+  total_pages: number;
+  synced_pages: number;
+  not_synced_pages: number;
+  pending_quota_pages: number;
+}
+
 export interface NotebookWithPages extends Notebook {
   pages: Page[];
+  /** Counts over all pages; present even when pages were not requested. */
+  page_counts?: NotebookPageCounts | null;
+}
+
+export interface NotebookPagesResponse {
+  items: Page[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
 }
 
 export interface SyncProgress {
@@ -102,42 +120,66 @@ export interface NotebookTree {
 }
 
 /**
- * Fetch notebooks for the current user
- */
-export async function getNotebooks(token: string): Promise<Notebook[]> {
-  const response = await fetch(`${API_URL}/notebooks/`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
-  });
-
-  return handleApiResponse<Notebook[]>(response);
-}
-
-/**
  * Fetch notebooks organized in a tree structure
  */
-export async function getNotebooksTree(token: string): Promise<NotebookTree> {
-  const response = await fetch(`${API_URL}/notebooks/tree`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
-  });
-
-  return handleApiResponse<NotebookTree>(response);
+export async function getNotebooksTree(token: string, signal?: AbortSignal): Promise<NotebookTree> {
+  return apiFetch<NotebookTree>('/notebooks/tree', { token, signal });
 }
 
 /**
  * Fetch a single notebook with its pages
  */
-export async function getNotebook(id: number, token: string): Promise<NotebookWithPages> {
-  const response = await fetch(`${API_URL}/notebooks/${id}`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
+export async function getNotebook(
+  id: number,
+  token: string,
+  options?: { includePages?: boolean }
+): Promise<NotebookWithPages> {
+  return apiFetch<NotebookWithPages>(`/notebooks/${id}`, {
+    token,
+    query: { include_pages: options?.includePages === false ? 'false' : undefined },
   });
+}
 
-  return handleApiResponse<NotebookWithPages>(response);
+/**
+ * Fetch one window of a notebook's pages (with OCR text), ordered by page number
+ */
+export async function getNotebookPages(
+  id: number,
+  token: string,
+  options: { offset: number; limit: number; order?: 'asc' | 'desc' }
+): Promise<NotebookPagesResponse> {
+  return apiFetch<NotebookPagesResponse>(`/notebooks/${id}/pages`, {
+    token,
+    query: { offset: options.offset, limit: options.limit, order: options.order ?? 'asc' },
+  });
+}
+
+/**
+ * Fetch a page's PDF (authenticated)
+ */
+export async function getPagePdf(token: string, pageId: number): Promise<Blob> {
+  return apiFetch<Blob>(`/pages/${pageId}/pdf`, {
+    token,
+    responseType: 'blob',
+    errorMessage: 'Failed to load PDF',
+  });
+}
+
+/**
+ * Export a notebook as Markdown or PDF. Throws QuotaExceededError on 402.
+ */
+export async function exportNotebook(
+  token: string,
+  notebookId: number,
+  format: 'markdown' | 'pdf'
+): Promise<DownloadedFile> {
+  const response = await apiFetch<Response>(`/notebooks/${notebookId}/export`, {
+    token,
+    query: { format },
+    responseType: 'response',
+    fallbackMessage: (status) => `Export failed (${status})`,
+  });
+  return { blob: await response.blob(), filename: filenameFromResponse(response) };
 }
 
 /**
@@ -145,17 +187,7 @@ export async function getNotebook(id: number, token: string): Promise<NotebookWi
  */
 export async function trackAgentDownload(token: string): Promise<void> {
   try {
-    const response = await fetch(`${API_URL}/onboarding/agent-downloaded`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      console.error('Failed to track agent download');
-    }
+    await apiFetch('/onboarding/agent-downloaded', { token, method: 'POST', responseType: 'void' });
   } catch (error) {
     // Silent fail - don't block the download
     console.error('Error tracking agent download:', error);
@@ -171,18 +203,25 @@ export interface AgentStatus {
 /**
  * Get agent connection status
  */
-export async function getAgentStatus(token: string): Promise<AgentStatus> {
-  const response = await fetch(`${API_URL}/agents/status`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
+export async function getAgentStatus(token: string, signal?: AbortSignal): Promise<AgentStatus> {
+  return apiFetch<AgentStatus>('/agents/status', {
+    token,
+    signal,
+    errorMessage: 'Failed to fetch agent status',
   });
+}
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch agent status');
-  }
+/** backend app/schemas/auth.py `Token` */
+export interface AgentTokenResponse {
+  access_token: string;
+  token_type: string;
+}
 
-  return response.json();
+/**
+ * Exchange a Clerk session token for a long-lived agent token
+ */
+export async function exchangeAgentToken(clerkToken: string): Promise<AgentTokenResponse> {
+  return apiFetch<AgentTokenResponse>('/auth/agent-token', { token: clerkToken, method: 'POST' });
 }
 
 // ==================== Agent Version ====================
@@ -203,9 +242,8 @@ export interface AgentVersionInfo {
 /**
  * Get latest agent version and download URLs (public, no auth needed)
  */
-export async function getLatestAgentVersion(): Promise<AgentVersionInfo> {
-  const response = await fetch(`${API_URL}/agents/latest-version`);
-  return handleApiResponse<AgentVersionInfo>(response);
+export async function getLatestAgentVersion(signal?: AbortSignal): Promise<AgentVersionInfo> {
+  return apiFetch<AgentVersionInfo>('/agents/latest-version', { signal });
 }
 
 // ==================== Integrations ====================
@@ -219,9 +257,24 @@ export interface IntegrationConfig {
   last_synced_at: string | null;
 }
 
-export interface NotionOAuthUrlResponse {
+/** backend notion_oauth.py / todoist.py `OAuthUrlResponse` */
+export interface OAuthUrlResponse {
   authorization_url: string;
   state: string;
+}
+
+export type NotionOAuthUrlResponse = OAuthUrlResponse;
+
+/** backend notion_oauth.py `OAuthCallbackResponse` */
+export interface NotionOAuthCallbackResponse extends SuccessMessageResponse {
+  workspace_name?: string | null;
+  workspace_id?: string | null;
+}
+
+/** backend notion_oauth.py `select_database` return value */
+export interface SelectNotionDatabaseResponse extends SuccessMessageResponse {
+  database_id: string;
+  database_title: string | null;
 }
 
 export interface NotionDatabase {
@@ -250,88 +303,56 @@ export interface CreateDatabaseResponse {
  * Get all integrations for the current user
  */
 export async function getIntegrations(token: string): Promise<IntegrationConfig[]> {
-  const response = await fetch(`${API_URL}/integrations/`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
+  return apiFetch<IntegrationConfig[]>('/integrations/', {
+    token,
+    errorMessage: 'Failed to fetch integrations',
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch integrations');
-  }
-
-  return response.json();
 }
 
 /**
  * Get Notion OAuth authorization URL
  */
 export async function getNotionOAuthUrl(token: string): Promise<NotionOAuthUrlResponse> {
-  const response = await fetch(`${API_URL}/integrations/notion/oauth/authorize`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
+  return apiFetch<NotionOAuthUrlResponse>('/integrations/notion/oauth/authorize', {
+    token,
+    errorMessage: 'Failed to get OAuth URL',
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to get OAuth URL');
-  }
-
-  return response.json();
 }
 
 /**
  * Complete Notion OAuth callback
  */
-export async function notionOAuthCallback(token: string, code: string, state: string): Promise<any> {
-  const response = await fetch(`${API_URL}/integrations/notion/oauth/callback`, {
+export async function notionOAuthCallback(
+  token: string,
+  code: string,
+  state: string
+): Promise<NotionOAuthCallbackResponse> {
+  return apiFetch<NotionOAuthCallbackResponse>('/integrations/notion/oauth/callback', {
+    token,
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ code, state }),
+    body: { code, state },
+    errorMessage: 'Failed to complete OAuth',
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to complete OAuth');
-  }
-
-  return response.json();
 }
 
 /**
  * List available Notion databases
  */
 export async function listNotionDatabases(token: string): Promise<NotionDatabase[]> {
-  const response = await fetch(`${API_URL}/integrations/notion/databases`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
+  return apiFetch<NotionDatabase[]>('/integrations/notion/databases', {
+    token,
+    errorMessage: 'Failed to list databases',
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to list databases');
-  }
-
-  return response.json();
 }
 
 /**
  * List available Notion pages (for parent selection)
  */
 export async function listNotionPages(token: string): Promise<NotionPage[]> {
-  const response = await fetch(`${API_URL}/integrations/notion/pages`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
+  return apiFetch<NotionPage[]>('/integrations/notion/pages', {
+    token,
+    errorMessage: 'Failed to list pages',
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to list pages');
-  }
-
-  return response.json();
 }
 
 /**
@@ -343,24 +364,16 @@ export async function createNotionDatabase(
   databaseType: 'notebooks' | 'todos',
   parentPageId?: string
 ): Promise<CreateDatabaseResponse> {
-  const response = await fetch(`${API_URL}/integrations/notion/databases/create`, {
+  return apiFetch<CreateDatabaseResponse>('/integrations/notion/databases/create', {
+    token,
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+    body: {
       database_title: databaseTitle,
       database_type: databaseType,
       parent_page_id: parentPageId,
-    }),
+    },
+    errorMessage: 'Failed to create database',
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to create database');
-  }
-
-  return response.json();
 }
 
 /**
@@ -370,19 +383,13 @@ export async function selectNotionDatabase(
   token: string,
   databaseId: string,
   databaseType: 'notebooks' | 'todos'
-): Promise<any> {
-  const response = await fetch(`${API_URL}/integrations/notion/databases/${databaseId}/select?database_type=${databaseType}`, {
+): Promise<SelectNotionDatabaseResponse> {
+  return apiFetch<SelectNotionDatabaseResponse>(`/integrations/notion/databases/${databaseId}/select`, {
+    token,
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
+    query: { database_type: databaseType },
+    errorMessage: 'Failed to select database',
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to select database');
-  }
-
-  return response.json();
 }
 
 /**
@@ -396,36 +403,22 @@ export interface IntegrationTestResult {
 }
 
 export async function testIntegrationConnection(token: string, targetName: string): Promise<IntegrationTestResult> {
-  const response = await fetch(`${API_URL}/integrations/${targetName}/test`, {
+  return apiFetch<IntegrationTestResult>(`/integrations/${targetName}/test`, {
+    token,
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
+    errorMessage: 'Failed to test integration connection',
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to test integration connection');
-  }
-
-  return response.json();
 }
 
 /**
  * Delete an integration
  */
-export async function deleteIntegration(token: string, targetName: string): Promise<any> {
-  const response = await fetch(`${API_URL}/integrations/${targetName}`, {
+export async function deleteIntegration(token: string, targetName: string): Promise<SuccessMessageResponse> {
+  return apiFetch<SuccessMessageResponse>(`/integrations/${targetName}`, {
+    token,
     method: 'DELETE',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
+    errorMessage: 'Failed to delete integration',
   });
-
-  if (!response.ok) {
-    throw new Error('Failed to delete integration');
-  }
-
-  return response.json();
 }
 
 // ==================== Notebook Deletion ====================
@@ -444,20 +437,11 @@ export async function deleteNotebook(
   notebookId: number,
   cleanupNotion: boolean = false
 ): Promise<DeleteNotebookResponse> {
-  const params = new URLSearchParams();
-  if (cleanupNotion) params.set('cleanup_notion', 'true');
-
-  const response = await fetch(
-    `${API_URL}/notebooks/${notebookId}?${params.toString()}`,
-    {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    }
-  );
-
-  return handleApiResponse<DeleteNotebookResponse>(response);
+  return apiFetch<DeleteNotebookResponse>(`/notebooks/${notebookId}`, {
+    token,
+    method: 'DELETE',
+    query: { cleanup_notion: cleanupNotion ? 'true' : undefined },
+  });
 }
 
 // ==================== Quota ====================
@@ -479,26 +463,7 @@ export interface QuotaStatus {
  * Get quota status for the current user
  */
 export async function getQuotaStatus(token: string): Promise<QuotaStatus> {
-  const response = await fetch(`${API_URL}/quota/status`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
-  });
-
-  return handleApiResponse<QuotaStatus>(response);
-}
-
-/**
- * Check if user has available quota
- */
-export async function checkQuota(token: string): Promise<{ has_quota: boolean; quota: QuotaStatus }> {
-  const response = await fetch(`${API_URL}/quota/check`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
-  });
-
-  return handleApiResponse<{ has_quota: boolean; quota: QuotaStatus }>(response);
+  return apiFetch<QuotaStatus>('/quota/status', { token });
 }
 
 // ==================== Search ====================
@@ -558,14 +523,8 @@ export interface OnboardingProgress {
 /**
  * Get onboarding progress for the current user
  */
-export async function getOnboardingProgress(token: string): Promise<OnboardingProgress> {
-  const response = await fetch(`${API_URL}/onboarding/progress`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
-  });
-
-  return handleApiResponse<OnboardingProgress>(response);
+export async function getOnboardingProgress(token: string, signal?: AbortSignal): Promise<OnboardingProgress> {
+  return apiFetch<OnboardingProgress>('/onboarding/progress', { token, signal });
 }
 
 /**
@@ -573,17 +532,7 @@ export async function getOnboardingProgress(token: string): Promise<OnboardingPr
  */
 export async function dismissOnboarding(token: string): Promise<void> {
   try {
-    const response = await fetch(`${API_URL}/onboarding/dismiss`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      console.error('Failed to dismiss onboarding');
-    }
+    await apiFetch('/onboarding/dismiss', { token, method: 'POST', responseType: 'void' });
   } catch (error) {
     console.error('Error dismissing onboarding:', error);
   }
@@ -611,20 +560,6 @@ export interface WaitlistAdminResponse {
   };
 }
 
-export interface InviteValidationResponse {
-  valid: boolean;
-  email?: string;
-  reason?: string;
-}
-
-/**
- * Validate an invite token (public, no auth needed)
- */
-export async function validateInviteToken(token: string): Promise<InviteValidationResponse> {
-  const response = await fetch(`${API_URL}/waitlist/validate-invite?token=${encodeURIComponent(token)}`);
-  return response.json();
-}
-
 /**
  * Get waitlist entries (admin only)
  */
@@ -634,20 +569,10 @@ export async function getWaitlistAdmin(
   skip?: number,
   limit?: number
 ): Promise<WaitlistAdminResponse> {
-  const params = new URLSearchParams();
-  if (status) params.set('status', status);
-  if (skip) params.set('skip', skip.toString());
-  if (limit) params.set('limit', limit.toString());
-
-  const response = await fetch(`${API_URL}/waitlist/admin?${params}`, {
-    headers: { 'Authorization': `Bearer ${token}` },
+  return adminFetch<WaitlistAdminResponse>('/waitlist/admin', {
+    token,
+    query: { status: status || undefined, skip: skip || undefined, limit: limit || undefined },
   });
-
-  if (response.status === 403) {
-    throw new Error('Admin access required');
-  }
-
-  return handleApiResponse<WaitlistAdminResponse>(response);
 }
 
 /**
@@ -657,12 +582,7 @@ export async function approveWaitlistEntry(
   token: string,
   entryId: number
 ): Promise<WaitlistEntry> {
-  const response = await fetch(`${API_URL}/waitlist/admin/${entryId}/approve`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}` },
-  });
-
-  return handleApiResponse<WaitlistEntry>(response);
+  return apiFetch<WaitlistEntry>(`/waitlist/admin/${entryId}/approve`, { token, method: 'POST' });
 }
 
 /**
@@ -672,16 +592,10 @@ export async function approveWaitlistBulk(
   token: string,
   ids: number[]
 ): Promise<{ approved: number; errors: Array<{ id: number; error: string }> }> {
-  const response = await fetch(`${API_URL}/waitlist/admin/approve-bulk`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ ids }),
-  });
-
-  return handleApiResponse<{ approved: number; errors: Array<{ id: number; error: string }> }>(response);
+  return apiFetch<{ approved: number; errors: Array<{ id: number; error: string }> }>(
+    '/waitlist/admin/approve-bulk',
+    { token, method: 'POST', body: { ids } }
+  );
 }
 
 // ==================== Admin Users ====================
@@ -730,21 +644,15 @@ export async function getAdminUsers(
   sortBy?: string,
   sortDir?: string
 ): Promise<AdminUsersResponse> {
-  const params = new URLSearchParams();
-  if (skip) params.set('skip', skip.toString());
-  if (limit) params.set('limit', limit.toString());
-  if (sortBy) params.set('sort_by', sortBy);
-  if (sortDir) params.set('sort_dir', sortDir);
-
-  const response = await fetch(`${API_URL}/admin/users?${params}`, {
-    headers: { 'Authorization': `Bearer ${token}` },
+  return adminFetch<AdminUsersResponse>('/admin/users', {
+    token,
+    query: {
+      skip: skip || undefined,
+      limit: limit || undefined,
+      sort_by: sortBy || undefined,
+      sort_dir: sortDir || undefined,
+    },
   });
-
-  if (response.status === 403) {
-    throw new Error('Admin access required');
-  }
-
-  return handleApiResponse<AdminUsersResponse>(response);
 }
 
 // ==================== Search ====================
@@ -761,19 +669,18 @@ export async function searchNotebooks(
     dateTo?: string;          // ISO date string
   }
 ): Promise<SearchResponse> {
-  const params = new URLSearchParams({ q: query });
-  if (options?.skip) params.set('skip', options.skip.toString());
-  if (options?.limit) params.set('limit', options.limit.toString());
-  if (options?.parentUuid) params.set('parent_uuid', options.parentUuid);
-  if (options?.notebookId) params.set('notebook_id', options.notebookId.toString());
-  if (options?.dateFrom) params.set('date_from', options.dateFrom);
-  if (options?.dateTo) params.set('date_to', options.dateTo);
-
-  const response = await fetch(`${API_URL}/search?${params}`, {
-    headers: { 'Authorization': `Bearer ${token}` },
+  return apiFetch<SearchResponse>('/search', {
+    token,
+    query: {
+      q: query,
+      skip: options?.skip || undefined,
+      limit: options?.limit || undefined,
+      parent_uuid: options?.parentUuid || undefined,
+      notebook_id: options?.notebookId || undefined,
+      date_from: options?.dateFrom || undefined,
+      date_to: options?.dateTo || undefined,
+    },
   });
-
-  return handleApiResponse<SearchResponse>(response);
 }
 
 // ==================== Legal ====================
@@ -790,29 +697,15 @@ export interface LegalStatus {
 /**
  * Get the user's legal acceptance status
  */
-export async function getLegalStatus(token: string): Promise<LegalStatus> {
-  const response = await fetch(`${API_URL}/users/legal-status`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
-  });
-
-  return handleApiResponse<LegalStatus>(response);
+export async function getLegalStatus(token: string, signal?: AbortSignal): Promise<LegalStatus> {
+  return apiFetch<LegalStatus>('/users/legal-status', { token, signal });
 }
 
 /**
  * Accept the current ToS and Privacy Policy
  */
 export async function acceptTerms(token: string): Promise<LegalStatus> {
-  const response = await fetch(`${API_URL}/users/accept-terms`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  return handleApiResponse<LegalStatus>(response);
+  return apiFetch<LegalStatus>('/users/accept-terms', { token, method: 'POST' });
 }
 
 // ==================== Obsidian Integration ====================
@@ -831,58 +724,35 @@ export interface ObsidianStatusResponse {
 }
 
 export async function enableObsidian(token: string): Promise<ObsidianEnableResponse> {
-  const response = await fetch(`${API_URL}/integrations/obsidian/enable`, {
+  return apiFetch<ObsidianEnableResponse>('/integrations/obsidian/enable', {
+    token,
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+    fallbackMessage: 'Failed to enable Obsidian',
   });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to enable Obsidian');
-  }
-  return response.json();
 }
 
 export async function regenerateObsidianKey(token: string): Promise<ObsidianEnableResponse> {
-  const response = await fetch(`${API_URL}/integrations/obsidian/regenerate-key`, {
+  return apiFetch<ObsidianEnableResponse>('/integrations/obsidian/regenerate-key', {
+    token,
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+    fallbackMessage: 'Failed to regenerate key',
   });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to regenerate key');
-  }
-  return response.json();
 }
 
 export async function disableObsidian(token: string): Promise<void> {
-  const response = await fetch(`${API_URL}/integrations/obsidian/disable`, {
+  return apiFetch<void>('/integrations/obsidian/disable', {
+    token,
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+    responseType: 'void',
+    fallbackMessage: 'Failed to disable Obsidian',
   });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to disable Obsidian');
-  }
 }
 
 export async function getObsidianStatus(token: string): Promise<ObsidianStatusResponse> {
-  const response = await fetch(`${API_URL}/integrations/obsidian/status`, {
-    headers: { 'Authorization': `Bearer ${token}` },
+  return apiFetch<ObsidianStatusResponse>('/integrations/obsidian/status', {
+    token,
+    fallbackMessage: 'Failed to get Obsidian status',
   });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || 'Failed to get Obsidian status');
-  }
-  return response.json();
 }
 
 // ==================== Todoist Integration ====================
@@ -901,74 +771,109 @@ export interface TodoistStatus {
   todos_synced: number;
 }
 
-export async function getTodoistOAuthUrl(token: string) {
-  const response = await fetch(`${API_URL}/integrations/todoist/oauth/authorize`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) throw new Error('Failed to get Todoist OAuth URL');
-  return response.json();
+/** backend todoist.py `set_project` return value */
+export interface SetTodoistProjectResponse extends SuccessMessageResponse {
+  todos_queued: number;
 }
 
-export async function todoistOAuthCallback(token: string, code: string, state: string) {
-  const response = await fetch(`${API_URL}/integrations/todoist/oauth/callback`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ code, state }),
+export async function getTodoistOAuthUrl(token: string): Promise<OAuthUrlResponse> {
+  return apiFetch<OAuthUrlResponse>('/integrations/todoist/oauth/authorize', {
+    token,
+    errorMessage: 'Failed to get Todoist OAuth URL',
   });
-  if (!response.ok) throw new Error('Failed to complete Todoist OAuth');
-  return response.json();
+}
+
+export async function todoistOAuthCallback(
+  token: string,
+  code: string,
+  state: string
+): Promise<SuccessMessageResponse> {
+  return apiFetch<SuccessMessageResponse>('/integrations/todoist/oauth/callback', {
+    token,
+    method: 'POST',
+    body: { code, state },
+    errorMessage: 'Failed to complete Todoist OAuth',
+  });
 }
 
 export async function getTodoistProjects(token: string): Promise<TodoistProject[]> {
-  const response = await fetch(`${API_URL}/integrations/todoist/projects`, {
-    headers: { Authorization: `Bearer ${token}` },
+  return apiFetch<TodoistProject[]>('/integrations/todoist/projects', {
+    token,
+    errorMessage: 'Failed to fetch Todoist projects',
   });
-  if (!response.ok) throw new Error('Failed to fetch Todoist projects');
-  return response.json();
 }
 
-export async function setTodoistProject(token: string, projectId: string, projectName: string) {
-  const response = await fetch(`${API_URL}/integrations/todoist/project`, {
+export async function setTodoistProject(
+  token: string,
+  projectId: string,
+  projectName: string
+): Promise<SetTodoistProjectResponse> {
+  return apiFetch<SetTodoistProjectResponse>('/integrations/todoist/project', {
+    token,
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ project_id: projectId, project_name: projectName }),
+    body: { project_id: projectId, project_name: projectName },
+    errorMessage: 'Failed to set Todoist project',
   });
-  if (!response.ok) throw new Error('Failed to set Todoist project');
-  return response.json();
 }
 
 export async function getTodoistStatus(token: string): Promise<TodoistStatus> {
-  const response = await fetch(`${API_URL}/integrations/todoist/status`, {
-    headers: { Authorization: `Bearer ${token}` },
+  return apiFetch<TodoistStatus>('/integrations/todoist/status', {
+    token,
+    errorMessage: 'Failed to get Todoist status',
   });
-  if (!response.ok) throw new Error('Failed to get Todoist status');
-  return response.json();
 }
 
 export async function createTodoistProject(token: string, name: string = 'reMarkable Notes'): Promise<TodoistProject> {
-  const response = await fetch(`${API_URL}/integrations/todoist/projects/create`, {
+  return apiFetch<TodoistProject>('/integrations/todoist/projects/create', {
+    token,
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ name }),
+    body: { name },
+    errorMessage: 'Failed to create Todoist project',
   });
-  if (!response.ok) throw new Error('Failed to create Todoist project');
-  return response.json();
 }
 
-export async function disconnectTodoist(token: string) {
-  const response = await fetch(`${API_URL}/integrations/todoist/disconnect`, {
+export async function disconnectTodoist(token: string): Promise<SuccessMessageResponse> {
+  return apiFetch<SuccessMessageResponse>('/integrations/todoist/disconnect', {
+    token,
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    errorMessage: 'Failed to disconnect Todoist',
   });
-  if (!response.ok) throw new Error('Failed to disconnect Todoist');
-  return response.json();
+}
+
+// ==================== Account ====================
+
+/** backend services/account_service.py `get_data_summary` */
+export interface AccountDataSummary {
+  notebooks: number;
+  pages: number;
+  files: number;
+  integrations: string[];
+  member_since: string | null;
+  subscription: string;
+}
+
+export async function getAccountDataSummary(token: string): Promise<AccountDataSummary> {
+  return apiFetch<AccountDataSummary>('/account/data-summary', { token });
+}
+
+/** Download a ZIP of all the user's data */
+export async function exportAccountData(token: string): Promise<DownloadedFile> {
+  const response = await apiFetch<Response>('/account/export', {
+    token,
+    method: 'POST',
+    responseType: 'response',
+    errorMessage: 'Export failed',
+  });
+  return { blob: await response.blob(), filename: filenameFromResponse(response) };
+}
+
+/** Permanently delete the account; `confirmation` must be the exact phrase */
+export async function deleteAccount(token: string, confirmation: string): Promise<void> {
+  return apiFetch<void>('/account', {
+    token,
+    method: 'DELETE',
+    body: { confirmation },
+    responseType: 'void',
+    fallbackMessage: 'Deletion failed',
+  });
 }
