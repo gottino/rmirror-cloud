@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { useAuth } from '@clerk/nextjs';
+import { useApiToken } from '@/lib/useApiToken';
 import UserMenu from '@/components/UserMenu';
 import { useRouter } from 'next/navigation';
 import { Menu } from 'lucide-react';
@@ -10,12 +10,9 @@ import { getTodoistProjects, setTodoistProject, createTodoistProject, TodoistPro
 import { trackEvent } from '@/lib/analytics';
 
 function TodoistSetupContent() {
-  const { getToken } = useAuth();
+  const getToken = useApiToken();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  // Development mode bypass
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
 
   const [projects, setProjects] = useState<TodoistProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
@@ -31,9 +28,7 @@ function TodoistSetupContent() {
   async function loadProjects() {
     setLoading(true);
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const data = await getTodoistProjects(token);
@@ -57,9 +52,7 @@ function TodoistSetupContent() {
     setCreating(true);
     setError(null);
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const newProject = await createTodoistProject(token, 'reMarkable Notes');
@@ -83,9 +76,7 @@ function TodoistSetupContent() {
 
     setSaving(true);
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       await setTodoistProject(token, project.id, project.name);
