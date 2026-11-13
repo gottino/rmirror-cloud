@@ -166,13 +166,21 @@ AGENT_BLOCKED_ROUTES = [
     ("DELETE", f"{API}/notebooks/{{notebook_id}}"),
     ("GET", f"{API}/notebooks/{{notebook_id}}/export"),
     ("POST", f"{API}/auth/agent-token"),
+    ("POST", f"{API}/auth/agent-token/revoke"),
     ("GET", f"{API}/admin/users"),
     ("GET", f"{API}/waitlist/admin"),
     ("POST", f"{API}/waitlist/admin/{{entry_id}}/approve"),
     ("POST", f"{API}/users/accept-terms"),
     ("POST", f"{API}/sync/trigger"),
-    ("POST", f"{API}/sync/process-queue"),
     ("POST", f"{API}/processing/metadata/rebuild-paths"),
+    # Read the user's notebook content; the agent never calls them.
+    ("GET", f"{API}/notebooks/"),
+    ("GET", f"{API}/notebooks/tree"),
+    ("GET", f"{API}/notebooks/uuid/{{notebook_uuid}}"),
+    ("GET", f"{API}/notebooks/{{notebook_id}}"),
+    ("GET", f"{API}/notebooks/{{notebook_id}}/pages"),
+    ("GET", f"{API}/pages/{{page_id}}/pdf"),
+    ("GET", f"{API}/search"),
 ]
 
 # Routes the Mac agent calls; guarding any of them would break sync.
@@ -183,6 +191,42 @@ AGENT_ALLOWED_ROUTES = [
     ("POST", f"{API}/processing/rm-file"),
     ("GET", f"{API}/quota/status"),
     ("POST", f"{API}/agents/register"),
+    ("POST", f"{API}/processing/metadata/update"),
+    ("POST", f"{API}/notebooks/{{notebook_uuid}}/content"),
+    ("GET", f"{API}/sync/deleted-notebooks"),
+    ("POST", f"{API}/sync/deleted-notebooks/{{notebook_uuid}}/acknowledge"),
+]
+
+# Routes an agent token can reach although the agent does not call them.
+# Reviewed and left open for now (low sensitivity, or writes whose guard needs
+# a separate decision); each one is a candidate for a guard.
+AGENT_REACHABLE_UNUSED_ROUTES = [
+    ("GET", f"{API}/users/legal-status"),
+    ("GET", f"{API}/onboarding/progress"),
+    ("POST", f"{API}/onboarding/progress"),
+    ("POST", f"{API}/onboarding/agent-downloaded"),
+    ("POST", f"{API}/onboarding/dismiss"),
+    ("POST", f"{API}/agents/heartbeat"),
+    ("GET", f"{API}/agents/status"),
+    ("POST", f"{API}/notebooks/upload"),
+    ("GET", f"{API}/quota/check"),
+    ("GET", f"{API}/sync/status/{{target_name}}"),
+]
+
+# Routes that do not take Clerk or agent bearer tokens at all.
+NON_CLERK_ROUTES = [
+    # Public
+    ("GET", "/"),
+    ("GET", "/health"),
+    ("GET", f"{API}/agents/latest-version"),
+    ("GET", f"{API}/agents/clerk-config"),
+    ("POST", f"{API}/waitlist"),
+    ("GET", f"{API}/waitlist/validate-invite"),
+    # Webhook signature
+    ("POST", f"{API}/webhooks/clerk"),
+    # Obsidian API key
+    ("GET", f"{API}/integrations/obsidian/sync"),
+    ("POST", f"{API}/integrations/obsidian/sync/confirm"),
 ]
 
 
@@ -220,6 +264,53 @@ def test_real_route_rejects_agent_tokens(method, path):
 @pytest.mark.parametrize("method,path", AGENT_ALLOWED_ROUTES)
 def test_real_agent_route_stays_open_to_agent_tokens(method, path):
     assert not _is_agent_guarded(_find_route(method, path)), f"{method} {path} would block the agent"
+
+
+@pytest.mark.parametrize("method,path", AGENT_REACHABLE_UNUSED_ROUTES)
+def test_reviewed_unused_route_is_listed_correctly(method, path):
+    route = _find_route(method, path)
+    assert not _is_agent_guarded(route), (
+        f"{method} {path} is guarded now; move it to AGENT_BLOCKED_ROUTES"
+    )
+
+
+@pytest.mark.parametrize("method,path", NON_CLERK_ROUTES)
+def test_non_clerk_route_does_not_use_clerk_auth(method, path):
+    from app.auth.clerk import get_clerk_user
+
+    route = _find_route(method, path)
+    assert get_clerk_user not in _dependency_calls(route.dependant), (
+        f"{method} {path} uses Clerk/agent auth; classify it as agent-allowed or guard it"
+    )
+
+
+def test_every_route_is_classified_for_agent_tokens():
+    """Each route must be agent-guarded, agent-allowed, reviewed, or non-Clerk.
+
+    A new router or endpoint fails this test until someone decides whether
+    the Mac agent's long-lived token may call it.
+    """
+    from fastapi.routing import APIRoute
+
+    from app.main import app
+
+    open_to_agent = set(AGENT_ALLOWED_ROUTES) | set(AGENT_REACHABLE_UNUSED_ROUTES)
+    non_clerk = set(NON_CLERK_ROUTES)
+    unclassified = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
+            key = (method, route.path)
+            if _is_agent_guarded(route) or key in open_to_agent or key in non_clerk:
+                continue
+            unclassified.append(f"{method} {route.path}")
+    assert not unclassified, (
+        "Routes not classified for agent tokens (guard them with "
+        "get_clerk_session_user/reject_agent_token, or add them to "
+        "AGENT_ALLOWED_ROUTES / AGENT_REACHABLE_UNUSED_ROUTES / NON_CLERK_ROUTES): "
+        + ", ".join(unclassified)
+    )
 
 
 @pytest.fixture

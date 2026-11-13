@@ -1,0 +1,7 @@
+{
+  "from": "rMirror Cloud <noreply@example.com>",
+  "to": [
+    "Ann <b>O'Neil</b> & \"Co\" <ann@example.com>"
+  ],
+  "subject": "Your notebooks are in the cloud!"
+}

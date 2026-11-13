@@ -12,6 +12,7 @@ from svix.webhooks import Webhook, WebhookVerificationError
 from app.api.users import CURRENT_PRIVACY_VERSION, CURRENT_TOS_VERSION
 from app.config import get_settings
 from app.database import get_db
+from app.middleware.rate_limit import WEBHOOK_LIMIT, limiter
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
 from app.models.user import User
 from app.utils.email import get_email_service
@@ -56,6 +57,7 @@ def verify_webhook_signature(payload: bytes, headers: dict, webhook_secret: str)
 
 
 @router.post("")
+@limiter.limit(WEBHOOK_LIMIT)  # unauthenticated until the signature check: per IP
 async def clerk_webhook(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
@@ -88,13 +90,13 @@ async def clerk_webhook(
     global _webhook_secret_warned
 
     if not settings.clerk_webhook_secret:
-        # In production, webhook secret is required
-        if not settings.debug:
+        # Webhook secret is required unless explicitly allowed for local dev
+        if not settings.allow_unsigned_webhooks:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Webhook secret not configured",
             )
-        # In development, warn once and allow
+        # ALLOW_UNSIGNED_WEBHOOKS (SQLite only): warn once and allow
         if not _webhook_secret_warned:
             logger.warning(
                 "CLERK_WEBHOOK_SECRET not configured - webhook signature verification disabled. "

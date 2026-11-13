@@ -15,25 +15,17 @@ alembic = "^1.13.1"
 psycopg2-binary = "^2.9.9"
 pydantic = {extras = ["email"], version = "^2.5.3"}
 pydantic-settings = "^2.1.0"
-python-jose = {extras = ["cryptography"], version = "^3.3.0"}
-passlib = {extras = ["bcrypt"], version = "^1.7.4"}
 python-multipart = "^0.0.6"
-redis = "^5.0.1"
-rq = "^1.16.1"
 boto3 = "^1.34.34"
 pypdf = "^3.17.4"
 python-magic = "^0.4.27"
 aiofiles = "^23.2.1"
 httpx = "^0.28.1"
-tenacity = "^8.2.3"
 rmscene = "^0.6.0"
 rmc = {git = "https://github.com/ricklupton/rmc.git"}
-anthropic = "^0.86.0"
 notion-client = "^2.7.0"
-clerk-backend-sdk = "^1.0.0"
 svix = "^1.17.0"
 resend = "^2.19.0"
-pypdf2 = "^3.0.1"
 slowapi = "^0.1.9"
 pyjwt = {version = ">=2.4.0", extras = ["crypto"]}
 google-genai = "^1.69.0"
@@ -71,8 +63,31 @@ ignore = [
 "app/models/*.py" = ["F821"]
 # Scripts have imports after path setup
 "*.py" = ["E402"]
-# Sync manager has intentional dead code for debugging
-"app/core/unified_sync_manager.py" = ["F841"]
+
+[tool.deptry]
+# Run as: deptry app alembic   (CI: backend-checks job)
+known_first_party = ["app"]
+
+[tool.deptry.per_rule_ignores]
+# Used at runtime without an import in app/: the ASGI server, the PostgreSQL
+# driver (picked by DATABASE_URL), and FastAPI's form/file upload parser.
+DEP002 = ["uvicorn", "psycopg2-binary", "python-multipart"]
+# Imported directly but installed through a declared package: starlette via
+# fastapi, botocore via boto3, cryptography via pyjwt[crypto].
+DEP003 = ["starlette", "botocore", "cryptography"]
+
+[tool.vulture]
+# Run as: vulture   (CI: backend-checks job). Allowlist: vulture_allowlist.py
+paths = ["app", "vulture_allowlist.py"]
+min_confidence = 60
+ignore_decorators = [
+    "@router.*",
+    "@app.*",
+    "@limiter.*",
+    "@field_validator",
+    "@model_validator",
+    "@validator",
+]
 
 [tool.mypy]
 python_version = "3.11"

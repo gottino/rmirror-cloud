@@ -33,18 +33,6 @@ class AgentHeartbeatRequest(BaseModel):
     agent_id: str
 
 
-class AgentStatusResponse(BaseModel):
-    """Agent status response."""
-
-    agent_id: str
-    is_online: bool
-    version: str
-    platform: str
-    hostname: str | None
-    first_seen_at: datetime
-    last_seen_at: datetime
-
-
 @router.post("/register")
 async def register_agent(
     request: AgentRegistrationRequest,

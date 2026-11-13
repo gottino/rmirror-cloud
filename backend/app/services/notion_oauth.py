@@ -22,7 +22,7 @@ class NotionOAuthService:
         self.client_id = settings.notion_client_id
         self.client_secret = settings.notion_client_secret
         self.redirect_uri = settings.notion_redirect_uri
-        self.debug = settings.debug
+        self.disable_tls_verify = settings.disable_tls_verify
         self.logger = logger
 
         if not all([self.client_id, self.client_secret, self.redirect_uri]):
@@ -30,16 +30,16 @@ class NotionOAuthService:
 
     def _get_http_client(self) -> httpx.Client:
         """
-        Create httpx client with SSL verification based on debug mode.
+        Create httpx client; TLS verification is off only with DISABLE_TLS_VERIFY.
 
         Returns:
             httpx.Client instance
         """
-        return httpx.Client(verify=not self.debug)
+        return httpx.Client(verify=not self.disable_tls_verify)
 
     def _get_notion_client(self, access_token: str) -> NotionClient:
         """
-        Create Notion client with SSL verification disabled in debug mode.
+        Create Notion client (TLS verification off only with DISABLE_TLS_VERIFY).
 
         Args:
             access_token: Notion OAuth access token
@@ -47,7 +47,7 @@ class NotionOAuthService:
         Returns:
             NotionClient instance configured for API version 2025-09-03
         """
-        if self.debug:
+        if self.disable_tls_verify:
             # Create httpx client with SSL verification disabled
             http_client = self._get_http_client()
             return NotionClient(
@@ -102,8 +102,8 @@ class NotionOAuthService:
         """
         settings = get_settings()
 
-        # Disable SSL verification in development mode
-        async with httpx.AsyncClient(verify=not settings.debug) as client:
+        # TLS verification is off only with DISABLE_TLS_VERIFY (SQLite dev only)
+        async with httpx.AsyncClient(verify=not settings.disable_tls_verify) as client:
             response = await client.post(
                 "https://api.notion.com/v1/oauth/token",
                 auth=(self.client_id, self.client_secret),

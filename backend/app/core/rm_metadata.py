@@ -63,19 +63,6 @@ class RMMetadataParser:
 
         return self.parse(io.BytesIO(content))
 
-    def parse_string(self, json_str: str) -> RMMetadata:
-        """
-        Parse metadata from JSON string.
-
-        Args:
-            json_str: JSON string
-
-        Returns:
-            Parsed RMMetadata object
-        """
-        data = json.loads(json_str)
-        return self._parse_dict(data)
-
     def _parse_dict(self, data: dict[str, Any]) -> RMMetadata:
         """Parse metadata from dictionary."""
         # Required fields
@@ -102,34 +89,3 @@ class RMMetadataParser:
             bookmarked=data.get("bookmarked", False),
             redirect_document_uuid=data.get("redirectionPageMap"),
         )
-
-    def to_dict(self, metadata: RMMetadata) -> dict[str, Any]:
-        """
-        Convert RMMetadata back to dictionary format.
-
-        Args:
-            metadata: RMMetadata object
-
-        Returns:
-            Dictionary in reMarkable format
-        """
-        result = {
-            "visibleName": metadata.visible_name,
-            "type": metadata.document_type,
-            "parent": metadata.parent,
-            "lastModified": str(int(metadata.last_modified.timestamp() * 1000)),
-            "version": metadata.version,
-            "pinned": metadata.pinned,
-            "synced": metadata.synced,
-        }
-
-        if metadata.modified_client:
-            result["lastModifiedClient"] = metadata.modified_client
-        if metadata.current_page is not None:
-            result["currentPage"] = metadata.current_page
-        if metadata.bookmarked:
-            result["bookmarked"] = metadata.bookmarked
-        if metadata.redirect_document_uuid:
-            result["redirectionPageMap"] = metadata.redirect_document_uuid
-
-        return result
