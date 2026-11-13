@@ -12,18 +12,41 @@ everything is present, 1 otherwise.
 import os
 import sys
 
+# Used only when the deployed code is older than the shared list in app.config
+# (deploy.sh runs this script against the CURRENT code before switching to the
+# new commit). The new code is checked again, with the shared list, after install.
+FALLBACK_REQUIRED = [
+    "SECRET_KEY",
+    "CLERK_JWKS_URL",
+    "CLERK_SECRET_KEY",
+    "CLERK_WEBHOOK_SECRET",
+    "GOOGLE_AI_API_KEY",
+    "INTEGRATION_MASTER_KEY",
+    "S3_ENDPOINT_URL",
+    "S3_ACCESS_KEY",
+    "S3_SECRET_KEY",
+    "S3_BUCKET_NAME",
+]
+
 
 def missing_settings(settings) -> list[str]:
     """Return the names of required settings that are empty or unsuitable.
 
     The list of required settings lives in app.config (shared with start-up).
+    Code deployed before that list existed is checked against FALLBACK_REQUIRED.
     """
-    from app.config import config_problems
-
     missing = []
     database_url = str(getattr(settings, "database_url", "") or "")
     if not database_url or database_url.startswith("sqlite"):
         missing.append("DATABASE_URL (must not be SQLite)")
+    try:
+        from app.config import config_problems
+    except ImportError:
+        for name in FALLBACK_REQUIRED:
+            value = getattr(settings, name.lower(), None)
+            if value is None or not str(value).strip():
+                missing.append(name)
+        return missing
     missing.extend(config_problems(settings)[0])
     return missing
 
