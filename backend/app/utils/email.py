@@ -3,6 +3,7 @@ Email utility using Resend for rMirror Cloud
 """
 
 import logging
+from html import escape as _e
 from typing import Optional
 
 import resend
@@ -11,6 +12,11 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _clean_subject(value: object) -> str:
+    """Make a value safe for a plain-text subject line (no CR/LF)."""
+    return " ".join(str(value).replace("\r", " ").replace("\n", " ").split())
 
 
 class EmailService:
@@ -56,7 +62,9 @@ class EmailService:
             from_field = f"{self.from_name} <{self.from_email}>"
 
             # Build to field with name if provided
-            to_field = f"{to_name} <{to_email}>" if to_name else to_email
+            to_field = (
+                f"{_clean_subject(to_name)} <{to_email}>" if to_name else to_email
+            )
 
             params = {
                 "from": from_field,
@@ -92,7 +100,7 @@ class EmailService:
 
                     <!-- Content card -->
                     <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
-                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {_e(user_name)},</p>
                         <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Thank you for joining rMirror Cloud. We're excited to help you sync and transcribe your reMarkable notebooks with powerful OCR.</p>
 
                         <!-- Feature callout -->
@@ -186,7 +194,7 @@ class EmailService:
 
                     <!-- Content card -->
                     <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
-                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {_e(user_name)},</p>
                         <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Great news! We've successfully synced <strong style="color: #c85a54;">{notebook_count}</strong> notebook(s) from your reMarkable tablet.</p>
 
                         <!-- Stats callout -->
@@ -265,15 +273,15 @@ class EmailService:
             <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; line-height: 1.6; color: #2d2a2e; background-color: #faf8f5;">
                 <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
                     <!-- Alert Header -->
-                    <div style="background-color: {color}; color: #ffffff; padding: 20px 24px; border-radius: 12px 12px 0 0; margin-bottom: 0;">
-                        <p style="color: #ffffff; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 8px 0; opacity: 0.9;">{severity.upper()} ALERT</p>
-                        <h2 style="color: #ffffff; font-size: 22px; font-weight: 600; margin: 0;">{emoji} {subject}</h2>
+                    <div style="background-color: {_e(color)}; color: #ffffff; padding: 20px 24px; border-radius: 12px 12px 0 0; margin-bottom: 0;">
+                        <p style="color: #ffffff; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 8px 0; opacity: 0.9;">{_e(severity.upper())} ALERT</p>
+                        <h2 style="color: #ffffff; font-size: 22px; font-weight: 600; margin: 0;">{emoji} {_e(subject)}</h2>
                     </div>
 
                     <!-- Alert Content -->
                     <div style="background-color: #ffffff; padding: 24px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
-                        <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; border-left: 4px solid {color};">
-                            <pre style="white-space: pre-wrap; font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.6; color: #2d2a2e; margin: 0; overflow-x: auto;">{message}</pre>
+                        <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; border-left: 4px solid {_e(color)};">
+                            <pre style="white-space: pre-wrap; font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.6; color: #2d2a2e; margin: 0; overflow-x: auto;">{_e(message)}</pre>
                         </div>
                     </div>
 
@@ -290,7 +298,7 @@ class EmailService:
 
         return self.send_email(
             to_email=settings.admin_email,
-            subject=f"[{severity.upper()}] rMirror Cloud - {subject}",
+            subject=f"[{_clean_subject(severity.upper())}] rMirror Cloud - {_clean_subject(subject)}",
             html_content=html_content
         )
 
@@ -319,7 +327,7 @@ class EmailService:
 
                     <!-- Content card -->
                     <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
-                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {display_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {_e(display_name)},</p>
                         <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Great news! You've been approved for early access to rMirror Cloud. Click the button below to create your account and start syncing your reMarkable notebooks.</p>
 
                         <!-- Feature callout -->
@@ -330,7 +338,7 @@ class EmailService:
 
                         <!-- CTA Button -->
                         <div style="text-align: center; margin: 32px 0 0 0;">
-                            <a href="{invite_link}"
+                            <a href="{_e(invite_link)}"
                                style="display: inline-block; padding: 14px 32px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
                                 Create Your Account
                             </a>
@@ -368,6 +376,10 @@ class EmailService:
         name: Optional[str],
     ) -> bool:
         """Notify admin when someone joins the waitlist."""
+        if not settings.admin_email:
+            logger.info("ADMIN_EMAIL not set; skipping waitlist admin notification")
+            return False
+
         display_name = name or "Not provided"
         admin_url = f"{settings.dashboard_url}/admin/waitlist"
 
@@ -391,16 +403,16 @@ class EmailService:
                     <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
                         <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; margin-bottom: 24px;">
                             <p style="color: #8b8680; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">Email</p>
-                            <p style="color: #2d2a2e; font-size: 16px; font-weight: 600; margin: 0;">{email}</p>
+                            <p style="color: #2d2a2e; font-size: 16px; font-weight: 600; margin: 0;">{_e(email)}</p>
                         </div>
                         <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; margin-bottom: 28px;">
                             <p style="color: #8b8680; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">Name</p>
-                            <p style="color: #2d2a2e; font-size: 16px; font-weight: 600; margin: 0;">{display_name}</p>
+                            <p style="color: #2d2a2e; font-size: 16px; font-weight: 600; margin: 0;">{_e(display_name)}</p>
                         </div>
 
                         <!-- CTA Button -->
                         <div style="text-align: center;">
-                            <a href="{admin_url}"
+                            <a href="{_e(admin_url)}"
                                style="display: inline-block; padding: 14px 32px; background-color: #c85a54; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(200, 90, 84, 0.25);">
                                 Review &amp; Approve
                             </a>
@@ -419,8 +431,8 @@ class EmailService:
         """
 
         return self.send_email(
-            to_email="support@rmirror.io",
-            subject=f"New waitlist signup: {email}",
+            to_email=settings.admin_email,
+            subject=f"New waitlist signup: {_clean_subject(email)}",
             html_content=html_content,
         )
 
@@ -454,7 +466,7 @@ class EmailService:
 
                     <!-- Content card -->
                     <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
-                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {_e(user_name)},</p>
                         <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">You've used <strong style="color: #d4a574;">{used} of {limit}</strong> free OCR pages this month ({percentage:.0f}%). You have <strong>{remaining}</strong> pages remaining.</p>
 
                         <!-- Usage stats -->
@@ -464,7 +476,7 @@ class EmailService:
                                 <div style="background-color: #d4a574; height: 100%; width: {percentage}%;"></div>
                             </div>
                             <p style="color: #2d2a2e; font-size: 14px; margin: 0;">
-                                <strong>{used}/{limit}</strong> pages • Resets {reset_at}
+                                <strong>{used}/{limit}</strong> pages • Resets {_e(reset_at)}
                             </p>
                         </div>
 
@@ -537,7 +549,7 @@ class EmailService:
 
                     <!-- Content card -->
                     <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
-                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {_e(user_name)},</p>
                         <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">You've used all <strong style="color: #c85a54;">{limit} free OCR pages</strong> for this month.</p>
 
                         <!-- Status callout -->
@@ -549,7 +561,7 @@ class EmailService:
                             <p style="color: #2d2a2e; font-size: 14px; margin: 0;">✗ Integration syncing paused (Notion, Readwise, etc.)</p>
                         </div>
 
-                        <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 24px 0;">Your quota will reset on <strong>{reset_at}</strong>, and you'll have {limit} pages available again. Any pending pages will be automatically processed when quota becomes available (newest pages first).</p>
+                        <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 24px 0;">Your quota will reset on <strong>{_e(reset_at)}</strong>, and you'll have {limit} pages available again. Any pending pages will be automatically processed when quota becomes available (newest pages first).</p>
 
                         <!-- Pro tier preview -->
                         <div style="background-color: #faf8f5; padding: 24px; border-radius: 8px; margin-bottom: 24px;">
@@ -617,7 +629,7 @@ class EmailService:
 
                     <!-- Content card -->
                     <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
-                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {_e(user_name)},</p>
                         <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">You created your rMirror account, but we haven't seen any notebooks sync yet. The macOS agent takes just a few minutes to set up, and then your reMarkable notes sync automatically in the background.</p>
 
                         <h2 style="color: #2d2a2e; font-size: 20px; font-weight: 600; margin: 0 0 16px 0;">Here's how to get started:</h2>
@@ -691,7 +703,7 @@ class EmailService:
 
                     <!-- Content card -->
                     <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
-                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {_e(user_name)},</p>
                         <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Your first sync is complete! <strong style="color: #c85a54;">{notebook_count}</strong> notebook(s) with <strong style="color: #c85a54;">{page_count}</strong> pages are now safely in the cloud.</p>
 
                         <!-- Stats callout -->
@@ -754,7 +766,7 @@ class EmailService:
                         <!-- OCR preview -->
                         <div style="background-color: #faf8f5; padding: 20px; border-radius: 8px; border: 1px solid #e8e4df; margin-bottom: 28px;">
                             <p style="color: #8b8680; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 12px 0;">Preview of your handwriting</p>
-                            <p style="color: #2d2a2e; font-size: 15px; font-style: italic; margin: 0; line-height: 1.7; border-left: 3px solid #c85a54; padding-left: 16px;">"{ocr_snippet}"</p>
+                            <p style="color: #2d2a2e; font-size: 15px; font-style: italic; margin: 0; line-height: 1.7; border-left: 3px solid #c85a54; padding-left: 16px;">"{_e(ocr_snippet)}"</p>
                         </div>
             """
 
@@ -776,7 +788,7 @@ class EmailService:
 
                     <!-- Content card -->
                     <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
-                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {_e(user_name)},</p>
                         <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Our AI has finished reading your handwriting and converted it to searchable text. You can now search for any word you've written across all your notebooks.</p>
 
                         {snippet_html}
@@ -833,7 +845,7 @@ class EmailService:
 
                     <!-- Content card -->
                     <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
-                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {_e(user_name)},</p>
                         <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">Your notebooks are syncing and your handwriting is being transcribed. Now take it a step further: connect Notion and your handwritten notes will automatically appear in your workspace.</p>
 
                         <!-- Feature callout -->
@@ -893,7 +905,7 @@ class EmailService:
 
                     <!-- Content card -->
                     <div style="background-color: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 12px rgba(45, 42, 46, 0.08); margin-bottom: 24px;">
-                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {user_name},</p>
+                        <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 20px 0;">Hi {_e(user_name)},</p>
                         <p style="color: #2d2a2e; font-size: 16px; margin: 0 0 24px 0;">You've been using rMirror for a bit now, and we'd love to hear how it's going. Your feedback directly shapes what we build next.</p>
 
                         <p style="color: #2d2a2e; font-size: 15px; margin: 0 0 16px 0; font-weight: 600;">We have 3 quick questions:</p>
