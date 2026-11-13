@@ -3,11 +3,16 @@ Flask routes for rMirror Agent web UI.
 """
 
 import asyncio
+import hmac
+import secrets
 import threading
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import quote, urlencode
 
+import httpx
 from flask import Flask, jsonify, redirect, render_template, request
 
 from app.__version__ import __version__
@@ -77,8 +82,74 @@ async def register_agent_with_backend(
         raise
 
 
+# One-time sign-in state: issued by /auth/bridge, required by /auth/callback.
+AUTH_STATE_TTL_SECONDS = 600
+_MAX_PENDING_AUTH_STATES = 20
+
+
+class AuthStateStore:
+    """In-memory store of one-time sign-in states with a short expiry."""
+
+    def __init__(self, ttl_seconds: float = AUTH_STATE_TTL_SECONDS):
+        self._ttl = ttl_seconds
+        self._states: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def _prune(self, now: float) -> None:
+        for value, expires_at in list(self._states.items()):
+            if expires_at <= now:
+                del self._states[value]
+
+    def issue(self) -> str:
+        """Create and remember a new random state."""
+        value = secrets.token_urlsafe(32)
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            # Keep the store bounded; drop the oldest pending states first
+            while len(self._states) >= _MAX_PENDING_AUTH_STATES:
+                oldest = min(self._states, key=self._states.get)
+                del self._states[oldest]
+            self._states[value] = now + self._ttl
+        return value
+
+    def consume(self, value: str | None) -> bool:
+        """Return True if value matches a pending unexpired state; it is removed either way."""
+        if not value:
+            return False
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            match = None
+            for stored in self._states:
+                if hmac.compare_digest(stored.encode(), value.encode()):
+                    match = stored
+            if match is None:
+                return False
+            del self._states[match]
+            return True
+
+
+async def verify_agent_token(cloud_sync: CloudSync, token: str) -> bool:
+    """Check a candidate token against the backend before it is stored."""
+    if not cloud_sync.client:
+        cloud_sync.client = httpx.AsyncClient(timeout=30.0, verify=cloud_sync._verify_ssl)
+
+    try:
+        response = await cloud_sync.client.get(
+            f"{cloud_sync.config.api.url}/sync/stats",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    except httpx.HTTPError:
+        return False
+    return response.status_code == 200
+
+
 def register_routes(app: Flask) -> None:
     """Register all web UI routes."""
+
+    auth_states = AuthStateStore()
+    app.config["AUTH_STATES"] = auth_states
 
     @app.route("/")
     def index():
@@ -291,8 +362,6 @@ def register_routes(app: Flask) -> None:
         # Fetch Clerk publishable key from backend
         clerk_key = None
         try:
-            import httpx
-
             resp = httpx.get(f"{api_base}/v1/agents/clerk-config", timeout=10)
             if resp.status_code == 200:
                 clerk_key = resp.json().get("clerk_publishable_key")
@@ -306,17 +375,24 @@ def register_routes(app: Flask) -> None:
                 "<p><a href='/'>Back to agent</a></p>"
             ), 502
 
+        # One-time state that /auth/callback must receive back
+        state = auth_states.issue()
+
         # Production Clerk keys only work from their registered domain,
         # so redirect to the external bridge page hosted on that domain.
         if clerk_key.startswith("pk_live_"):
-            callback = f"http://localhost:{config.web.port}/auth/callback"
-            return redirect(f"{api_base}/agent?callback={callback}")
+            callback = (
+                f"http://localhost:{config.web.port}/auth/callback?"
+                + urlencode({"state": state})
+            )
+            return redirect(f"{api_base}/agent?callback={quote(callback, safe='')}")
 
         # Dev/test keys work from localhost — serve the local bridge
         return render_template(
             "auth_bridge.html",
             clerk_publishable_key=clerk_key,
             api_url=f"{api_base}/v1",
+            state=state,
         )
 
     @app.route("/auth/callback")
@@ -324,17 +400,36 @@ def register_routes(app: Flask) -> None:
         """
         Handle Clerk OAuth callback redirect with JWT token in URL.
 
-        Expected query parameter:
-        ?token=clerk_jwt_token
+        Expected query parameters:
+        ?state=<one-time state from /auth/bridge>&token=<agent token>
         """
         import platform
 
         config: Config = app.config["AGENT_CONFIG"]
 
         try:
+            # The state is single-use: consume it before looking at the token
+            if not auth_states.consume(request.args.get("state")):
+                return render_template(
+                    "auth_result.html",
+                    success=False,
+                    message="Sign-in request expired or not started from this agent. Please sign in again.",
+                ), 400
+
             token = request.args.get("token")
             if not token:
                 return render_template("auth_result.html", success=False, message="Missing authentication token")
+
+            # Verify the token with the backend before replacing the stored one
+            cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+            with run_async_safely(cloud_sync) as loop:
+                token_ok = loop.run_until_complete(verify_agent_token(cloud_sync, token))
+            if not token_ok:
+                return render_template(
+                    "auth_result.html",
+                    success=False,
+                    message="Could not verify the sign-in token with rMirror Cloud. Please sign in again.",
+                ), 401
 
             # Store the JWT token in config (will be saved to keychain)
             config.api.token = token
@@ -344,7 +439,6 @@ def register_routes(app: Flask) -> None:
             config.save()
 
             # Mark cloud sync as authenticated
-            cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
             cloud_sync.authenticated = True
 
             # Register agent with backend
