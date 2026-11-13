@@ -280,7 +280,7 @@ poetry run alembic upgrade head
 poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Backend runs at `http://localhost:8000`. API docs at `http://localhost:8000/docs`.
+Backend runs at `http://localhost:8000`. API docs at `http://localhost:8000/docs` when `ENABLE_API_DOCS=true` is set in `backend/.env`.
 
 **Database Management:**
 
