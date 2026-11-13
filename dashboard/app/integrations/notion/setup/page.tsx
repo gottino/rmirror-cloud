@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { useAuth } from '@clerk/nextjs';
+import { useApiToken } from '@/lib/useApiToken';
 import UserMenu from '@/components/UserMenu';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Menu } from 'lucide-react';
@@ -17,14 +17,11 @@ import {
 import { trackEvent } from '@/lib/analytics';
 
 function NotionSetupContent() {
-  const { getToken } = useAuth();
+  const getToken = useApiToken();
   const router = useRouter();
   const searchParams = useSearchParams();
   const databaseType = (searchParams.get('type') as 'notebooks' | 'todos') || 'notebooks';
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  // Development mode bypass
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
 
   const [step, setStep] = useState<'choose' | 'select' | 'create'>('choose');
   const [databases, setDatabases] = useState<NotionDatabase[]>([]);
@@ -49,9 +46,7 @@ function NotionSetupContent() {
   async function loadDatabases() {
     setLoading(true);
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const data = await listNotionDatabases(token);
@@ -66,9 +61,7 @@ function NotionSetupContent() {
   async function loadPages() {
     setLoading(true);
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const data = await listNotionPages(token);
@@ -83,9 +76,7 @@ function NotionSetupContent() {
   async function handleSelectDatabase(databaseId: string) {
     setLoading(true);
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       await selectNotionDatabase(token, databaseId, databaseType);
@@ -106,9 +97,7 @@ function NotionSetupContent() {
 
     setLoading(true);
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       await createNotionDatabase(

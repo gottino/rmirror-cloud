@@ -6,12 +6,13 @@ import re
 import uuid
 from datetime import datetime
 from io import BytesIO
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
@@ -26,7 +27,13 @@ from app.models.page import Page
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.user import User
 from app.schemas.notebook import Notebook as NotebookSchema
-from app.schemas.notebook import NotebookUploadResponse, NotebookWithPages
+from app.schemas.notebook import (
+    NotebookPageCounts,
+    NotebookPagesResponse,
+    NotebookUploadResponse,
+    NotebookWithPages,
+)
+from app.schemas.page import Page as PageSchema
 from app.services import quota_service
 from app.storage import StorageService
 from app.utils.files import (
@@ -337,11 +344,55 @@ async def get_notebook_by_uuid(
     return notebook
 
 
+def _get_owned_notebook(db: Session, notebook_id: int, user_id: int) -> Notebook:
+    """Load a notebook owned by ``user_id`` or raise 404."""
+    notebook = (
+        db.query(Notebook)
+        .filter(
+            Notebook.id == notebook_id,
+            Notebook.user_id == user_id,
+        )
+        .first()
+    )
+
+    if not notebook:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notebook not found",
+        )
+    return notebook
+
+
+def _page_counts(db: Session, notebook_id: int) -> dict[str, int]:
+    """Count a notebook's pages by OCR status in one grouped query."""
+    rows = (
+        db.query(Page.ocr_status, func.count(NotebookPage.id))
+        .join(Page, NotebookPage.page_id == Page.id)
+        .filter(NotebookPage.notebook_id == notebook_id)
+        .group_by(Page.ocr_status)
+        .all()
+    )
+    by_status = {ocr_status: count for ocr_status, count in rows}
+    total = sum(by_status.values())
+    not_synced = by_status.get("not_synced", 0)
+    return {
+        "total_pages": total,
+        "synced_pages": total - not_synced,
+        "not_synced_pages": not_synced,
+        "pending_quota_pages": by_status.get("pending_quota", 0),
+    }
+
+
 @router.get("/{notebook_id}", response_model=NotebookWithPages)
 async def get_notebook(
     notebook_id: int,
     current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
+    include_pages: Annotated[
+        bool,
+        Query(description="Include every page in the response. Set to false and use "
+              "GET /notebooks/{id}/pages to load pages in windows."),
+    ] = True,
 ):
     """
     Get a specific notebook by ID with its pages.
@@ -352,46 +403,97 @@ async def get_notebook(
         notebook_id: Notebook ID
         current_user: Current authenticated user
         db: Database session
+        include_pages: When false, ``pages`` is left empty (metadata and
+            ``page_counts`` only)
 
     Returns:
         Notebook record with pages in correct order
     """
-    # Get the notebook
-    notebook = (
-        db.query(Notebook)
-        .filter(
-            Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+    notebook = _get_owned_notebook(db, notebook_id, current_user.id)
+
+    pages = []
+    if include_pages:
+        # Get pages through the mapping table (source of truth for order)
+        notebook_pages = (
+            db.query(NotebookPage, Page)
+            .join(Page, NotebookPage.page_id == Page.id)
+            .filter(NotebookPage.notebook_id == notebook.id)
+            .order_by(NotebookPage.page_number)
+            .all()
         )
-        .first()
+
+        # Set page_number from the mapping table (since it's no longer in the pages table)
+        for notebook_page, page in notebook_pages:
+            # Temporarily set page_number attribute for serialization
+            page.page_number = notebook_page.page_number
+            pages.append(page)
+
+    # Build the response from the notebook's columns only; validating the ORM
+    # object directly would lazy-load the unordered ``Notebook.pages`` relationship.
+    return NotebookWithPages(
+        **NotebookSchema.model_validate(notebook, from_attributes=True).model_dump(),
+        pages=[PageSchema.model_validate(page, from_attributes=True) for page in pages],
+        page_counts=NotebookPageCounts(**_page_counts(db, notebook.id)),
     )
 
-    if not notebook:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Notebook not found",
-        )
 
-    # Get pages through the mapping table (source of truth for order)
-    notebook_pages = (
-        db.query(NotebookPage, Page)
+@router.get("/{notebook_id}/pages", response_model=NotebookPagesResponse)
+async def get_notebook_pages(
+    notebook_id: int,
+    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    db: Annotated[Session, Depends(get_db)],
+    offset: Annotated[int, Query(ge=0, description="Number of pages to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=100, description="Pages per window (1-100)")] = 50,
+    order: Annotated[
+        Literal["asc", "desc"],
+        Query(description="Page-number order: asc (first page first) or desc"),
+    ] = "asc",
+):
+    """
+    Get one window of a notebook's pages (with OCR text), in page order.
+
+    Args:
+        notebook_id: Notebook ID
+        current_user: Current authenticated user
+        db: Database session
+        offset: Number of pages to skip
+        limit: Maximum pages to return (max 100)
+        order: Page-number sort direction
+
+    Returns:
+        Items for the window plus total, offset, limit and has_more
+    """
+    notebook = _get_owned_notebook(db, notebook_id, current_user.id)
+
+    total = (
+        db.query(func.count(NotebookPage.id))
+        .filter(NotebookPage.notebook_id == notebook.id)
+        .scalar()
+    ) or 0
+
+    sort_key = NotebookPage.page_number.desc() if order == "desc" else NotebookPage.page_number.asc()
+    rows = (
+        db.query(NotebookPage.page_number, Page)
         .join(Page, NotebookPage.page_id == Page.id)
         .filter(NotebookPage.notebook_id == notebook.id)
-        .order_by(NotebookPage.page_number)
+        .order_by(sort_key)
+        .offset(offset)
+        .limit(limit)
         .all()
     )
 
-    # Attach pages to notebook in correct order
-    # Set page_number from the mapping table (since it's no longer in the pages table)
-    pages = []
-    for notebook_page, page in notebook_pages:
-        # Temporarily set page_number attribute for serialization
-        page.page_number = notebook_page.page_number
-        pages.append(page)
+    items = []
+    for page_number, page in rows:
+        page.page_number = page_number
+        items.append(PageSchema.model_validate(page, from_attributes=True))
 
-    notebook.pages = pages
-
-    return notebook
+    return NotebookPagesResponse(
+        items=items,
+        total=total,
+        offset=offset,
+        limit=limit,
+        has_more=offset + len(items) < total,
+    )
 
 
 @router.get("/{notebook_id}/export")
