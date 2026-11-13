@@ -106,3 +106,40 @@ def test_local_storage_backend_needs_no_s3_settings(run_main):
     env = {k: v for k, v in FULL_ENV.items() if not k.startswith("S3_")}
     code, _ = run_main({**env, "STORAGE_BACKEND": "local"})
     assert code == 0
+
+
+def test_runs_against_code_without_shared_list(tmp_path):
+    """deploy.sh pipes the NEW script into the CURRENTLY deployed code.
+
+    Code deployed before app.config.config_problems existed must still be
+    checkable, otherwise the first deploy that carries the shared list aborts.
+    """
+    import subprocess
+    import sys
+
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "__init__.py").write_text("")
+    (app / "config.py").write_text(
+        "class S:\n"
+        "    database_url = 'postgresql://u@localhost/db'\n"
+        "    secret_key = 'x'\n"
+        "    clerk_jwks_url = 'x'\n"
+        "    clerk_secret_key = 'x'\n"
+        "    clerk_webhook_secret = 'x'\n"
+        "    google_ai_api_key = ''\n"
+        "    integration_master_key = 'x'\n"
+        "    s3_endpoint_url = 'x'\n"
+        "    s3_access_key = 'x'\n"
+        "    s3_secret_key = 'x'\n"
+        "    s3_bucket_name = 'x'\n"
+        "def get_settings():\n"
+        "    return S()\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-"], input=SCRIPT.read_text(), cwd=tmp_path, capture_output=True, text=True
+    )
+    assert "ImportError" not in result.stderr
+    assert result.returncode == 1
+    assert "GOOGLE_AI_API_KEY" in result.stdout
+    assert "CLERK_SECRET_KEY" not in result.stdout
