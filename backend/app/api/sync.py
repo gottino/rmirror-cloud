@@ -5,38 +5,36 @@ import logging
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from sqlalchemy import bindparam, delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
-from app.core.sync_engine import SyncItem
 from app.core.unified_sync_manager import UnifiedSyncManager
+from app.core.upserts import insert_ignoring_conflicts
 from app.database import get_db
-from app.integrations.notion_sync import NotionSyncTarget
+from app.integrations.registry import PAGE_TEXT, missing_config, supports
+from app.middleware.rate_limit import limiter
 from app.models.deleted_notebook import DeletedNotebook
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
-from app.models.sync_record import IntegrationConfig, SyncItemType, SyncQueue, SyncRecord
+from app.models.sync_record import IntegrationConfig
 from app.models.user import User
-from app.services.sync_worker import apply_sync_failure, apply_sync_result
+from app.services.initial_sync import queue_pages_for_sync
+from app.utils.files import parse_uuid
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["sync"])
-
-# Rate limiter for sync endpoints
-limiter = Limiter(key_func=get_remote_address)
 
 
 class SyncRequest(BaseModel):
     """Request to trigger a sync operation."""
 
-    target_name: str  # "notion", "readwise", "all"
-    item_type: str | None = None  # "notebook", "todo", "highlight" or None for all
-    limit: int = 100
+    target_name: str  # a target that accepts page text (e.g. "notion"), or "all"
+    item_type: str | None = None  # Ignored; kept so existing clients still validate
+    limit: int = 100  # Ignored; every unsynced page is queued
     notebook_uuids: list[str] | None = None  # Optional list of specific notebook UUIDs to sync
 
 
@@ -65,6 +63,13 @@ class SyncStatsResponse(BaseModel):
 # ============================================================================
 
 
+# The agent sends its whole library in one request, and a large library can hold
+# a few thousand notebooks. These caps sit well above that; they exist to reject
+# absurd payloads, not to shape normal use.
+MAX_METADATA_NOTEBOOKS = 5000
+MAX_PAGES_PER_NOTEBOOK = 5000
+
+
 class NotebookMetadataItem(BaseModel):
     """Metadata for a single notebook to sync."""
 
@@ -72,7 +77,11 @@ class NotebookMetadataItem(BaseModel):
     visible_name: str = Field(..., description="Display name of the notebook")
     parent_uuid: Optional[str] = Field(None, description="Parent folder UUID, if any")
     document_type: str = Field("notebook", description="Document type (notebook, pdf, epub, folder)")
-    pages: List[str] = Field(default_factory=list, description="Ordered list of page UUIDs from .content file")
+    pages: List[str] = Field(
+        default_factory=list,
+        max_length=MAX_PAGES_PER_NOTEBOOK,
+        description="Ordered list of page UUIDs from .content file",
+    )
     # Optional metadata fields
     pinned: Optional[bool] = None
     deleted: Optional[bool] = None
@@ -91,7 +100,7 @@ class MetadataSyncRequest(BaseModel):
     """
 
     notebooks: List[NotebookMetadataItem] = Field(
-        ..., description="List of notebooks with their page structure"
+        ..., max_length=MAX_METADATA_NOTEBOOKS, description="List of notebooks with their page structure"
     )
 
 
@@ -103,7 +112,268 @@ class MetadataSyncResponse(BaseModel):
     notebooks_updated: int = Field(..., description="Number of existing notebooks updated")
     pages_registered: int = Field(..., description="Total number of page stubs registered")
     pages_already_synced: int = Field(..., description="Pages that already have content")
+    skipped: int = Field(0, description="Notebooks and pages skipped because their id was not a UUID")
     message: str
+
+
+# Rows per IN (...) list, well below the bind-parameter limits of SQLite and PostgreSQL.
+_IN_CHUNK = 1000
+
+# Notebook columns the metadata sync updates only when the agent sent a value.
+_OPTIONAL_NOTEBOOK_FIELDS = ("pinned", "deleted", "version", "last_opened", "last_opened_page", "content_json")
+
+
+def _chunks(values: list, size: int = _IN_CHUNK):
+    for i in range(0, len(values), size):
+        yield values[i : i + size]
+
+
+def _parse_last_opened(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int, int, int, int]:
+    """Upsert notebooks, page stubs and page order for a metadata sync in bulk.
+
+    ``entries`` is a list of ``(notebook_uuid, NotebookMetadataItem, page_uuids)``
+    with validated, lowercase UUIDs. Reads existing rows with a few IN queries
+    and writes with multi-row INSERTs and executemany UPDATEs, so the number of
+    statements does not grow with the number of notebooks or pages (apart from
+    one extra statement per 1,000 ids in an IN list).
+
+    Semantics match the former row-by-row version: a notebook or page seen
+    again (in the database or earlier in the same request) is updated, pages
+    that already have content are left alone, and pages without content that
+    are not completed/pending/processing are reset to NOT_SYNCED. A notebook's
+    page order is the page list of its last entry that has pages; pages no
+    longer listed lose their order mapping.
+
+    Inserts use ON CONFLICT DO NOTHING against the unique indexes and then
+    re-read the rows a concurrent sync created first, so two syncs of the same
+    notebook at once neither fail nor duplicate rows.
+
+    Returns (notebooks_created, notebooks_updated, pages_registered, pages_already_synced).
+    """
+    notebooks_created = notebooks_updated = pages_registered = pages_already_synced = 0
+    now = datetime.utcnow()
+
+    # 1. Existing notebooks (lowest id wins if a uuid is duplicated).
+    notebook_ids: dict[str, int] = {}
+    uuids = list(dict.fromkeys(nb_uuid for nb_uuid, _, _ in entries))
+    for chunk in _chunks(uuids):
+        rows = db.execute(
+            select(Notebook.id, Notebook.notebook_uuid)
+            .where(Notebook.user_id == user_id, Notebook.notebook_uuid.in_(chunk))
+            .order_by(Notebook.id)
+        ).all()
+        for nb_id, nb_uuid in rows:
+            notebook_ids.setdefault(nb_uuid, nb_id)
+    existing_notebook_ids = list(notebook_ids.values())
+
+    # 2. Fold the request into one insert row or one update per notebook.
+    new_notebooks: dict[str, dict] = {}
+    notebook_updates: dict[int, dict] = {}
+    for nb_uuid, nb_data, page_uuids in entries:
+        values = {
+            "pinned": nb_data.pinned,
+            "deleted": nb_data.deleted,
+            "version": nb_data.version,
+            "last_opened": _parse_last_opened(nb_data.last_opened),
+            "last_opened_page": nb_data.last_opened_page,
+            # Store page UUIDs in content_json for reference
+            "content_json": (
+                json.dumps({"pages": page_uuids, "pageCount": len(page_uuids)}) if page_uuids else None
+            ),
+        }
+        if nb_uuid in notebook_ids or nb_uuid in new_notebooks:
+            target = new_notebooks.get(nb_uuid)
+            if target is None:
+                target = notebook_updates.setdefault(
+                    notebook_ids[nb_uuid], dict.fromkeys(_OPTIONAL_NOTEBOOK_FIELDS)
+                )
+            target["visible_name"] = nb_data.visible_name
+            target["parent_uuid"] = nb_data.parent_uuid
+            target["last_synced_at"] = now
+            for field in _OPTIONAL_NOTEBOOK_FIELDS:
+                if values[field] is not None:
+                    target[field] = values[field]
+            notebooks_updated += 1
+            logger.debug(f"Updated notebook: {nb_data.visible_name} ({nb_uuid})")
+        else:
+            values["pinned"] = nb_data.pinned or False
+            values["deleted"] = nb_data.deleted or False
+            new_notebooks[nb_uuid] = {
+                "user_id": user_id,
+                "notebook_uuid": nb_uuid,
+                "visible_name": nb_data.visible_name,
+                "parent_uuid": nb_data.parent_uuid,
+                "document_type": nb_data.document_type,
+                "last_synced_at": now,
+                **values,
+            }
+            notebooks_created += 1
+            logger.debug(f"Created notebook: {nb_data.visible_name} ({nb_uuid})")
+
+    if new_notebooks:
+        # ON CONFLICT DO NOTHING: a concurrent sync may create the same notebook
+        # first. RETURNING yields only the rows inserted here.
+        result = db.execute(
+            insert_ignoring_conflicts(db, Notebook, ["user_id", "notebook_uuid"]).returning(
+                Notebook.id, Notebook.notebook_uuid
+            ),
+            sorted(new_notebooks.values(), key=lambda row: row["notebook_uuid"]),
+        )
+        for nb_id, nb_uuid in result:
+            notebook_ids[nb_uuid] = nb_id
+        lost = [nb_uuid for nb_uuid in new_notebooks if nb_uuid not in notebook_ids]
+        for chunk in _chunks(lost):
+            rows = db.execute(
+                select(Notebook.id, Notebook.notebook_uuid)
+                .where(Notebook.user_id == user_id, Notebook.notebook_uuid.in_(chunk))
+            ).all()
+            for nb_id, nb_uuid in rows:
+                # Created by a concurrent sync: update it like an existing one.
+                row = new_notebooks[nb_uuid]
+                notebook_ids[nb_uuid] = nb_id
+                existing_notebook_ids.append(nb_id)
+                notebook_updates[nb_id] = {
+                    key: row[key]
+                    for key in ("visible_name", "parent_uuid", "last_synced_at", *_OPTIONAL_NOTEBOOK_FIELDS)
+                }
+                notebooks_created -= 1
+                notebooks_updated += 1
+
+    if notebook_updates:
+        table = Notebook.__table__
+        optional = {
+            field: func.coalesce(bindparam(f"b_{field}", type_=table.c[field].type), table.c[field])
+            for field in _OPTIONAL_NOTEBOOK_FIELDS
+        }
+        db.execute(
+            update(table)
+            .where(table.c.id == bindparam("b_id"))
+            .values(
+                visible_name=bindparam("b_visible_name"),
+                parent_uuid=bindparam("b_parent_uuid"),
+                last_synced_at=bindparam("b_last_synced_at"),
+                **optional,
+            ),
+            [
+                {"b_id": nb_id, **{f"b_{key}": value for key, value in values.items()}}
+                for nb_id, values in sorted(notebook_updates.items())
+            ],
+        )
+
+    # 3. Existing pages and page-order mappings of the existing notebooks.
+    pages: dict[tuple[int, str], tuple[int, str | None, str]] = {}
+    mappings: dict[int, dict[int, int]] = {}  # notebook_id -> {page_id: page_number}
+    for chunk in _chunks(existing_notebook_ids):
+        page_rows = db.execute(
+            select(Page.id, Page.notebook_id, Page.page_uuid, Page.s3_key, Page.ocr_status)
+            .where(Page.notebook_id.in_(chunk))
+            .order_by(Page.id)
+        ).all()
+        for page_id, nb_id, page_uuid, s3_key, ocr_status in page_rows:
+            pages.setdefault((nb_id, page_uuid), (page_id, s3_key, ocr_status))
+        mapping_rows = db.execute(
+            select(NotebookPage.notebook_id, NotebookPage.page_id, NotebookPage.page_number)
+            .where(NotebookPage.notebook_id.in_(chunk))
+        ).all()
+        for nb_id, page_id, page_number in mapping_rows:
+            mappings.setdefault(nb_id, {})[page_id] = page_number
+
+    # 4. Page stubs: which to create and which to reset. The wanted page order
+    # of a notebook is the page list of its last entry with pages (the last
+    # position wins if a page is listed twice).
+    new_pages: dict[tuple[int, str], None] = {}
+    reset_page_ids: set[int] = set()
+    wanted_order: dict[int, dict[str, int]] = {}
+    for nb_uuid, _, page_uuids in entries:
+        nb_id = notebook_ids[nb_uuid]
+        if page_uuids:
+            wanted_order[nb_id] = {page_uuid: idx + 1 for idx, page_uuid in enumerate(page_uuids)}  # 1-indexed
+        for page_uuid in page_uuids:
+            key = (nb_id, page_uuid)
+            page = pages.get(key)
+            if page and page[1]:
+                # Page already has content uploaded - don't reset it
+                pages_already_synced += 1
+            elif page:
+                # Page exists but no content - ensure NOT_SYNCED status
+                if page[2] not in (
+                    OcrStatus.COMPLETED,
+                    OcrStatus.PENDING,
+                    OcrStatus.PROCESSING,
+                    OcrStatus.NOT_SYNCED,
+                ):
+                    reset_page_ids.add(page[0])
+                pages_registered += 1
+            else:
+                new_pages[key] = None
+                pages_registered += 1
+
+    if new_pages:
+        result = db.execute(
+            insert_ignoring_conflicts(db, Page, ["notebook_id", "page_uuid"]).returning(
+                Page.id, Page.notebook_id, Page.page_uuid
+            ),
+            [
+                {"notebook_id": nb_id, "page_uuid": page_uuid, "ocr_status": OcrStatus.NOT_SYNCED.value}
+                for nb_id, page_uuid in sorted(new_pages)
+            ],
+        )
+        for page_id, nb_id, page_uuid in result:
+            pages[(nb_id, page_uuid)] = (page_id, None, OcrStatus.NOT_SYNCED.value)
+        # Stubs a concurrent sync inserted first: load their ids.
+        lost_notebooks = sorted({nb_id for nb_id, page_uuid in new_pages if (nb_id, page_uuid) not in pages})
+        for chunk in _chunks(lost_notebooks):
+            page_rows = db.execute(
+                select(Page.id, Page.notebook_id, Page.page_uuid, Page.s3_key, Page.ocr_status)
+                .where(Page.notebook_id.in_(chunk))
+                .order_by(Page.id)
+            ).all()
+            for page_id, nb_id, page_uuid, s3_key, ocr_status in page_rows:
+                pages.setdefault((nb_id, page_uuid), (page_id, s3_key, ocr_status))
+
+    for chunk in _chunks(sorted(reset_page_ids)):
+        db.execute(
+            update(Page).where(Page.id.in_(chunk)).values(ocr_status=OcrStatus.NOT_SYNCED.value),
+            execution_options={"synchronize_session": False},
+        )
+
+    # 5. Page order. notebook_pages is unique on (notebook_id, page_number) and
+    # (notebook_id, page_id), so renumbering rows one by one collides with a row
+    # that still holds the wanted number (reordered pages, a removed page). A
+    # notebook whose order changed gets its mapping rows replaced instead:
+    # delete them, then insert the wanted order, ignoring conflicts with rows a
+    # concurrent sync of the same notebook inserted meanwhile. Pages no longer
+    # listed lose their mapping.
+    replaced: list[int] = []
+    new_mappings = []
+    for nb_id, order in sorted(wanted_order.items()):
+        wanted = {pages[(nb_id, page_uuid)][0]: number for page_uuid, number in order.items()}
+        if wanted == mappings.get(nb_id, {}):
+            continue
+        if nb_id in mappings:
+            replaced.append(nb_id)
+        new_mappings.extend(
+            {"notebook_id": nb_id, "page_id": page_id, "page_number": number}
+            for page_id, number in sorted(wanted.items(), key=lambda item: item[1])
+        )
+    for chunk in _chunks(replaced):
+        db.execute(
+            delete(NotebookPage).where(NotebookPage.notebook_id.in_(chunk)),
+            execution_options={"synchronize_session": False},
+        )
+    if new_mappings:
+        db.execute(insert_ignoring_conflicts(db, NotebookPage), new_mappings)
+
+    return notebooks_created, notebooks_updated, pages_registered, pages_already_synced
 
 
 @router.post("/metadata", response_model=MetadataSyncResponse)
@@ -145,113 +415,37 @@ async def sync_metadata(
     notebooks_updated = 0
     pages_registered = 0
     pages_already_synced = 0
+    skipped = 0
 
     try:
+        entries = []
         for nb_data in sync_request.notebooks:
-            # Find or create notebook
-            notebook = db.query(Notebook).filter(
-                Notebook.user_id == current_user.id,
-                Notebook.notebook_uuid == nb_data.uuid
-            ).first()
-
-            if notebook:
-                # Update existing notebook metadata
-                notebook.visible_name = nb_data.visible_name
-                notebook.parent_uuid = nb_data.parent_uuid
-                if nb_data.pinned is not None:
-                    notebook.pinned = nb_data.pinned
-                if nb_data.deleted is not None:
-                    notebook.deleted = nb_data.deleted
-                if nb_data.version is not None:
-                    notebook.version = nb_data.version
-                if nb_data.last_opened:
-                    try:
-                        notebook.last_opened = datetime.fromisoformat(nb_data.last_opened.replace("Z", "+00:00"))
-                    except ValueError:
-                        pass
-                if nb_data.last_opened_page is not None:
-                    notebook.last_opened_page = nb_data.last_opened_page
-                notebook.last_synced_at = datetime.utcnow()
-                notebooks_updated += 1
-                logger.debug(f"Updated notebook: {nb_data.visible_name} ({nb_data.uuid})")
-            else:
-                # Create new notebook
-                notebook = Notebook(
-                    user_id=current_user.id,
-                    notebook_uuid=nb_data.uuid,
-                    visible_name=nb_data.visible_name,
-                    parent_uuid=nb_data.parent_uuid,
-                    document_type=nb_data.document_type,
-                    pinned=nb_data.pinned or False,
-                    deleted=nb_data.deleted or False,
-                    version=nb_data.version,
-                    last_synced_at=datetime.utcnow(),
+            # Ids become storage keys later: skip anything that is not a UUID
+            # instead of failing the whole batch. Never log the raw value.
+            try:
+                nb_uuid = parse_uuid(nb_data.uuid)
+            except ValueError:
+                logger.warning(
+                    f"Skipping notebook with invalid uuid (length {len(nb_data.uuid)}) "
+                    f"for user {current_user.id}"
                 )
-                if nb_data.last_opened:
-                    try:
-                        notebook.last_opened = datetime.fromisoformat(nb_data.last_opened.replace("Z", "+00:00"))
-                    except ValueError:
-                        pass
-                if nb_data.last_opened_page is not None:
-                    notebook.last_opened_page = nb_data.last_opened_page
-                db.add(notebook)
-                db.flush()  # Get the notebook ID
-                notebooks_created += 1
-                logger.debug(f"Created notebook: {nb_data.visible_name} ({nb_data.uuid})")
+                skipped += 1
+                continue
 
-            # Store page UUIDs in content_json for reference
-            if nb_data.pages:
-                content_data = {
-                    "pages": nb_data.pages,
-                    "pageCount": len(nb_data.pages),
-                }
-                notebook.content_json = json.dumps(content_data)
-
-            # Process page stubs
-            for page_idx, page_uuid in enumerate(nb_data.pages):
-                # Find existing page
-                page = db.query(Page).filter(
-                    Page.notebook_id == notebook.id,
-                    Page.page_uuid == page_uuid
-                ).first()
-
-                if page and page.s3_key:
-                    # Page already has content uploaded - don't reset it
-                    pages_already_synced += 1
-                elif page:
-                    # Page exists but no content - ensure NOT_SYNCED status
-                    if page.ocr_status not in [OcrStatus.COMPLETED, OcrStatus.PENDING, OcrStatus.PROCESSING]:
-                        page.ocr_status = OcrStatus.NOT_SYNCED
-                    pages_registered += 1
-                else:
-                    # Create new page stub
-                    page = Page(
-                        notebook_id=notebook.id,
-                        page_uuid=page_uuid,
-                        ocr_status=OcrStatus.NOT_SYNCED,
+            page_uuids = []
+            for raw_page in nb_data.pages:
+                try:
+                    page_uuids.append(parse_uuid(raw_page))
+                except ValueError:
+                    logger.warning(
+                        f"Skipping page with invalid uuid (length {len(raw_page)}) "
+                        f"for user {current_user.id}"
                     )
-                    db.add(page)
-                    db.flush()  # Get the page ID
-                    pages_registered += 1
+                    skipped += 1
+            entries.append((nb_uuid, nb_data, page_uuids))
 
-                # Create or update NotebookPage mapping
-                page_number = page_idx + 1  # 1-indexed
-                notebook_page = db.query(NotebookPage).filter(
-                    NotebookPage.notebook_id == notebook.id,
-                    NotebookPage.page_id == page.id
-                ).first()
-
-                if notebook_page:
-                    # Update page order if changed
-                    notebook_page.page_number = page_number
-                else:
-                    # Create new mapping
-                    notebook_page = NotebookPage(
-                        notebook_id=notebook.id,
-                        page_id=page.id,
-                        page_number=page_number,
-                    )
-                    db.add(notebook_page)
+        counts = _apply_metadata_sync(db, current_user.id, entries)
+        notebooks_created, notebooks_updated, pages_registered, pages_already_synced = counts
 
         db.commit()
 
@@ -268,6 +462,7 @@ async def sync_metadata(
             notebooks_updated=notebooks_updated,
             pages_registered=pages_registered,
             pages_already_synced=pages_already_synced,
+            skipped=skipped,
             message=f"Synced {notebooks_created + notebooks_updated} notebooks with {total_pages} pages",
         )
 
@@ -283,31 +478,37 @@ async def sync_metadata(
 @router.post("/trigger", response_model=SyncResponse)
 async def trigger_sync(
     request: SyncRequest,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_clerk_session_user),
     db: Session = Depends(get_db),
 ):
     """
-    Trigger a sync operation.
+    Queue a sync to the specified target (or every enabled target for "all").
 
-    This will sync content to the specified target (or all targets if "all" is specified).
-    The sync runs in the background.
+    Every OCR-completed page that has not been synced to the target yet, and
+    is not already queued, gets a ``page_text`` row in the sync queue
+    (optionally only pages of ``notebook_uuids``). The sync worker does the
+    writing; this endpoint never calls the target. ``skipped_count`` counts
+    pages already synced or queued. Only targets that accept page text are
+    used.
     """
     try:
-        # Initialize sync manager
-        sync_manager = UnifiedSyncManager(db, current_user.id)
-
-        # Get integration configs for the user
         if request.target_name == "all":
-            configs = (
-                db.query(IntegrationConfig)
+            configs = [
+                config
+                for config in db.query(IntegrationConfig)
                 .filter(
                     IntegrationConfig.user_id == current_user.id,
                     IntegrationConfig.is_enabled == True,
                 )
                 .all()
-            )
+                if supports(config.target_name, PAGE_TEXT)
+            ]
         else:
+            if not supports(request.target_name, PAGE_TEXT):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Integration '{request.target_name}' does not sync notebook pages",
+                )
             config = (
                 db.query(IntegrationConfig)
                 .filter(
@@ -331,40 +532,28 @@ async def trigger_sync(
                 status_code=404, detail="No enabled integrations found"
             )
 
-        # Register sync targets
         for config in configs:
-            config_dict = config.get_config()
-
-            if config.target_name == "notion":
-                access_token = config_dict.get("access_token")
-                if not access_token:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Notion integration requires OAuth authentication. Please reconnect to Notion."
-                    )
-                target = NotionSyncTarget(
-                    access_token=access_token,
-                    database_id=config_dict.get("database_id"),
+            if missing_config(config.target_name, config.get_config()):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Integration '{config.target_name}' is not fully configured. Please reconnect it.",
                 )
-                sync_manager.register_target(target)
 
-        # Start sync in background
-        background_tasks.add_task(
-            _run_sync,
-            sync_manager,
-            request.target_name,
-            request.limit,
-            current_user.id,
-            db,
-            request.notebook_uuids,
-        )
+        queued = 0
+        skipped = 0
+        for config in configs:
+            stats = queue_pages_for_sync(
+                db, current_user.id, config.target_name, request.notebook_uuids
+            )
+            queued += stats["queued_count"]
+            skipped += stats["skipped_count"]
 
         return SyncResponse(
             success=True,
-            message=f"Sync started for {request.target_name}",
+            message=f"Queued {queued} pages for {request.target_name}",
             synced_count=0,
             failed_count=0,
-            skipped_count=0,
+            skipped_count=skipped,
         )
 
     except HTTPException:
@@ -372,80 +561,6 @@ async def trigger_sync(
     except Exception as e:
         logger.error(f"Error triggering sync: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An internal error occurred")
-
-
-async def _run_sync(
-    sync_manager: UnifiedSyncManager,
-    target_name: str,
-    limit: int,
-    user_id: int,
-    db: Session,
-    notebook_uuids: list[str] | None = None,
-):
-    """
-    Run sync operation in background.
-
-    Args:
-        sync_manager: Initialized sync manager
-        target_name: Target to sync to
-        limit: Maximum items to sync
-        user_id: User ID
-        db: Database session
-        notebook_uuids: Optional list of specific notebook UUIDs to sync
-    """
-    try:
-        logger.info(f"Starting background sync for user {user_id} to {target_name}")
-
-        synced_count = 0
-        failed_count = 0
-        skipped_count = 0
-
-        # Get targets to sync to
-        if target_name == "all":
-            target_names = list(sync_manager.targets.keys())
-        else:
-            target_names = [target_name]
-
-        # Get notebooks needing sync
-        for t_name in target_names:
-            if notebook_uuids:
-                # Sync specific notebooks
-                notebooks = sync_manager.get_specific_notebooks(t_name, notebook_uuids)
-            else:
-                # Sync notebooks that need syncing
-                notebooks = sync_manager.get_notebooks_needing_sync(t_name, limit)
-
-            logger.info(f"Found {len(notebooks)} notebooks to sync to {t_name}")
-
-            for notebook_item in notebooks:
-                result = await sync_manager.sync_item_to_target(notebook_item, t_name)
-
-                if result.success:
-                    synced_count += 1
-                elif result.status.value == "skipped":
-                    skipped_count += 1
-                else:
-                    failed_count += 1
-
-            # Update last_synced_at
-            config = (
-                db.query(IntegrationConfig)
-                .filter(
-                    IntegrationConfig.user_id == user_id,
-                    IntegrationConfig.target_name == t_name,
-                )
-                .first()
-            )
-            if config:
-                config.last_synced_at = datetime.utcnow()
-                db.commit()
-
-        logger.info(
-            f"Background sync completed: {synced_count} synced, {failed_count} failed, {skipped_count} skipped"
-        )
-
-    except Exception as e:
-        logger.error(f"Error in background sync: {e}", exc_info=True)
 
 
 @router.get("/stats", response_model=SyncStatsResponse)
@@ -519,183 +634,6 @@ async def get_sync_status(
         raise
     except Exception as e:
         logger.error(f"Error getting sync status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An internal error occurred")
-
-
-@router.post("/process-queue")
-async def process_sync_queue(
-    limit: int = 10,
-    current_user: User = Depends(get_clerk_session_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Process pending items in the sync queue.
-
-    This endpoint manually processes items from the sync queue.
-    In production, this would be handled by a background worker.
-    """
-    try:
-        # Get pending queue items for this user
-        pending_items = (
-            db.query(SyncQueue)
-            .filter(
-                SyncQueue.user_id == current_user.id,
-                SyncQueue.status == 'pending',
-                # Items in retry backoff wait for their turn, as in the worker
-                SyncQueue.scheduled_at <= datetime.utcnow(),
-            )
-            .order_by(SyncQueue.priority, SyncQueue.created_at)
-            .limit(limit)
-            .with_for_update(skip_locked=True)
-            .all()
-        )
-
-        if not pending_items:
-            return {
-                "success": True,
-                "message": "No pending items in queue",
-                "processed": 0,
-                "failed": 0
-            }
-
-        logger.info(f"Processing {len(pending_items)} pending sync items")
-
-        processed = 0
-        failed = 0
-
-        for queue_item in pending_items:
-            try:
-                # Mark as processing
-                queue_item.status = 'processing'
-                queue_item.started_at = datetime.utcnow()
-                db.commit()
-
-                # Get integration config
-                config = (
-                    db.query(IntegrationConfig)
-                    .filter(
-                        IntegrationConfig.user_id == current_user.id,
-                        IntegrationConfig.target_name == queue_item.target_name,
-                        IntegrationConfig.is_enabled == True,
-                    )
-                    .first()
-                )
-
-                if not config:
-                    logger.warning(f"No active integration found for {queue_item.target_name}")
-                    queue_item.status = 'failed'
-                    queue_item.error_message = f"Integration {queue_item.target_name} not active"
-                    failed += 1
-                    db.commit()
-                    continue
-
-                # Get the page data
-                if queue_item.item_type == 'page_text':
-                    page = db.query(Page).filter(Page.id == int(queue_item.item_id)).first()
-                    if not page:
-                        logger.warning(f"Page {queue_item.item_id} not found")
-                        queue_item.status = 'failed'
-                        queue_item.error_message = "Page not found"
-                        failed += 1
-                        db.commit()
-                        continue
-
-                    # Get notebook info
-                    notebook = db.query(Notebook).filter(Notebook.id == page.notebook_id).first()
-
-                    # Get decrypted config
-                    config_dict = config.get_config()
-
-                    # Create appropriate sync target
-                    if queue_item.target_name == 'notion':
-                        from app.integrations.notion_sync import NotionSyncTarget
-                        target = NotionSyncTarget(
-                            access_token=config_dict.get('access_token'),
-                            database_id=config_dict.get('database_id'),
-                        )
-                    else:
-                        logger.warning(f"Unknown target: {queue_item.target_name}")
-                        queue_item.status = 'failed'
-                        queue_item.error_message = f"Unknown target: {queue_item.target_name}"
-                        failed += 1
-                        db.commit()
-                        continue
-
-                    # Create sync item
-                    metadata = json.loads(queue_item.metadata_json) if queue_item.metadata_json else {}
-                    sync_item = SyncItem(
-                        item_type=SyncItemType.PAGE_TEXT,
-                        item_id=str(page.id),
-                        content_hash=queue_item.content_hash,
-                        data={
-                            'page_uuid': queue_item.page_uuid,
-                            'notebook_uuid': queue_item.notebook_uuid,
-                            'page_number': queue_item.page_number,
-                            'text': page.ocr_text or '',
-                            'notebook_name': notebook.visible_name if notebook else 'Unknown',
-                            **metadata
-                        },
-                        source_table='pages',
-                        created_at=page.created_at,
-                        updated_at=page.updated_at,
-                    )
-
-                    # Sync the item
-                    result = await target.sync_item(sync_item)
-
-                    if result.success:
-                        # Create sync record
-                        sync_record = SyncRecord(
-                            user_id=current_user.id,
-                            target_name=queue_item.target_name,
-                            item_type=queue_item.item_type,
-                            item_id=queue_item.item_id,
-                            content_hash=queue_item.content_hash,
-                            external_id=result.target_id,
-                            status='success',
-                            synced_at=datetime.utcnow(),
-                        )
-                        db.add(sync_record)
-
-                        # Mark queue item as completed
-                        queue_item.status = 'completed'
-                        queue_item.completed_at = datetime.utcnow()
-                        processed += 1
-
-                        logger.info(f"Successfully synced page {page.id} to {queue_item.target_name}")
-                    else:
-                        # Same skip/retry/permanent rules as the background worker
-                        outcome = apply_sync_result(queue_item, result)
-                        if outcome == "skipped":
-                            processed += 1
-                        else:
-                            failed += 1
-                            logger.error(f"Failed to sync page {page.id} ({outcome}): {result.error_message}")
-
-                    db.commit()
-                else:
-                    logger.warning(f"Unsupported item type: {queue_item.item_type}")
-                    queue_item.status = 'failed'
-                    queue_item.error_message = f"Unsupported item type: {queue_item.item_type}"
-                    failed += 1
-                    db.commit()
-
-            except Exception as e:
-                logger.error(f"Error processing queue item {queue_item.id}: {e}", exc_info=True)
-                db.rollback()
-                apply_sync_failure(queue_item, str(e))
-                failed += 1
-                db.commit()
-
-        return {
-            "success": True,
-            "message": f"Processed {processed} items, {failed} failed",
-            "processed": processed,
-            "failed": failed
-        }
-
-    except Exception as e:
-        logger.error(f"Error processing sync queue: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
