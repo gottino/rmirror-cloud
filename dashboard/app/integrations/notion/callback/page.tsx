@@ -1,20 +1,17 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { useAuth } from '@clerk/nextjs';
+import { useApiToken } from '@/lib/useApiToken';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { notionOAuthCallback } from '@/lib/api';
 import { trackEvent } from '@/lib/analytics';
 
 function NotionCallbackContent() {
-  const { getToken } = useAuth();
+  const getToken = useApiToken();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
-
-  // Development mode bypass
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
 
   useEffect(() => {
     handleCallback();
@@ -31,9 +28,7 @@ function NotionCallbackContent() {
         return;
       }
 
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) {
         router.push('/sign-in');
         return;
