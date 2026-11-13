@@ -433,7 +433,7 @@ async def get_notebook(
 @router.get("/{notebook_id}/pages", response_model=NotebookPagesResponse)
 async def get_notebook_pages(
     notebook_id: int,
-    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_session_user)],
     db: Annotated[Session, Depends(get_db)],
     offset: Annotated[int, Query(ge=0, description="Number of pages to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=100, description="Pages per window (1-100)")] = 50,
