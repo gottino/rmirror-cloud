@@ -11,8 +11,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
@@ -22,6 +20,7 @@ from app.core.rm_converter import RMConverter
 from app.core.rm_metadata import RMMetadataParser
 from app.database import get_db
 from app.dependencies import get_storage_service
+from app.middleware.rate_limit import UPLOAD_LIMIT, limiter
 from app.models.notebook import DocumentType, Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
@@ -36,9 +35,6 @@ from app.utils.umami import track_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["processing"])
-
-# Rate limiter for processing endpoints
-limiter = Limiter(key_func=get_remote_address)
 
 
 class ProcessRMFileResponse(BaseModel):
@@ -59,7 +55,9 @@ class ProcessRMFileRequest(BaseModel):
 
 
 @router.post("/rm-file", response_model=ProcessRMFileResponse)
-@limiter.limit("10/minute")
+# Per user (settings.rate_limit_upload, default 120/minute): sized for an
+# initial sync, where the agent uploads every page back to back.
+@limiter.limit(UPLOAD_LIMIT)
 async def process_rm_file(
     request: Request,
     rm_file: UploadFile = File(..., description=".rm file from reMarkable tablet"),
