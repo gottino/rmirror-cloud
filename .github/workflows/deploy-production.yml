@@ -80,6 +80,8 @@ jobs:
           NEXT_PUBLIC_ADMIN_USER_IDS: ${{ vars.NEXT_PUBLIC_ADMIN_USER_IDS }}
           NEXT_PUBLIC_UMAMI_URL: ${{ secrets.NEXT_PUBLIC_UMAMI_URL }}
           NEXT_PUBLIC_UMAMI_WEBSITE_ID: ${{ secrets.NEXT_PUBLIC_UMAMI_WEBSITE_ID }}
+          # "true" enforces the dashboard CSP; anything else ships it Report-Only (dashboard/lib/csp.js)
+          CSP_ENFORCE: ${{ vars.CSP_ENFORCE }}
         run: |
           npm ci
           npm run build
