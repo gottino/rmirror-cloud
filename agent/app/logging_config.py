@@ -5,6 +5,7 @@ Sets up both file and console logging with proper formatting.
 """
 
 import logging
+import re
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -76,3 +77,28 @@ def get_logger(name: str) -> logging.Logger:
         Logger instance
     """
     return logging.getLogger(name)
+
+
+_SECRET_QUERY_PARAM = re.compile(r"([?&](?:token|state)=)[^&\s\"]*", re.IGNORECASE)
+
+
+class RedactQuerySecretsFilter(logging.Filter):
+    """Redact token= and state= query values from access log lines."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        redacted = _SECRET_QUERY_PARAM.sub(r"\1[REDACTED]", message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = None
+        return True
+
+
+def install_werkzeug_redaction() -> None:
+    """Attach the redaction filter to werkzeug's request logger (idempotent)."""
+    werkzeug_logger = logging.getLogger("werkzeug")
+    if not any(isinstance(f, RedactQuerySecretsFilter) for f in werkzeug_logger.filters):
+        werkzeug_logger.addFilter(RedactQuerySecretsFilter())

@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from app.sync.cloud_sync import (
+    AuthenticationRequiredError,
     CloudSync,
     CloudSyncError,
     QuotaExceededError,
@@ -429,3 +430,103 @@ class TestMetadataParsing:
 
         assert result["document_type"] == "folder"
         assert result["visible_name"] == "Test Folder"
+
+
+class TestUploadErrorClassification:
+    """upload_file marks errors so the sync queue can tell retryable ones apart."""
+
+    async def _upload_with_error(self, config, rm_file, error):
+        sync = CloudSync(config)
+        sync.authenticated = True
+        sync.client = httpx.AsyncClient(timeout=30.0)
+
+        async def mock_post(*args, **kwargs):
+            raise error
+
+        try:
+            with patch.object(sync.client, "post", new=mock_post):
+                await sync.upload_file(rm_file, "test-notebook-uuid-1234", "rm")
+        finally:
+            await sync.close()
+
+    @staticmethod
+    def _status_error(code):
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = code
+        response.text = "error"
+        return httpx.HTTPStatusError(str(code), request=MagicMock(), response=response)
+
+    @pytest.mark.parametrize("code,transient", [(500, True), (503, True), (400, False), (413, False)])
+    async def test_http_errors(self, test_config_with_token, temp_remarkable_dir, code, transient):
+        rm_file = next((temp_remarkable_dir / "test-notebook-uuid-1234").glob("*.rm"))
+        with pytest.raises(CloudSyncError) as exc_info:
+            await self._upload_with_error(test_config_with_token, rm_file, self._status_error(code))
+        assert exc_info.value.status_code == code
+        assert exc_info.value.transient is transient
+
+    @pytest.mark.parametrize(
+        "error", [httpx.ConnectError("refused"), httpx.ReadTimeout("slow"), httpx.RemoteProtocolError("eof")]
+    )
+    async def test_network_errors_are_transient(self, test_config_with_token, temp_remarkable_dir, error):
+        rm_file = next((temp_remarkable_dir / "test-notebook-uuid-1234").glob("*.rm"))
+        with pytest.raises(CloudSyncError) as exc_info:
+            await self._upload_with_error(test_config_with_token, rm_file, error)
+        assert exc_info.value.transient is True
+
+    async def test_401_with_rejected_token_requires_sign_in(self, test_config_with_token, temp_remarkable_dir):
+        test_config_with_token.api.use_clerk_auth = True
+        rm_file = next((temp_remarkable_dir / "test-notebook-uuid-1234").glob("*.rm"))
+        sync = CloudSync(test_config_with_token)
+        sync.authenticated = True
+        sync.client = httpx.AsyncClient(timeout=30.0)
+
+        async def mock_post(*args, **kwargs):
+            raise self._status_error(401)
+
+        async def mock_get(*args, **kwargs):
+            raise self._status_error(401)
+
+        try:
+            with patch.object(sync.client, "post", new=mock_post), patch.object(sync.client, "get", new=mock_get):
+                with pytest.raises(AuthenticationRequiredError):
+                    await sync.upload_file(rm_file, "test-notebook-uuid-1234", "rm")
+        finally:
+            await sync.close()
+        assert sync.authenticated is False
+
+    async def test_authentication_required_is_a_cloud_sync_error(self):
+        assert issubclass(AuthenticationRequiredError, CloudSyncError)
+
+
+class TestUploadReauthBound:
+    async def test_second_401_after_reauth_requires_sign_in(self, test_config_with_token, temp_remarkable_dir):
+        rm_file = next((temp_remarkable_dir / "test-notebook-uuid-1234").glob("*.rm"))
+        sync = CloudSync(test_config_with_token)
+        sync.authenticated = True
+        sync.client = httpx.AsyncClient(timeout=30.0)
+        posts = 0
+        reauths = 0
+
+        async def mock_post(*args, **kwargs):
+            nonlocal posts
+            posts += 1
+            response = MagicMock(spec=httpx.Response)
+            response.status_code = 401
+            response.text = "Unauthorized"
+            raise httpx.HTTPStatusError("401", request=MagicMock(), response=response)
+
+        async def mock_re_auth():
+            nonlocal reauths
+            reauths += 1
+            sync.authenticated = True
+            return True
+
+        try:
+            with patch.object(sync.client, "post", new=mock_post), patch.object(sync, "authenticate", new=mock_re_auth):
+                with pytest.raises(AuthenticationRequiredError):
+                    await sync.upload_file(rm_file, "test-notebook-uuid-1234", "rm")
+        finally:
+            await sync.close()
+        assert posts == 2
+        assert reauths == 1
+        assert sync.authenticated is False

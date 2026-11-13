@@ -1960,7 +1960,15 @@
                     method: 'POST',
                 });
 
-                const data = await response.json();
+                let data = await response.json();
+
+                // The sync runs in the background: poll until it finishes
+                while (data.state === 'running') {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    data = await (await fetch('/api/sync/initial/status')).json();
+                }
+                if (data.state === 'done') data.success = true;
+                if (data.state === 'error') data.success = false;
 
                 if (data.success) {
                     const stats = data.stats;

@@ -16,9 +16,20 @@ logger = logging.getLogger(__name__)
 
 
 class CloudSyncError(Exception):
-    """Cloud sync error."""
+    """Cloud sync error.
 
-    pass
+    ``transient`` is True for failures worth retrying later (network errors,
+    timeouts, 5xx responses). ``status_code`` is the HTTP status when there was one.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None, transient: bool = False):
+        super().__init__(message)
+        self.status_code = status_code
+        self.transient = transient
+
+
+class AuthenticationRequiredError(CloudSyncError):
+    """The stored token was rejected (or is missing); the user has to sign in again."""
 
 
 class RateLimitError(Exception):
@@ -57,6 +68,20 @@ class CloudSync:
         """
         return not self.config.dev.dev_mode
 
+    def ensure_client(self) -> httpx.AsyncClient:
+        """Return the long-lived HTTP client, creating it on first use.
+
+        The client belongs to the agent's event loop (app.agent_loop): call this
+        only from coroutines running there. It is closed by close() at shutdown.
+        """
+        if self.client is None:
+            # SSL verification controlled by RMIRROR_DEV_MODE env var
+            # Default: verify=True (secure). Set RMIRROR_DEV_MODE=true for corporate proxies
+            self.client = httpx.AsyncClient(timeout=300.0, verify=self._verify_ssl)
+            ssl_status = "enabled" if self._verify_ssl else "disabled (dev mode)"
+            logger.debug(f"Created HTTP client with 300s timeout (SSL verification {ssl_status})")
+        return self.client
+
     async def authenticate(self) -> bool:
         """
         Authenticate with the backend API and store the access token.
@@ -64,13 +89,7 @@ class CloudSync:
         Returns:
             True if authentication successful, False otherwise.
         """
-        # Create HTTP client if not exists
-        if self.client is None:
-            # SSL verification controlled by RMIRROR_DEV_MODE env var
-            # Default: verify=True (secure). Set RMIRROR_DEV_MODE=true for corporate proxies
-            self.client = httpx.AsyncClient(timeout=300.0, verify=self._verify_ssl)
-            ssl_status = "enabled" if self._verify_ssl else "disabled (dev mode)"
-            logger.debug(f"Created HTTP client with 300s timeout (SSL verification {ssl_status})")
+        self.ensure_client()
 
         # If we already have a token (from any source), verify it's valid
         if self.config.api.token:
@@ -92,19 +111,27 @@ class CloudSync:
                     logger.warning("JWT token expired or invalid")
                     # Token expired - if using Clerk, need to re-auth via web
                     if self.config.api.use_clerk_auth:
-                        raise CloudSyncError(
-                            "Authentication token expired. Please sign in again via the web interface."
+                        raise AuthenticationRequiredError(
+                            "Authentication token expired. Please sign in again via the web interface.",
+                            status_code=401,
                         )
                     # Otherwise, fall through to password auth below
                     logger.info("Token expired, will try password authentication")
                 else:
-                    raise CloudSyncError(f"Token verification failed: {e}")
+                    raise CloudSyncError(
+                        f"Token verification failed: {e}",
+                        status_code=e.response.status_code,
+                        transient=e.response.status_code >= 500,
+                    )
             except Exception as e:
                 # Log the actual exception for debugging
                 logger.error(f"Token verification error: {type(e).__name__}: {e}", exc_info=True)
                 # If using Clerk auth, we can't fall back to password auth
                 if self.config.api.use_clerk_auth:
-                    raise CloudSyncError(f"Token verification failed: {e}")
+                    raise CloudSyncError(
+                        f"Token verification failed: {e}",
+                        transient=isinstance(e, httpx.TransportError),
+                    )
                 # Otherwise fall through to password auth
                 logger.info("Token verification failed, will try password authentication")
 
@@ -143,19 +170,13 @@ class CloudSync:
                 raise CloudSyncError(f"Authentication error: {e}")
 
         # If we got here with Clerk auth but no token, user needs to sign in
-        raise CloudSyncError(
+        raise AuthenticationRequiredError(
             "Please sign in via the web interface at http://localhost:5555"
         )
 
     async def ensure_authenticated(self) -> None:
         """Ensure we have a valid authentication token and HTTP client."""
-        # Always create a new HTTP client if it doesn't exist
-        # This is necessary because Flask creates a new event loop for each request,
-        # and httpx clients are bound to the event loop they were created in
-        if not self.client:
-            self.client = httpx.AsyncClient(timeout=300.0, verify=self._verify_ssl)
-            ssl_status = "enabled" if self._verify_ssl else "disabled (dev mode)"
-            logger.debug(f"Created new HTTP client for current event loop (SSL verification {ssl_status})")
+        self.ensure_client()
 
         # Re-authenticate if needed
         if not self.authenticated or not self.config.api.token:
@@ -242,7 +263,7 @@ class CloudSync:
         return metadata_request
 
     async def upload_file(
-        self, file_path: Path, notebook_uuid: str, file_type: str
+        self, file_path: Path, notebook_uuid: str, file_type: str, _reauthenticated: bool = False
     ) -> dict:
         """
         Upload a single file to the backend.
@@ -407,11 +428,17 @@ class CloudSync:
             )
 
             if e.response.status_code == 401:
-                # Token expired, re-authenticate and retry
-                logger.info("Token expired, re-authenticating...")
                 self.authenticated = False
+                if _reauthenticated:
+                    # Re-auth succeeded but the upload is still rejected: retry only once
+                    raise AuthenticationRequiredError(
+                        f"Upload of {file_path.name} rejected after re-authentication. Please sign in again.",
+                        status_code=401,
+                    )
+                # Token expired, re-authenticate and retry once
+                logger.info("Token expired, re-authenticating...")
                 await self.authenticate()
-                return await self.upload_file(file_path, notebook_uuid, file_type)
+                return await self.upload_file(file_path, notebook_uuid, file_type, _reauthenticated=True)
 
             if e.response.status_code == 402:
                 # Quota exceeded
@@ -451,13 +478,23 @@ class CloudSync:
                     retry_after=retry_after
                 )
 
-            raise CloudSyncError(f"Upload failed for {file_path.name}: {e}")
+            raise CloudSyncError(
+                f"Upload failed for {file_path.name}: {e}",
+                status_code=e.response.status_code,
+                transient=e.response.status_code >= 500,
+            )
         except httpx.TimeoutException as e:
             logger.error(f"Upload timeout for {file_path.name}: {e}")
-            raise CloudSyncError(f"Upload timeout for {file_path.name}: Request took longer than 300 seconds")
+            raise CloudSyncError(
+                f"Upload timeout for {file_path.name}: Request took longer than 300 seconds",
+                transient=True,
+            )
         except Exception as e:
             logger.error(f"Upload error for {file_path.name}: {e}", exc_info=True)
-            raise CloudSyncError(f"Upload error for {file_path.name}: {e}")
+            raise CloudSyncError(
+                f"Upload error for {file_path.name}: {e}",
+                transient=isinstance(e, httpx.TransportError),
+            )
 
     async def sync_notebook(self, notebook_uuid: str, notebook_dir: Path) -> dict:
         """
