@@ -179,6 +179,20 @@ jobs:
           xcrun stapler validate "$DMG_PATH"
           codesign --verify --verbose=2 "$DMG_PATH"
 
+      - name: Verify signature and notarization
+        working-directory: agent
+        env:
+          AGENT_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          DMG_PATH="dist/rMirror-${AGENT_VERSION}.dmg"
+
+          codesign --verify --deep --strict --verbose=2 dist/rMirror.app
+          codesign --verify --strict --verbose=2 "$DMG_PATH"
+          xcrun stapler validate "$DMG_PATH"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG_PATH"
+          echo "Signature and notarization verified"
+
       - name: Upload DMG as artifact
         uses: actions/upload-artifact@v4
         with:
