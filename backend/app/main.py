@@ -64,12 +64,20 @@ async def lifespan(app: FastAPI):
     await stop_sync_worker()
 
 
+def api_docs_kwargs(settings) -> dict:
+    """FastAPI arguments that turn /docs, /redoc and /openapi.json off unless enabled."""
+    if settings.enable_api_docs:
+        return {}
+    return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
 # Create FastAPI application
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     description="Cloud service for reMarkable tablet integration",
     lifespan=lifespan,
+    **api_docs_kwargs(settings),
 )
 
 # Shared rate limiter: per-route limits keyed by user, and a default limit

@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     app_name: str = "rMirror Cloud API"
     debug: bool = False
     api_version: str = "v1"
+    # Serve the interactive API docs (/docs, /redoc, /openapi.json). Off by default.
+    enable_api_docs: bool = False
 
     @field_validator("debug", mode="before")
     @classmethod

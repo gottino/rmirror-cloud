@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@clerk/nextjs';
+import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import UserMenu from '@/components/UserMenu';
 import { useRouter } from 'next/navigation';
 import { Menu } from 'lucide-react';
@@ -28,7 +29,8 @@ import { trackEvent } from '@/lib/analytics';
 import { timeAgo } from '@/lib/utils';
 
 export default function IntegrationsPage() {
-  const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn } = useAuth();
+  const getToken = useApiToken();
   const router = useRouter();
   const [integrations, setIntegrations] = useState<IntegrationConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,7 +46,7 @@ export default function IntegrationsPage() {
   const [todoistLoading, setTodoistLoading] = useState(false);
 
   // Development mode bypass
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  const isDevelopmentMode = isDevAuthMode();
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
 
   useEffect(() => {
@@ -55,18 +57,13 @@ export default function IntegrationsPage() {
 
   async function loadIntegrations() {
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
-      console.log('Got token:', token ? 'yes' : 'no');
+      const token = await getToken();
       if (!token) {
         setError('No authentication token available');
         return;
       }
 
-      console.log('Fetching integrations...');
       const data = await getIntegrations(token);
-      console.log('Integrations loaded:', data);
       setIntegrations(data);
 
       // Also load Obsidian status
@@ -95,17 +92,13 @@ export default function IntegrationsPage() {
   async function handleConnectNotion() {
     try {
       setLoading(true);
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) {
         setError('Not authenticated');
         return;
       }
 
-      console.log('Getting Notion OAuth URL...');
       const { authorization_url } = await getNotionOAuthUrl(token);
-      console.log('Redirecting to:', authorization_url);
       trackEvent({ name: 'integration_setup_started', data: { service: 'notion' } });
       window.location.href = authorization_url;
     } catch (err) {
@@ -121,9 +114,7 @@ export default function IntegrationsPage() {
     }
 
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       await deleteIntegration(token, targetName);
@@ -139,9 +130,7 @@ export default function IntegrationsPage() {
     setTestResult(null);
 
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const result = await testIntegrationConnection(token, targetName);
@@ -160,9 +149,7 @@ export default function IntegrationsPage() {
   async function handleEnableObsidian() {
     setObsidianLoading(true);
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const result = await enableObsidian(token);
@@ -180,9 +167,7 @@ export default function IntegrationsPage() {
     if (!confirm('This will invalidate your current API key. Any connected Obsidian plugin will need the new key. Continue?')) return;
     setObsidianLoading(true);
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       const result = await regenerateObsidianKey(token);
@@ -198,9 +183,7 @@ export default function IntegrationsPage() {
   async function handleDisableObsidian() {
     if (!confirm('Are you sure you want to disconnect Obsidian? Your synced files will remain in your vault.')) return;
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) return;
 
       await disableObsidian(token);
@@ -223,9 +206,7 @@ export default function IntegrationsPage() {
   async function handleConnectTodoist() {
     try {
       setTodoistLoading(true);
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) { setError('Not authenticated'); return; }
       const { authorization_url } = await getTodoistOAuthUrl(token);
       trackEvent({ name: 'integration_setup_started', data: { service: 'todoist' } });
@@ -240,9 +221,7 @@ export default function IntegrationsPage() {
     if (!confirm('Are you sure you want to disconnect Todoist?')) return;
     try {
       setTodoistLoading(true);
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (!token) { setError('Not authenticated'); return; }
       await disconnectTodoist(token);
       setTodoistStatus(null);
