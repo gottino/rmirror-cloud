@@ -33,13 +33,8 @@ dashboard/
 │   ├── sign-in/             # Clerk sign-in page
 │   └── sign-up/             # Clerk sign-up page
 ├── components/              # Reusable React components
-│   ├── Sidebar.tsx          # Main navigation sidebar
-│   ├── FolderSidebar.tsx    # Notebook folder navigation
-│   ├── NotebookTree.tsx     # Tree view of notebooks
-│   ├── MainContentArea.tsx  # Content display area
-│   ├── Breadcrumb.tsx       # Navigation breadcrumbs
-│   └── Quota*.tsx, ...      # QuotaDisplay, QuotaWarning, QuotaExceededModal, OnboardingChecklist, SearchResults
-├── lib/                     # api.ts (backend client), constants.ts, quota-context.tsx, analytics.ts
+│   └── Sidebar.tsx          # Main navigation sidebar (dashboard page has its own)
+├── lib/                     # API client (apiClient.ts, api.ts), hooks, utilities
 ├── public/                  # Static assets
 ├── deploy/                  # package-standalone.sh, install-release.sh (used by the deploy workflows)
 ├── middleware.ts            # Clerk auth middleware
@@ -138,7 +133,7 @@ Production builds happen in GitHub Actions (`NEXT_OUTPUT=standalone`), never on 
 1. **Check middleware.ts** for protected routes - every page except `/`, `/sign-in`, `/sign-up`, `/legal` and `/agent` requires auth
 2. **Review app/ structure** - using App Router (not Pages Router)
 3. **Check Tailwind config** for custom theme settings
-4. **Understand component hierarchy** - Sidebar → NotebookTree → MainContentArea
+4. **Backend calls** - add a function to `lib/api.ts` (built on `apiFetch`); get tokens with `useApiToken()`
 
 ### Common Tasks
 
@@ -153,19 +148,16 @@ export default function MyPage() {
 
 **Fetch from API with auth:**
 ```typescript
-import { useAuth } from '@clerk/nextjs'
+import { useApiToken } from '@/lib/useApiToken'
+import { getIntegrations } from '@/lib/api'   // every backend call lives in lib/api.ts
 
 function MyComponent() {
-  const { getToken } = useAuth()
+  const getToken = useApiToken()   // fresh Clerk token (or the local dev token)
 
   const fetchData = async () => {
     const token = await getToken()
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/notebooks/tree`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-    return response.json()
+    if (!token) return
+    return getIntegrations(token)   // throws ApiError / QuotaExceededError
   }
 }
 ```

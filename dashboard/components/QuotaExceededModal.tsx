@@ -92,7 +92,7 @@ export function QuotaExceededModal({ isOpen, onClose, quota }: QuotaExceededModa
           </div>
 
           {/* Pro tier preview */}
-          <ProTierInfoCard analyticsSource="quota_modal" />
+          <ProTierInfoCard />
 
           {/* Beta tester note */}
           <div
