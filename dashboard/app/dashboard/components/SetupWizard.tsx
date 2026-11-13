@@ -7,7 +7,6 @@ import { getLatestAgentVersion, type AgentVersionInfo, getAgentStatus } from '@/
 
 interface SetupWizardProps {
   getToken: () => Promise<string | null>;
-  isDevelopmentMode: boolean;
   onComplete: () => void;
   onboardingProgress?: {
     agent_downloaded_at: string | null;
@@ -20,7 +19,6 @@ type WizardStep = 1 | 2 | 3 | 4;
 
 export default function SetupWizard({
   getToken,
-  isDevelopmentMode,
   onComplete,
   onboardingProgress,
 }: SetupWizardProps) {
@@ -51,9 +49,7 @@ export default function SetupWizard({
 
     const checkAgent = async () => {
       try {
-        const authToken = isDevelopmentMode
-          ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-          : await getToken();
+        const authToken = await getToken();
         if (!authToken) return;
 
         const status = await getAgentStatus(authToken);
@@ -74,7 +70,7 @@ export default function SetupWizard({
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
-  }, [currentStep, getToken, isDevelopmentMode]);
+  }, [currentStep, getToken]);
 
   const handleDownload = useCallback(() => {
     if (!agentVersion?.platforms.macos?.url) return;
