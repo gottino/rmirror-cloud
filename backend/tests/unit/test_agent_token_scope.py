@@ -178,6 +178,7 @@ AGENT_BLOCKED_ROUTES = [
     ("GET", f"{API}/notebooks/tree"),
     ("GET", f"{API}/notebooks/uuid/{{notebook_uuid}}"),
     ("GET", f"{API}/notebooks/{{notebook_id}}"),
+    ("GET", f"{API}/notebooks/{{notebook_id}}/pages"),
     ("GET", f"{API}/pages/{{page_id}}/pdf"),
     ("GET", f"{API}/search"),
 ]
