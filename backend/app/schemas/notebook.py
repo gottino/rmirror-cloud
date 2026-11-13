@@ -47,13 +47,38 @@ class Notebook(NotebookBase):
         from_attributes = True
 
 
+class NotebookPageCounts(BaseModel):
+    """Page counts for a notebook, by sync/OCR state."""
+
+    total_pages: int
+    synced_pages: int
+    not_synced_pages: int
+    pending_quota_pages: int
+
+
 class NotebookWithPages(Notebook):
-    """Notebook response schema with pages."""
+    """Notebook response schema with pages.
+
+    ``pages`` is empty when the request asked for ``include_pages=false``;
+    ``page_counts`` is always filled so clients can show totals without
+    loading every page.
+    """
 
     pages: list[Page] = []
+    page_counts: NotebookPageCounts | None = None
 
     class Config:
         from_attributes = True
+
+
+class NotebookPagesResponse(BaseModel):
+    """One window of a notebook's pages, in notebook page order."""
+
+    items: list[Page]
+    total: int
+    offset: int
+    limit: int
+    has_more: bool
 
 
 class NotebookUploadResponse(BaseModel):

@@ -1,8 +1,11 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { useQuota } from '@/lib/quota-context';
 import { QUOTA_THRESHOLDS } from '@/lib/constants';
 import { AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+
+const QUOTA_MODAL_SEEN_KEY = 'rmirror_quota_modal_shown';
 
 interface QuotaDisplayProps {
   variant?: 'compact' | 'full';
@@ -11,14 +14,25 @@ interface QuotaDisplayProps {
 
 export function QuotaDisplay({ variant = 'compact', onQuotaExceeded }: QuotaDisplayProps) {
   const { quota, loading } = useQuota();
+  const isExhausted = !!quota?.is_exhausted;
+  const callbackRef = useRef(onQuotaExceeded);
+  callbackRef.current = onQuotaExceeded;
+
+  // Notify once per browser session when quota transitions to exhausted, so the
+  // modal can be closed without being reopened by later renders or polls.
+  useEffect(() => {
+    if (!isExhausted || !callbackRef.current) return;
+    try {
+      if (sessionStorage.getItem(QUOTA_MODAL_SEEN_KEY)) return;
+      sessionStorage.setItem(QUOTA_MODAL_SEEN_KEY, '1');
+    } catch {
+      // Storage unavailable: fall through and notify (effect still runs only on transition)
+    }
+    callbackRef.current();
+  }, [isExhausted]);
 
   if (loading || !quota) {
     return null;
-  }
-
-  // Call callback if quota exceeded
-  if (quota.is_exhausted && onQuotaExceeded) {
-    onQuotaExceeded();
   }
 
   const percentage = isNaN(quota.percentage_used) ? 0 : quota.percentage_used;
