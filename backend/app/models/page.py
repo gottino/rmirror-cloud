@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -25,6 +25,18 @@ class Page(Base):
     """Individual pages within notebooks, with OCR tracking."""
 
     __tablename__ = "pages"
+    __table_args__ = (
+        # One row per reMarkable page per notebook; NULL page_uuids never
+        # conflict. Find-or-create sites insert with ON CONFLICT against it.
+        Index("uq_pages_notebook_page_uuid", "notebook_id", "page_uuid", unique=True),
+        # PostgreSQL-only search index (migration f8a2b4c9d1e7).
+        Index(
+            "idx_pages_ocr_text_trgm",
+            "ocr_text",
+            postgresql_using="gin",
+            postgresql_ops={"ocr_text": "gin_trgm_ops"},
+        ).ddl_if(dialect="postgresql"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     notebook_id: Mapped[int] = mapped_column(
@@ -32,7 +44,7 @@ class Page(Base):
     )
 
     # Page identification
-    page_uuid: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    page_uuid: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
 
     # Storage
     s3_key: Mapped[str | None] = mapped_column(String(500), nullable=True)  # .rm file

@@ -8,13 +8,19 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 
+from sqlalchemy import text, update
 from sqlalchemy.orm import Session
 
-from app.core.sync_engine import SyncItem, SyncItemType, SyncResult
+from app.core.sync_engine import (
+    ContentFingerprint,
+    SyncErrorKind,
+    SyncItem,
+    SyncItemType,
+    SyncResult,
+)
+from app.core.upserts import dialect_insert
 from app.database import SessionLocal
-from app.integrations.notion_sync import NotionSyncTarget
-from app.integrations.notion_todos_sync import NotionTodosSyncTarget
-from app.integrations.todoist_sync import TodoistSyncTarget
+from app.integrations.registry import create_target, supports
 from app.models.notebook import Notebook
 from app.models.page import Page
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord, SyncStatus
@@ -35,9 +41,38 @@ MAX_SYNC_RETRIES = 8
 RETRY_BASE_DELAY_SECONDS = 60
 RETRY_MAX_DELAY_SECONDS = 3600  # cap a single backoff at 1 hour
 
-# A FAILED result whose message matches this is permanent: retrying can't fix
-# revoked credentials, a bad request, or a block the user archived (CLAUDE.md:
-# treat archived blocks as deleted). Anything else is assumed transient.
+# A RATE_LIMITED result defers the row without using a retry attempt. To keep a
+# permanently rate-limited row from being deferred forever, the consecutive
+# deferrals are counted in the row's metadata_json; after this many, the next
+# rate-limited result is handled as an ordinary transient failure (backoff and
+# attempt cap). Any other outcome resets the count.
+MAX_RATE_LIMIT_DEFERRALS = 20
+RATE_LIMIT_DEFERRALS_KEY = "rate_limit_deferrals"
+RATE_LIMIT_GROWTH_STEP = timedelta(seconds=30)
+RATE_LIMIT_GROWTH_STEPS_MAX = 10
+RATE_LIMIT_MAX_DELAY = timedelta(seconds=RETRY_MAX_DELAY_SECONDS)
+
+# A claimed row is 'processing' with started_at stamped at claim time and again
+# just before each item runs. A row still 'processing' this long after its
+# started_at belongs to a worker that died (deploy, crash, OOM kill), so the
+# next sweep takes it back. Must comfortably exceed the slowest single item.
+PROCESSING_LEASE = timedelta(minutes=10)
+
+# A target reports PARENT_GONE when the notebook's page in it was archived or
+# deleted. The worker then forgets that notebook's records and requeues, so the
+# next attempt recreates the page. If the same queue row hits it again within
+# this window, it is handled as an ordinary transient failure instead (no loop).
+PARENT_GONE_GUARD = timedelta(hours=1)
+PARENT_GONE_REQUEUE_DELAY = timedelta(seconds=5)
+# Priority for the notebook's other pages requeued after PARENT_GONE
+# (background work, like the initial sync).
+PARENT_GONE_RESYNC_PRIORITY = 8
+
+# Used only when a result carries no error_kind (targets that do not classify
+# their errors): a FAILED result whose message matches this is permanent:
+# retrying can't fix revoked credentials, a bad request, or a block the user
+# archived (CLAUDE.md: treat archived blocks as deleted). Anything else is
+# assumed transient.
 _PERMANENT_ERROR = re.compile(
     r"archived|unauthori[sz]ed|forbidden|not found|could not find|invalid token"
     r"|\b(400|401|403|404)\b",
@@ -85,7 +120,13 @@ def apply_sync_result(
     """Record a sync result that wasn't a success, using the target's own status.
 
     - SKIPPED (e.g. empty page): nothing to sync, so the item is completed.
-    - FAILED with a permanent cause (see _PERMANENT_ERROR): 'failed', no retry.
+    - error_kind RATE_LIMITED: back to 'pending' at ``retry_after`` (default
+      30s); no retry attempt is used up.
+    - error_kind AUTH or PERMANENT: 'failed', no retry.
+    - error_kind TRANSIENT or PARENT_GONE (when the worker did not handle it
+      itself): transient, see below.
+    - No error_kind: FAILED with a permanent cause (see _PERMANENT_ERROR) is
+      'failed', no retry.
     - RETRY, or any other FAILED: transient, rescheduled via apply_sync_failure,
       no earlier than the target's ``retry_after`` when it gives one.
 
@@ -94,23 +135,236 @@ def apply_sync_result(
     now = now or datetime.utcnow()
 
     if result.status == SyncStatus.SKIPPED:
+        _set_rate_limit_deferrals(queue_item, 0)
         queue_item.status = 'completed'
         queue_item.completed_at = now
         queue_item.error_message = None
         return "skipped"
 
     message = result.error_message or "sync failed"
-    if result.status == SyncStatus.FAILED and _PERMANENT_ERROR.search(message):
+    retry_after = getattr(result, "retry_after", None)
+    if not isinstance(retry_after, datetime):
+        retry_after = None
+    kind = getattr(result, "error_kind", None)
+    if not isinstance(kind, SyncErrorKind):
+        kind = None
+
+    if kind is SyncErrorKind.RATE_LIMITED:
+        deferrals = _get_rate_limit_deferrals(queue_item)
+        if deferrals < MAX_RATE_LIMIT_DEFERRALS:
+            # The provider asked us to slow down; that is not a failed attempt.
+            deferrals += 1
+            _set_rate_limit_deferrals(queue_item, deferrals)
+            delay = max(
+                (retry_after - now) if retry_after else timedelta(0),
+                RATE_LIMIT_GROWTH_STEP * min(deferrals, RATE_LIMIT_GROWTH_STEPS_MAX),
+            )
+            queue_item.status = 'pending'
+            queue_item.error_message = message
+            queue_item.scheduled_at = now + min(delay, RATE_LIMIT_MAX_DELAY)
+            return "retry"
+        # Deferred too often in a row: fall through to the ordinary transient path.
+    else:
+        _set_rate_limit_deferrals(queue_item, 0)
+
+    if kind is not None:
+        permanent = kind in (SyncErrorKind.AUTH, SyncErrorKind.PERMANENT)
+    else:
+        permanent = result.status == SyncStatus.FAILED and bool(_PERMANENT_ERROR.search(message))
+    if permanent:
         queue_item.status = 'failed'
         queue_item.error_message = message
         return "failed"
 
     if not apply_sync_failure(queue_item, message, now=now):
         return "failed"
-    retry_after = getattr(result, "retry_after", None)
-    if isinstance(retry_after, datetime) and retry_after > queue_item.scheduled_at:
+    if retry_after and retry_after > queue_item.scheduled_at:
         queue_item.scheduled_at = retry_after
     return "retry"
+
+
+def _load_json(raw: Optional[str]) -> dict:
+    try:
+        value = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _get_rate_limit_deferrals(queue_item: "SyncQueue") -> int:
+    value = _load_json(queue_item.metadata_json).get(RATE_LIMIT_DEFERRALS_KEY)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+def _set_rate_limit_deferrals(queue_item: "SyncQueue", count: int) -> None:
+    meta = _load_json(queue_item.metadata_json)
+    if count > 0:
+        meta[RATE_LIMIT_DEFERRALS_KEY] = count
+    elif RATE_LIMIT_DEFERRALS_KEY in meta:
+        del meta[RATE_LIMIT_DEFERRALS_KEY]
+    else:
+        return
+    queue_item.metadata_json = json.dumps(meta) if meta else None
+
+
+def handle_parent_gone(
+    db: Session, queue_item: "SyncQueue", result: SyncResult, *, now: Optional[datetime] = None
+) -> bool:
+    """React to PARENT_GONE: the notebook's page in the target was archived/deleted.
+
+    Deletes the notebook-level SyncRecord and every other SyncRecord of that
+    notebook for this user and target (their blocks lived on the gone page),
+    requeues the notebook's other synced pages, and puts this row back to
+    'pending' after a short delay without using up a retry. The next attempt
+    then finds no notebook record and creates a new notebook page.
+
+    Returns False, changing nothing, when this row already did this within
+    PARENT_GONE_GUARD (or has no notebook); the caller then records an
+    ordinary failure.
+    """
+    now = now or datetime.utcnow()
+    if not queue_item.notebook_uuid:
+        return False
+
+    meta = _load_json(queue_item.metadata_json)
+    last = meta.get("parent_gone_at")
+    if last:
+        try:
+            if now - datetime.fromisoformat(last) < PARENT_GONE_GUARD:
+                return False
+        except (TypeError, ValueError):
+            pass
+
+    records = (
+        db.query(SyncRecord)
+        .filter(
+            SyncRecord.user_id == queue_item.user_id,
+            SyncRecord.target_name == queue_item.target_name,
+            SyncRecord.notebook_uuid == queue_item.notebook_uuid,
+        )
+        .all()
+    )
+    resync = [
+        r for r in records
+        if r.item_type == 'page_text'
+        and r.page_uuid
+        and r.item_id
+        and r.page_uuid != queue_item.page_uuid
+    ]
+    for record in records:
+        db.delete(record)
+
+    already_pending = {
+        page_uuid
+        for (page_uuid,) in db.query(SyncQueue.page_uuid).filter(
+            SyncQueue.user_id == queue_item.user_id,
+            SyncQueue.target_name == queue_item.target_name,
+            SyncQueue.notebook_uuid == queue_item.notebook_uuid,
+            SyncQueue.status == 'pending',
+        )
+    }
+    for record in resync:
+        if record.page_uuid in already_pending:
+            continue
+        db.add(
+            SyncQueue(
+                user_id=queue_item.user_id,
+                item_type='page_text',
+                item_id=record.item_id,
+                content_hash=record.content_hash,
+                page_uuid=record.page_uuid,
+                notebook_uuid=record.notebook_uuid,
+                page_number=record.page_number,
+                target_name=queue_item.target_name,
+                status='pending',
+                priority=PARENT_GONE_RESYNC_PRIORITY,
+                scheduled_at=now + PARENT_GONE_REQUEUE_DELAY,
+            )
+        )
+
+    meta["parent_gone_at"] = now.isoformat()
+    queue_item.metadata_json = json.dumps(meta)
+    queue_item.status = 'pending'
+    queue_item.scheduled_at = now + PARENT_GONE_REQUEUE_DELAY
+    queue_item.error_message = result.error_message or "Notebook page gone in target; recreating"
+    logger.warning(
+        "Notebook page gone in %s for notebook %s; dropped %d sync record(s), "
+        "requeued %d page(s)",
+        queue_item.target_name,
+        queue_item.notebook_uuid,
+        len(records),
+        len(resync),
+        extra={
+            "event": "sync.parent_gone",
+            "queue_id": queue_item.id,
+            "target": queue_item.target_name,
+            "notebook_uuid": queue_item.notebook_uuid,
+        },
+    )
+    return True
+
+
+def reclaim_stale_processing(db: Session, *, now: Optional[datetime] = None) -> tuple[int, int]:
+    """Take back queue rows stranded in 'processing' by a worker that went away.
+
+    A row whose ``started_at`` is older than PROCESSING_LEASE (or NULL) is
+    treated as abandoned. It counts as one failed attempt (retry_count + 1), like
+    apply_sync_failure, and is either returned to 'pending' or, once
+    MAX_SYNC_RETRIES is reached, dead-lettered as 'failed'.
+
+    Unlike apply_sync_failure no backoff is applied: the row did not fail, its
+    worker vanished, so it is retryable immediately (scheduled_at = now). The
+    attempt cap still bounds a row that keeps killing its worker.
+
+    Done as two set-based UPDATE statements rather than read-then-write per row,
+    so two uvicorn workers sweeping at once are safe: the loser of a row lock
+    re-checks ``status = 'processing'`` and skips rows the winner already moved.
+
+    Returns (requeued, dead_lettered).
+    """
+    now = now or datetime.utcnow()
+    cutoff = now - PROCESSING_LEASE
+    stale = (
+        SyncQueue.status == 'processing',
+        (SyncQueue.started_at.is_(None)) | (SyncQueue.started_at < cutoff),
+    )
+
+    dead = db.execute(
+        update(SyncQueue)
+        .where(*stale, SyncQueue.retry_count + 1 >= MAX_SYNC_RETRIES)
+        .values(
+            status='failed',
+            retry_count=SyncQueue.retry_count + 1,
+            error_message=(
+                f"Abandoned in 'processing' after {MAX_SYNC_RETRIES} attempts "
+                "(worker stopped before finishing); giving up"
+            ),
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    requeued = db.execute(
+        update(SyncQueue)
+        .where(*stale, SyncQueue.retry_count + 1 < MAX_SYNC_RETRIES)
+        .values(
+            status='pending',
+            retry_count=SyncQueue.retry_count + 1,
+            scheduled_at=now,
+            error_message="Reclaimed: worker stopped before finishing this item",
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    db.commit()
+
+    if requeued or dead:
+        logger.warning(
+            "Reclaimed stale 'processing' sync items: %d requeued, %d dead-lettered",
+            requeued,
+            dead,
+            extra={"event": "sync.reclaim", "requeued": requeued, "dead_lettered": dead},
+        )
+    return requeued, dead
 
 
 class SyncWorker:
@@ -129,6 +383,7 @@ class SyncWorker:
         self._last_drip_check: Optional[float] = None
         # Round-robin cursor (last user id handled) for retroactive OCR
         self._pending_quota_cursor = 0
+        self._last_queue_prune: Optional[float] = None
 
     async def start(self):
         """Start the background worker."""
@@ -169,6 +424,9 @@ class SyncWorker:
                 # OCR pages left PENDING_QUOTA once their owner's quota has room again
                 await self._process_pending_quota_pages()
 
+                # Delete old finished queue rows (about hourly, small batches)
+                self._prune_sync_queue()
+
                 # Check drip emails every hour
                 if self._last_drip_check is None or (time.time() - self._last_drip_check) > 3600:
                     try:
@@ -199,6 +457,9 @@ class SyncWorker:
         """
         db: Session = SessionLocal()
         try:
+            # Recover rows a dead worker left in 'processing' before claiming more.
+            reclaim_stale_processing(db)
+
             # Get pending items with row-level locking to prevent race conditions
             # FOR UPDATE SKIP LOCKED ensures each worker gets different items
             pending_items = (
@@ -227,50 +488,98 @@ class SyncWorker:
 
             # Mark all items as 'processing' immediately to prevent other workers
             # from picking them up (FOR UPDATE locks are released on commit)
+            claimed_ids = [item.id for item in pending_items]
+            index = -1  # position of the item in flight, for cancellation cleanup
             for item in pending_items:
                 item.status = 'processing'
                 item.started_at = datetime.utcnow()
             db.commit()
 
-            for queue_item in pending_items:
-                try:
-                    await self._process_queue_item(db, queue_item)
-                except Exception as e:
-                    # The failed attempt may have left the session needing a
-                    # rollback (e.g. an IntegrityError on commit); discard its
-                    # partial writes before recording the failure.
-                    db.rollback()
-                    # Unexpected exceptions (network, provider 5xx) are transient:
-                    # reschedule with backoff, or dead-letter once retries exhausted.
-                    retrying = apply_sync_failure(queue_item, str(e))
-                    logger.error(
-                        "Sync item failed",
-                        exc_info=True,
-                        extra={
-                            "event": "sync.retry" if retrying else "sync.fail",
-                            "queue_id": queue_item.id,
-                            "target": queue_item.target_name,
-                            "error": str(e),
-                            "retry_count": queue_item.retry_count,
-                            "retrying": retrying,
-                            "next_attempt_at": (
-                                queue_item.scheduled_at.isoformat() if retrying else None
-                            ),
-                        },
-                    )
+            try:
+                for index, queue_item in enumerate(pending_items):
                     try:
+                        # Renew the lease: a long batch must not have its later
+                        # items reclaimed while this worker is alive. Guarded on
+                        # status so an item another sweep already reclaimed
+                        # (we were stalled past the lease) is not run twice.
+                        renewed = db.execute(
+                            update(SyncQueue)
+                            .where(
+                                SyncQueue.id == queue_item.id,
+                                SyncQueue.status == 'processing',
+                            )
+                            .values(started_at=datetime.utcnow())
+                            .execution_options(synchronize_session=False)
+                        ).rowcount
                         db.commit()
-                    except Exception:
-                        # Leave this item for later; keep processing the batch.
+                        if not renewed:
+                            logger.warning(
+                                "Sync item %s was reclaimed before it started; skipping",
+                                queue_item.id,
+                            )
+                            continue
+                        db.refresh(queue_item)
+                        await self._process_queue_item(db, queue_item)
+                    except Exception as e:
+                        # The failed attempt may have left the session needing a
+                        # rollback (e.g. an IntegrityError on commit); discard its
+                        # partial writes before recording the failure.
                         db.rollback()
+                        # Unexpected exceptions (network, provider 5xx) are transient:
+                        # reschedule with backoff, or dead-letter once retries exhausted.
+                        retrying = apply_sync_failure(queue_item, str(e))
                         logger.error(
-                            "Could not record sync failure",
+                            "Sync item failed",
                             exc_info=True,
-                            extra={"event": "sync.fail_unrecorded", "queue_id": queue_item.id},
+                            extra={
+                                "event": "sync.retry" if retrying else "sync.fail",
+                                "queue_id": queue_item.id,
+                                "target": queue_item.target_name,
+                                "error": str(e),
+                                "retry_count": queue_item.retry_count,
+                                "retrying": retrying,
+                                "next_attempt_at": (
+                                    queue_item.scheduled_at.isoformat() if retrying else None
+                                ),
+                            },
                         )
-
+                        try:
+                            db.commit()
+                        except Exception:
+                            # Leave this item for later; keep processing the batch.
+                            db.rollback()
+                            logger.error(
+                                "Could not record sync failure",
+                                exc_info=True,
+                                extra={"event": "sync.fail_unrecorded", "queue_id": queue_item.id},
+                            )
+            except asyncio.CancelledError:
+                # Shutdown mid-batch: hand back the claimed rows not yet started
+                # so they do not wait out the lease. The item in flight (if any)
+                # is left to the lease reclaim, since it may have partly synced.
+                self._release_unstarted(db, claimed_ids[index + 1:])
+                raise
         finally:
             db.close()
+
+    @staticmethod
+    def _release_unstarted(db: Session, ids: list[int]) -> None:
+        """Return claimed-but-unstarted rows to 'pending' (no attempt counted)."""
+        if not ids:
+            return
+        try:
+            db.rollback()
+            db.execute(
+                update(SyncQueue)
+                .where(SyncQueue.id.in_(ids), SyncQueue.status == 'processing')
+                .values(status='pending', started_at=None)
+                .execution_options(synchronize_session=False)
+            )
+            db.commit()
+        except Exception:
+            # Best effort: the lease reclaim recovers them anyway.
+            db.rollback()
+            logger.error("Could not release unstarted sync items", exc_info=True)
 
     async def _process_dirty_notebook_pdfs(self):
         """Rebuild combined notebook PDFs for notebooks that have gone quiet.
@@ -313,6 +622,38 @@ class SyncWorker:
                 logger.info("Retroactively OCR'd %d pending-quota page(s)", processed)
         except Exception as e:
             logger.error(f"Error processing pending-quota pages: {e}", exc_info=True)
+        finally:
+            db.close()
+
+    def _prune_sync_queue(self, interval_seconds: int = 3600):
+        """Delete finished sync_queue rows past their retention, about once an hour.
+
+        Retention comes from the SYNC_QUEUE_*_RETENTION_DAYS settings. Only
+        completed and failed queue rows are deleted, in bounded batches (see
+        ``prune_sync_queue``); sync_records and content are never touched.
+        """
+        if self._last_queue_prune is not None and (
+            time.time() - self._last_queue_prune
+        ) < interval_seconds:
+            return
+        self._last_queue_prune = time.time()
+
+        from app.config import get_settings
+        from app.services.sync_queue import prune_sync_queue
+
+        settings = get_settings()
+        db: Session = SessionLocal()
+        try:
+            deleted = prune_sync_queue(
+                db,
+                completed_days=settings.sync_queue_completed_retention_days,
+                failed_days=settings.sync_queue_failed_retention_days,
+            )
+            if deleted:
+                logger.info("Pruned %d finished sync_queue row(s)", deleted)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error pruning sync queue: {e}", exc_info=True)
         finally:
             db.close()
 
@@ -362,9 +703,23 @@ class SyncWorker:
             db.commit()
             return
 
+        # The target registry says which item types each target accepts
+        if not supports(queue_item.target_name, queue_item.item_type):
+            logger.warning(
+                f"Target {queue_item.target_name} does not accept {queue_item.item_type} items"
+            )
+            queue_item.status = 'failed'
+            queue_item.error_message = (
+                f"Target {queue_item.target_name} does not accept {queue_item.item_type} items"
+            )
+            db.commit()
+            return
+
         # Process based on item type
         if queue_item.item_type == 'page_text':
             await self._process_page_sync(db, queue_item, config, _item_start)
+        elif queue_item.item_type == 'notebook_metadata':
+            await self._process_notebook_metadata_sync(db, queue_item, config, _item_start)
         elif queue_item.item_type == 'todo':
             await self._process_todo_sync(db, queue_item, config, _item_start)
         else:
@@ -404,18 +759,7 @@ class SyncWorker:
         # Get decrypted config
         config_dict = config.get_config()
 
-        # Create appropriate sync target
-        if queue_item.target_name == 'notion':
-            target = NotionSyncTarget(
-                access_token=config_dict.get('access_token'),
-                database_id=config_dict.get('database_id'),
-            )
-        else:
-            logger.warning(f"Unknown target: {queue_item.target_name}")
-            queue_item.status = 'failed'
-            queue_item.error_message = f"Unknown target: {queue_item.target_name}"
-            db.commit()
-            return
+        target = create_target(queue_item.target_name, config_dict)
 
         # Check if the NOTEBOOK was previously synced to get the parent Notion page ID
         # This prevents creating multiple Notion pages for the same notebook
@@ -446,6 +790,12 @@ class SyncWorker:
 
         existing_block_id = existing_record.external_id if existing_record else None
         existing_content_hash = existing_record.content_hash if existing_record else None
+        # Old blocks a previous update appended over but could not delete.
+        stale_block_ids = (
+            _load_json(existing_record.metadata_json).get("stale_block_ids") or []
+            if existing_record
+            else []
+        )
 
         # Check if content actually changed
         content_changed = existing_content_hash != queue_item.content_hash
@@ -457,6 +807,19 @@ class SyncWorker:
             queue_item.completed_at = datetime.utcnow()
             db.commit()
             return
+
+        # Blocks other pages of this notebook are recorded at; the target never
+        # adopts or deletes these when looking for this page's own toggle.
+        claimed_block_ids = [
+            external_id
+            for (external_id,) in db.query(SyncRecord.external_id).filter(
+                SyncRecord.user_id == queue_item.user_id,
+                SyncRecord.target_name == queue_item.target_name,
+                SyncRecord.notebook_uuid == queue_item.notebook_uuid,
+                SyncRecord.item_type != 'notebook',
+                SyncRecord.page_uuid != queue_item.page_uuid,
+            )
+        ]
 
         # Create sync item with existing IDs if available
         metadata = json.loads(queue_item.metadata_json) if queue_item.metadata_json else {}
@@ -472,6 +835,8 @@ class SyncWorker:
                 'notebook_name': notebook.visible_name if notebook else 'Unknown',
                 'existing_block_id': existing_block_id,  # Pass existing page block ID
                 'existing_notebook_page_id': existing_notebook_page_id,  # Pass existing notebook page ID
+                'stale_block_ids': stale_block_ids,
+                'claimed_block_ids': claimed_block_ids,
                 'user_id': queue_item.user_id,
                 **metadata
             },
@@ -497,6 +862,7 @@ class SyncWorker:
                 .first()
             )
 
+            result_metadata = result.metadata or {}
             if existing_record:
                 # Update existing record with new content hash and block ID
                 existing_record.external_id = result.target_id
@@ -504,6 +870,7 @@ class SyncWorker:
                 existing_record.status = 'success'
                 existing_record.synced_at = datetime.utcnow()
                 existing_record.updated_at = datetime.utcnow()
+                self._store_stale_block_ids(existing_record, result_metadata)
                 logger.info(f"Updated existing sync record for page {page.id}")
             else:
                 # Create new sync record
@@ -520,11 +887,11 @@ class SyncWorker:
                     notebook_uuid=queue_item.notebook_uuid,
                     page_number=queue_item.page_number,
                 )
+                self._store_stale_block_ids(sync_record, result_metadata)
                 db.add(sync_record)
 
             # If a new notebook page was created in Notion, also create a SyncRecord for it
             # This prevents duplicate notebook pages on future syncs
-            result_metadata = result.metadata or {}
             if result_metadata.get('notebook_created') and result_metadata.get('notebook_page_id'):
                 notebook_page_id = result_metadata['notebook_page_id']
                 # Check if notebook SyncRecord already exists (shouldn't happen but be safe)
@@ -557,6 +924,7 @@ class SyncWorker:
                     )
 
             # Mark queue item as completed
+            _set_rate_limit_deferrals(queue_item, 0)
             queue_item.status = 'completed'
             queue_item.completed_at = datetime.utcnow()
 
@@ -574,6 +942,11 @@ class SyncWorker:
                     "notebook_uuid": queue_item.notebook_uuid,
                 },
             )
+        elif (
+            getattr(result, "error_kind", None) is SyncErrorKind.PARENT_GONE
+            and handle_parent_gone(db, queue_item, result)
+        ):
+            pass  # requeued to recreate the notebook page; logged by the helper
         else:
             duration_ms = round((time.monotonic() - _item_start) * 1000, 1)
             outcome = apply_sync_result(queue_item, result)
@@ -594,6 +967,159 @@ class SyncWorker:
             )
 
         db.commit()
+
+    async def _process_notebook_metadata_sync(
+        self,
+        db: Session,
+        queue_item: SyncQueue,
+        config: IntegrationConfig,
+        _item_start: float = 0.0,
+    ):
+        """Write a notebook's properties (title, path, page count, dates) to the target.
+
+        The payload is rebuilt from the database now, so the latest metadata is
+        written even if it changed after the row was queued. On success one
+        ``notebook_metadata`` SyncRecord per notebook and target holds the hash
+        last written; queue_sync uses it to skip unchanged metadata.
+        """
+        from app.services.sync_queue import notebook_metadata_payload
+
+        notebook_uuid = queue_item.notebook_uuid or queue_item.item_id
+        notebook = (
+            db.query(Notebook)
+            .filter(
+                Notebook.user_id == queue_item.user_id,
+                Notebook.notebook_uuid == notebook_uuid,
+            )
+            .first()
+        )
+        if not notebook:
+            logger.info(f"Notebook {notebook_uuid} no longer exists; skipping metadata sync")
+            queue_item.status = 'completed'
+            queue_item.completed_at = datetime.utcnow()
+            db.commit()
+            return
+
+        data = notebook_metadata_payload(notebook)
+        content_hash = ContentFingerprint.for_notebook_metadata(data)
+
+        # Already written with this exact metadata (e.g. by another row for the
+        # same notebook): nothing to push.
+        record = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == queue_item.user_id,
+                SyncRecord.target_name == queue_item.target_name,
+                SyncRecord.item_type == 'notebook_metadata',
+                SyncRecord.notebook_uuid == notebook.notebook_uuid,
+            )
+            .first()
+        )
+        if record is not None and record.status == 'success' and record.content_hash == content_hash:
+            _set_rate_limit_deferrals(queue_item, 0)
+            queue_item.status = 'completed'
+            queue_item.completed_at = datetime.utcnow()
+            queue_item.error_message = None
+            db.commit()
+            return
+
+        target = create_target(queue_item.target_name, config.get_config())
+        sync_item = SyncItem(
+            item_type=SyncItemType.NOTEBOOK_METADATA,
+            item_id=notebook.notebook_uuid,
+            content_hash=content_hash,
+            data=data,
+            source_table='notebooks',
+            created_at=notebook.created_at,
+            updated_at=notebook.updated_at,
+        )
+
+        result = await target.sync_item(sync_item)
+        duration_ms = round((time.monotonic() - _item_start) * 1000, 1)
+
+        if result.success:
+            now = datetime.utcnow()
+            # One record per (user, target, notebook), enforced by the partial
+            # unique index uq_sync_notebook_metadata. Upsert against it so two
+            # workers finishing rows for the same notebook cannot collide.
+            insert_stmt = dialect_insert(db, SyncRecord).values(
+                user_id=queue_item.user_id,
+                target_name=queue_item.target_name,
+                item_type='notebook_metadata',
+                item_id=notebook.notebook_uuid,
+                notebook_uuid=notebook.notebook_uuid,
+                content_hash=content_hash,
+                external_id=result.target_id or "",
+                status='success',
+                error_message=None,
+                synced_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            db.execute(
+                insert_stmt.on_conflict_do_update(
+                    index_elements=['user_id', 'target_name', 'notebook_uuid'],
+                    index_where=text("item_type = 'notebook_metadata'"),
+                    set_={
+                        'content_hash': insert_stmt.excluded.content_hash,
+                        'external_id': insert_stmt.excluded.external_id,
+                        'status': insert_stmt.excluded.status,
+                        'error_message': None,
+                        'synced_at': insert_stmt.excluded.synced_at,
+                        'updated_at': insert_stmt.excluded.updated_at,
+                    },
+                )
+            )
+            if record is not None:
+                db.expire(record)
+
+            _set_rate_limit_deferrals(queue_item, 0)
+            queue_item.status = 'completed'
+            queue_item.completed_at = now
+            logger.info(
+                "Metadata sync completed: notebook %s -> %s",
+                notebook.notebook_uuid,
+                queue_item.target_name,
+                extra={
+                    "event": "sync.done",
+                    "queue_id": queue_item.id,
+                    "target": queue_item.target_name,
+                    "duration_ms": duration_ms,
+                    "notebook_uuid": notebook.notebook_uuid,
+                },
+            )
+        else:
+            outcome = apply_sync_result(queue_item, result)
+            logger.log(
+                logging.INFO if outcome == "skipped" else logging.ERROR,
+                "Metadata sync %s: notebook %s: %s",
+                outcome,
+                notebook.notebook_uuid,
+                result.error_message,
+                extra={
+                    "event": f"sync.{'fail' if outcome == 'failed' else outcome}",
+                    "queue_id": queue_item.id,
+                    "target": queue_item.target_name,
+                    "duration_ms": duration_ms,
+                    "error": result.error_message,
+                    "retrying": outcome == "retry",
+                },
+            )
+
+        db.commit()
+
+    @staticmethod
+    def _store_stale_block_ids(record: SyncRecord, result_metadata: dict) -> None:
+        """Keep the target's undeleted old block ids in the record's metadata_json."""
+        if not isinstance(result_metadata, dict) or "stale_block_ids" not in result_metadata:
+            return
+        meta = _load_json(record.metadata_json)
+        stale = [b for b in (result_metadata.get("stale_block_ids") or []) if b]
+        if stale:
+            meta["stale_block_ids"] = stale
+        else:
+            meta.pop("stale_block_ids", None)
+        record.metadata_json = json.dumps(meta) if meta else None
 
     async def _process_todo_sync(
         self,
@@ -618,24 +1144,7 @@ class SyncWorker:
         # Get decrypted config
         config_dict = config.get_config()
 
-        # Create appropriate sync target
-        if queue_item.target_name == 'todoist':
-            target = TodoistSyncTarget(
-                access_token=config_dict.get('access_token'),
-                project_id=config_dict.get('project_id'),
-            )
-        elif queue_item.target_name == 'notion-todos':
-            target = NotionTodosSyncTarget(
-                access_token=config_dict.get('access_token'),
-                database_id=config_dict.get('database_id'),
-                use_status_property=config_dict.get('use_status_property', False),
-            )
-        else:
-            logger.warning(f"Unknown todo target: {queue_item.target_name}")
-            queue_item.status = 'failed'
-            queue_item.error_message = f"Unknown todo target: {queue_item.target_name}"
-            db.commit()
-            return
+        target = create_target(queue_item.target_name, config_dict)
 
         # Build sync item
         metadata = json.loads(queue_item.metadata_json) if queue_item.metadata_json else {}
@@ -706,6 +1215,7 @@ class SyncWorker:
                 )
                 db.add(sync_record)
 
+            _set_rate_limit_deferrals(queue_item, 0)
             queue_item.status = 'completed'
             queue_item.completed_at = datetime.utcnow()
 

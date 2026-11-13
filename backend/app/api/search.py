@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.auth.clerk import get_clerk_active_user
+from app.auth.clerk import get_clerk_session_user
 from app.database import get_db
 from app.models.user import User
 from app.schemas.search import SearchResponse
@@ -28,7 +28,7 @@ async def search_notebooks(
             description="Search query (2-200 characters)",
         ),
     ],
-    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_session_user)],
     db: Annotated[Session, Depends(get_db)],
     skip: Annotated[int, Query(ge=0, description="Pagination offset")] = 0,
     limit: Annotated[

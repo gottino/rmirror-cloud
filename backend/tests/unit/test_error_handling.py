@@ -172,9 +172,9 @@ class TestWebhookErrors:
 
         client = TestClient(app)
 
-        # Patch settings to enable debug mode (webhook secret not required in debug)
+        # Allow unsigned webhooks (local-dev flag) so no webhook secret is needed
         with patch("app.api.webhooks.clerk.get_settings") as mock_settings:
-            mock_settings.return_value.debug = True
+            mock_settings.return_value.allow_unsigned_webhooks = True
             mock_settings.return_value.clerk_webhook_secret = None
 
             # Unknown event type
@@ -183,7 +183,7 @@ class TestWebhookErrors:
                 json={"type": "unknown.event.type", "data": {"something": "here"}},
             )
 
-            # Debug mode without secret: should accept and return 200
+            # Unsigned webhooks allowed, no secret: should accept and return 200
             assert response.status_code == 200
 
 
@@ -199,7 +199,7 @@ class TestDatabaseErrors:
         # Test that invalid queries raise a proper database error
         try:
             # Query with invalid filter should handle gracefully
-            result = db.query(User).filter(User.id == "not_an_integer").first()
+            db.query(User).filter(User.id == "not_an_integer").first()
             # SQLAlchemy might auto-convert the string - that's acceptable behavior
         except SQLAlchemyError:
             # SQLAlchemy-specific error is the expected failure mode
