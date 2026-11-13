@@ -67,6 +67,7 @@ describe('buildContentSecurityPolicy', () => {
       ])
     );
     expect(d['img-src']).toContain('https://img.clerk.com');
+    expect(d['connect-src']).toContain('https://clerk-telemetry.com');
     expect(d['worker-src']).toEqual(["'self'", 'blob:']);
     expect(d['style-src']).toEqual(["'self'", "'unsafe-inline'"]);
     expect(d['frame-src']).toEqual(
