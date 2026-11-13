@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth, useUser } from '@clerk/nextjs';
+import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import { useState, useEffect, useCallback } from 'react';
 import { Check, AlertCircle, Users, Clock, UserCheck, ChevronLeft, ClipboardList } from 'lucide-react';
 import Link from 'next/link';
@@ -19,11 +20,12 @@ type AdminTab = 'users' | 'waitlist';
 type StatusFilter = 'all' | 'pending' | 'approved' | 'claimed';
 
 export default function AdminPage() {
-  const { getToken, userId, isSignedIn } = useAuth();
+  const { userId, isSignedIn } = useAuth();
+  const getAuthToken = useApiToken();
   const { isLoaded } = useUser();
 
   // Development mode bypass — only works on localhost, backend still enforces auth
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
+  const isDevelopmentMode = isDevAuthMode()
     && typeof window !== 'undefined' && window.location.hostname === 'localhost';
 
   const [activeTab, setActiveTab] = useState<AdminTab>('users');
@@ -37,13 +39,6 @@ export default function AdminPage() {
 
   // In dev mode, trust the admin check since Clerk may not return userId
   const isAdmin = isDevelopmentMode || (isLoaded && userId && ADMIN_USER_IDS.includes(userId));
-
-  const getAuthToken = useCallback(async (): Promise<string | null> => {
-    if (isDevelopmentMode) {
-      return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
-    }
-    return await getToken();
-  }, [isDevelopmentMode, getToken]);
 
   const fetchWaitlistData = useCallback(async () => {
     try {

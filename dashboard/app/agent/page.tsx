@@ -5,8 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { useState, useCallback, Suspense } from 'react';
 import Image from 'next/image';
 import { validateCallbackUrl, buildAgentRedirectUrl } from '@/lib/agent-callback';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://rmirror.io/api/v1';
+import { ApiError, exchangeAgentToken } from '@/lib/api';
 
 type BridgeState =
   | { phase: 'confirm' }
@@ -42,24 +41,15 @@ function AgentAuthBridgeInner() {
 
       setState({ phase: 'exchanging', message: 'Exchanging for agent token...' });
 
-      const response = await fetch(`${API_URL}/auth/agent-token`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${clerkToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        setState({
-          phase: 'error',
-          message: `Failed to get agent token: ${errorData.detail || response.statusText}`,
-        });
+      let access_token: string;
+      try {
+        ({ access_token } = await exchangeAgentToken(clerkToken));
+      } catch (err) {
+        if (!(err instanceof ApiError)) throw err;
+        const detail = typeof err.detail === 'string' && err.detail ? err.detail : err.statusText;
+        setState({ phase: 'error', message: `Failed to get agent token: ${detail}` });
         return;
       }
-
-      const { access_token } = await response.json();
 
       setState({ phase: 'exchanging', message: 'Redirecting to your local agent...' });
       const redirectUrl = buildAgentRedirectUrl(callbackUrl, access_token);
