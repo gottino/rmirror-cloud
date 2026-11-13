@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import Column, DateTime, Integer, String, func
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.auth.clerk import get_clerk_session_user
 from app.config import get_settings
 from app.database import Base, get_db
+from app.middleware.rate_limit import UNAUTHENTICATED_LIMIT, limiter
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,13 @@ class WaitlistCreate(BaseModel):
 
     email: EmailStr
     name: Optional[str] = None
+
+
+class WaitlistJoinResponse(BaseModel):
+    """Fixed acknowledgement for public signups (same for new and known emails)."""
+
+    status: str = "ok"
+    message: str = "Thanks! You are on the waitlist."
 
 
 class WaitlistResponse(BaseModel):
@@ -147,13 +155,39 @@ async def get_admin_user(
 # ==================== Public Endpoints ====================
 
 
-@router.post("", response_model=WaitlistResponse, status_code=201)
+def _notify_admin_of_signup(email: str, name: Optional[str]) -> None:
+    """Send the admin signup notification. Never raises.
+
+    Plain ``def`` on purpose: the Resend SDK call is blocking, and Starlette
+    runs sync background functions in a threadpool, off the event loop.
+    """
+    settings = get_settings()
+    if not settings.admin_email:
+        logger.info("ADMIN_EMAIL not set; skipping waitlist admin notification")
+        return
+    try:
+        from app.utils.email import get_email_service
+
+        get_email_service().send_waitlist_notification_email(email=email, name=name)
+    except Exception as e:
+        logger.error(f"Failed to send waitlist notification: {e}")
+
+
+@router.post("", response_model=WaitlistJoinResponse, status_code=202)
+@limiter.limit(UNAUTHENTICATED_LIMIT)  # public: per IP
 async def join_waitlist(
+    request: Request,
     data: WaitlistCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-) -> WaitlistEntry:
-    """Add an email to the waitlist."""
-    # Check if email already exists
+) -> WaitlistJoinResponse:
+    """Add an email to the waitlist.
+
+    The response is identical whether or not the address was already on the
+    list, so the endpoint does not reveal who has signed up.
+    """
+    ack = WaitlistJoinResponse()
+
     existing = (
         db.query(WaitlistEntry)
         .filter(WaitlistEntry.email == data.email)
@@ -165,44 +199,26 @@ async def join_waitlist(
         if data.name and not existing.name:
             existing.name = data.name
             db.commit()
-            db.refresh(existing)
-        return existing
+        return ack
 
-    # Create new entry
     entry = WaitlistEntry(email=data.email, name=data.name)
     db.add(entry)
 
     try:
         db.commit()
-        db.refresh(entry)
-
-        # Notify admin of new signup
-        try:
-            from app.utils.email import get_email_service
-
-            email_service = get_email_service()
-            email_service.send_waitlist_notification_email(
-                email=entry.email,
-                name=entry.name,
-            )
-        except Exception as e:
-            logger.error(f"Failed to send waitlist notification: {e}")
-
-        return entry
     except IntegrityError:
+        # Concurrent signup of the same address: treat as already on the list
         db.rollback()
-        existing = (
-            db.query(WaitlistEntry)
-            .filter(WaitlistEntry.email == data.email)
-            .first()
-        )
-        if existing:
-            return existing
-        raise HTTPException(status_code=500, detail="Failed to add email to waitlist")
+        return ack
+
+    background_tasks.add_task(_notify_admin_of_signup, data.email, data.name)
+    return ack
 
 
 @router.get("/validate-invite", response_model=InviteValidationResponse)
+@limiter.limit(UNAUTHENTICATED_LIMIT)  # public: per IP
 async def validate_invite(
+    request: Request,
     token: str,
     db: Session = Depends(get_db),
 ):
