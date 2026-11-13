@@ -1,14 +1,17 @@
 'use client';
 
 import { useAuth } from '@clerk/nextjs';
-import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
+import { Suspense, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Mail, Shield, BarChart3, Trash2 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
 import SetupWizard from './components/SetupWizard';
-import { getNotebooksTree, trackAgentDownload, getAgentStatus, getQuotaStatus, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, getLatestAgentVersion, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentStatus, type AgentVersionInfo, type QuotaStatus, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
+import { getNotebooksTree, trackAgentDownload, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, getLatestAgentVersion, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentVersionInfo, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
+import { useApiQuery } from '@/lib/useApiQuery';
+import { useAgentStatus } from '@/lib/useAgentStatus';
+import { useQuota } from '@/lib/quota-context';
 import { QuotaWarning } from '@/components/QuotaWarning';
 import { QuotaDisplay } from '@/components/QuotaDisplay';
 import { QuotaExceededModal } from '@/components/QuotaExceededModal';
@@ -17,6 +20,7 @@ import { OnboardingChecklist, getDefaultOnboardingSteps } from '@/components/Onb
 import { TermsAcceptanceModal } from '@/components/TermsAcceptanceModal';
 import { DeleteNotebookModal } from '@/components/DeleteNotebookModal';
 import { trackEvent } from '@/lib/analytics';
+import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import { Skeleton } from '@/components/Skeleton';
 import { memo } from 'react';
 
@@ -128,6 +132,22 @@ function findNodeByUuid(nodes: NotebookTreeNode[], uuid: string): NotebookTreeNo
   return null;
 }
 
+// Children of the folder at the end of `folderPath` (the tree root when empty)
+function getCurrentFolderNodes(tree: NotebookTreeNode[], folderPath: string[]): NotebookTreeNode[] {
+  let currentNodes = tree;
+  for (const folderUuid of folderPath) {
+    const found = findNodeByUuid(currentNodes, folderUuid);
+    if (found && found.children) {
+      currentNodes = found.children;
+    } else {
+      return [];
+    }
+  }
+  return currentNodes;
+}
+
+const SEARCH_PAGE_SIZE = 20;
+
 // Memoized logo to prevent flickering during search
 const SidebarLogo = memo(function SidebarLogo({ onClose }: { onClose?: () => void }) {
   return (
@@ -154,22 +174,15 @@ const SidebarLogo = memo(function SidebarLogo({ onClose }: { onClose?: () => voi
 });
 
 function DashboardContent() {
-  const { getToken, isSignedIn, userId } = useAuth();
+  const { isSignedIn, userId } = useAuth();
+  const getToken = useApiToken();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [tree, setTree] = useState<NotebookTreeNode[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentFolderPath, setCurrentFolderPath] = useState<string[]>([]); // Array of folder UUIDs
-  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
-  const [quota, setQuota] = useState<QuotaStatus | null>(null);
   const [showQuotaModal, setShowQuotaModal] = useState(false);
-  const [onboarding, setOnboarding] = useState<OnboardingProgress | null>(null);
-  const [legalStatus, setLegalStatus] = useState<LegalStatus | null>(null);
-  const [agentVersionInfo, setAgentVersionInfo] = useState<AgentVersionInfo | null>(null);
 
   // Delete notebook modal state
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -181,10 +194,15 @@ function DashboardContent() {
   // Search state
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [dateRange, setDateRange] = useState<'any' | 'week' | 'month' | 'year'>('any');
   const debounceTimer = useRef<NodeJS.Timeout>();
   const initializedFromUrl = useRef(false);
+  // Incremented per new search so a late "load more" for an old query is dropped
+  const searchGeneration = useRef(0);
+  // Parameters of the search currently shown, reused by "load more"
+  const lastSearchParams = useRef<{ query: string; parentUuid?: string; dateFrom?: string } | null>(null);
 
   // Helper to convert date range to ISO date string
   const getDateFromRange = useCallback((range: 'any' | 'week' | 'month' | 'year'): string | undefined => {
@@ -203,16 +221,14 @@ function DashboardContent() {
   }, []);
 
   // Development mode bypass
-  const isDevelopmentMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+  const isDevelopmentMode = isDevAuthMode();
   const effectiveIsSignedIn = isDevelopmentMode || isSignedIn;
   const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
   const isAdmin = isDevelopmentMode || (userId && ADMIN_USER_IDS.includes(userId));
 
   const handleDownloadClick = async () => {
     if (effectiveIsSignedIn) {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (token) {
         await trackAgentDownload(token);
       }
@@ -223,31 +239,39 @@ function DashboardContent() {
     window.open(downloadUrl, '_blank');
   };
 
-  const fetchNotebooks = async () => {
-    if (!effectiveIsSignedIn) {
-      setLoading(false);
-      return;
-    }
+  // Read-only data for the page. Each request gets a fresh token; a failed
+  // token lookup counts as an error (shown only for the notebook tree).
+  const authed = useCallback(async () => {
+    const token = await getToken();
+    if (!token) throw new Error('Failed to get authentication token');
+    return token;
+  }, [getToken]);
+  const signedInKey = (name: string) => (effectiveIsSignedIn ? name : null);
 
-    try {
-      setError(null);
-      // In dev mode, get JWT token from env var or localStorage
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
-      if (!token) {
-        throw new Error('Failed to get authentication token');
-      }
+  const notebooksQuery = useApiQuery<NotebookTreeData>(signedInKey('notebooks-tree'), async (signal) =>
+    getNotebooksTree(await authed(), signal)
+  );
+  const tree = useMemo(() => notebooksQuery.data?.tree ?? [], [notebooksQuery.data]);
+  const loading = notebooksQuery.loading;
+  const error = notebooksQuery.error
+    ? notebooksQuery.error.message || 'Failed to fetch notebooks'
+    : null;
+  const reloadNotebooks = notebooksQuery.reload;
 
-      const data = await getNotebooksTree(token);
-      setTree(data.tree);
-    } catch (err) {
-      console.error('Error fetching notebooks:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch notebooks');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const agentStatus = useAgentStatus({ enabled: !!effectiveIsSignedIn });
+  // Quota comes from QuotaProvider, which already fetches and polls it
+  const { quota } = useQuota();
+  const { data: onboarding, setData: setOnboarding } = useApiQuery<OnboardingProgress>(
+    signedInKey('onboarding-progress'),
+    async (signal) => getOnboardingProgress(await authed(), signal)
+  );
+  const { data: legalStatus, setData: setLegalStatus } = useApiQuery<LegalStatus>(
+    signedInKey('legal-status'),
+    async (signal) => getLegalStatus(await authed(), signal)
+  );
+  const { data: agentVersionInfo } = useApiQuery<AgentVersionInfo>('agent-version', (signal) =>
+    getLatestAgentVersion(signal)
+  );
 
   const openDeleteModal = (notebook: NotebookTreeNode) => {
     setDeleteTarget({
@@ -258,81 +282,8 @@ function DashboardContent() {
     setDeleteModalOpen(true);
   };
 
-  const getAuthToken = async (): Promise<string | null> => {
-    if (isDevelopmentMode) {
-      return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
-    }
-    return await getToken();
-  };
-
-  const fetchAgentStatus = async () => {
-    if (!effectiveIsSignedIn) return;
-
-    try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
-      if (!token) return;
-
-      const status = await getAgentStatus(token);
-      setAgentStatus(status);
-    } catch (err) {
-      console.error('Error fetching agent status:', err);
-    }
-  };
-
-  const fetchQuota = async () => {
-    if (!effectiveIsSignedIn) return;
-
-    try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
-      if (!token) return;
-
-      const quotaData = await getQuotaStatus(token);
-      setQuota(quotaData);
-    } catch (err) {
-      console.error('Error fetching quota:', err);
-    }
-  };
-
-  const fetchOnboarding = async () => {
-    if (!effectiveIsSignedIn) return;
-
-    try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
-      if (!token) return;
-
-      const data = await getOnboardingProgress(token);
-      setOnboarding(data);
-    } catch (err) {
-      console.error('Error fetching onboarding:', err);
-    }
-  };
-
-  const fetchLegalStatus = async () => {
-    if (!effectiveIsSignedIn) return;
-
-    try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
-      if (!token) return;
-
-      const data = await getLegalStatus(token);
-      setLegalStatus(data);
-    } catch (err) {
-      console.error('Error fetching legal status:', err);
-    }
-  };
-
   const handleAcceptTerms = async () => {
-    const token = isDevelopmentMode
-      ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-      : await getToken();
+    const token = await getToken();
     if (!token) return;
 
     const data = await acceptTerms(token);
@@ -343,9 +294,7 @@ function DashboardContent() {
     setOnboarding(prev => prev ? { ...prev, onboarding_dismissed: true } : null);
     trackEvent({ name: 'onboarding_dismissed' });
     if (effectiveIsSignedIn) {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
       if (token) {
         await dismissOnboarding(token);
       }
@@ -365,13 +314,13 @@ function DashboardContent() {
 
   // Execute search (extracted for reuse)
   const executeSearch = useCallback(async (query: string, range?: 'any' | 'week' | 'month' | 'year') => {
+    const generation = ++searchGeneration.current;
     setSearchLoading(true);
+    setSearchLoadingMore(false);
     setIsSearchMode(true);
 
     try {
-      const token = isDevelopmentMode
-        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
-        : await getToken();
+      const token = await getToken();
 
       if (!token) {
         console.error('No auth token available');
@@ -386,11 +335,18 @@ function DashboardContent() {
       // Use provided range or current dateRange state
       const effectiveRange = range ?? dateRange;
 
-      const results = await searchNotebooks(token, query, {
-        limit: 20,
+      const searchParamsForQuery = {
+        query,
         parentUuid: currentFolderUuid,
         dateFrom: getDateFromRange(effectiveRange),
+      };
+      const results = await searchNotebooks(token, query, {
+        limit: SEARCH_PAGE_SIZE,
+        parentUuid: searchParamsForQuery.parentUuid,
+        dateFrom: searchParamsForQuery.dateFrom,
       });
+      if (generation !== searchGeneration.current) return;
+      lastSearchParams.current = searchParamsForQuery;
       setSearchResults(results);
       trackEvent({ name: 'search_performed', data: { query_length: query.length, results: results.total_results } });
     } catch (err) {
@@ -399,7 +355,39 @@ function DashboardContent() {
     } finally {
       setSearchLoading(false);
     }
-  }, [isDevelopmentMode, getToken, currentFolderPath, dateRange, getDateFromRange]);
+  }, [getToken, currentFolderPath, dateRange, getDateFromRange]);
+
+  // Fetch the next page of search results (same query, folder and date filter)
+  const loadMoreSearchResults = useCallback(async () => {
+    const params = lastSearchParams.current;
+    if (!params || !searchResults?.has_more || searchLoadingMore) return;
+
+    const generation = searchGeneration.current;
+    setSearchLoadingMore(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const more = await searchNotebooks(token, params.query, {
+        skip: searchResults.results.length,
+        limit: SEARCH_PAGE_SIZE,
+        parentUuid: params.parentUuid,
+        dateFrom: params.dateFrom,
+      });
+      if (generation !== searchGeneration.current) return;
+      setSearchResults((prev) => prev && {
+        ...more,
+        results: [
+          ...prev.results,
+          ...more.results.filter((r) => !prev.results.some((p) => p.notebook_id === r.notebook_id)),
+        ],
+      });
+    } catch (err) {
+      console.error('Search load more error:', err);
+    } finally {
+      if (generation === searchGeneration.current) setSearchLoadingMore(false);
+    }
+  }, [getToken, searchResults, searchLoadingMore]);
 
   const handleSearch = async (query: string) => {
     // Clear previous timer
@@ -445,17 +433,6 @@ function DashboardContent() {
     }
   };
 
-  useEffect(() => {
-    fetchNotebooks();
-    fetchAgentStatus();
-    fetchQuota();
-    fetchOnboarding();
-    fetchLegalStatus();
-    getLatestAgentVersion()
-      .then(setAgentVersionInfo)
-      .catch((err) => console.error('Failed to fetch agent version:', err));
-  }, [effectiveIsSignedIn]);
-
   // Restore search state from URL params (for back button navigation)
   useEffect(() => {
     const urlQuery = searchParams.get('q') || '';
@@ -482,40 +459,27 @@ function DashboardContent() {
     }
   }, [searchParams, executeSearch]);
 
-  // Get current folder node and its contents
-  const getCurrentFolderNode = (): NotebookTreeNode[] => {
-    if (currentFolderPath.length === 0) {
-      // At root level
-      return tree;
-    }
+  // Derived tree data is memoised: the tree walk only reruns when the tree or
+  // folder changes, and the filter/grouping only when the query changes, not
+  // on every unrelated state update (search results, loading flags, modals).
+  const { notebooks, currentFolders } = useMemo(() => {
+    const currentNode = getCurrentFolderNodes(tree, currentFolderPath);
+    return {
+      // All notebooks in current scope (current folder + all subfolders)
+      notebooks: getAllNotebooks(currentNode),
+      // Folders at current level that contain notebooks
+      currentFolders: getFoldersWithNotebooks(currentNode),
+    };
+  }, [tree, currentFolderPath]);
 
-    // Navigate to current folder
-    let currentNodes = tree;
-    for (const folderUuid of currentFolderPath) {
-      const found = findNodeByUuid(currentNodes, folderUuid);
-      if (found && found.children) {
-        currentNodes = found.children;
-      } else {
-        return [];
-      }
-    }
-    return currentNodes;
-  };
-
-  const currentNode = getCurrentFolderNode();
-
-  // Get all notebooks in current scope (current folder + all subfolders)
-  const notebooks = getAllNotebooks(currentNode);
-
-  // Get folders at current level that contain notebooks
-  const currentFolders = getFoldersWithNotebooks(currentNode);
-
-  // Filter notebooks by search query
-  const filteredNotebooks = notebooks.filter((notebook) =>
-    notebook.visible_name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const groupedNotebooks = groupNotebooksByDate(filteredNotebooks);
+  // Filter notebooks by search query, then group by date
+  const { filteredNotebooks, groupedNotebooks } = useMemo(() => {
+    const needle = searchQuery.toLowerCase();
+    const filtered = notebooks.filter((notebook) =>
+      notebook.visible_name.toLowerCase().includes(needle)
+    );
+    return { filteredNotebooks: filtered, groupedNotebooks: groupNotebooksByDate(filtered) };
+  }, [notebooks, searchQuery]);
 
   // Build breadcrumb path
   const breadcrumbs: { name: string; uuid: string | null }[] = [{ name: 'Home', uuid: null }];
@@ -792,7 +756,7 @@ function DashboardContent() {
             <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>Error</h2>
             <p style={{ color: 'var(--warm-gray)', marginBottom: '1.5rem' }}>{error}</p>
             <button
-              onClick={() => fetchNotebooks()}
+              onClick={() => reloadNotebooks()}
               className="px-6 py-2 rounded-lg transition-colors"
               style={{
                 backgroundColor: 'var(--primary)',
@@ -928,18 +892,14 @@ function DashboardContent() {
               query={searchResults.query}
               totalResults={searchResults.total_results}
               hasMore={searchResults.has_more}
+              onLoadMore={loadMoreSearchResults}
+              loadingMore={searchLoadingMore}
             />
           ) : notebooks.length === 0 ? (
             <SetupWizard
-              getToken={async () => {
-                if (isDevelopmentMode) {
-                  return process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || '';
-                }
-                return await getToken();
-              }}
-              isDevelopmentMode={isDevelopmentMode}
+              getToken={getToken}
               onComplete={() => {
-                fetchNotebooks();
+                reloadNotebooks();
               }}
               onboardingProgress={onboarding ? {
                 agent_downloaded_at: onboarding.agent_downloaded_at,
@@ -1276,8 +1236,8 @@ function DashboardContent() {
           onClose={() => setDeleteModalOpen(false)}
           notebook={deleteTarget}
           hasNotion={onboarding?.has_notion ?? false}
-          getToken={getAuthToken}
-          onDeleted={() => fetchNotebooks()}
+          getToken={getToken}
+          onDeleted={() => reloadNotebooks()}
         />
       </div>
     </div>
