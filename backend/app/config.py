@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     # own flags below, which the app refuses to enable outside SQLite.
     debug: bool = False
     api_version: str = "v1"
+    # Serve the interactive API docs (/docs, /redoc, /openapi.json). Off by default.
+    enable_api_docs: bool = False
 
     # Insecure development flags (default off). Each one relaxes one security
     # check; see check_insecure_flags() for the start-up guard.

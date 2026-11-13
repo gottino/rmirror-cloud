@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QuotaDisplay } from '../../components/QuotaDisplay';
 
@@ -29,6 +29,7 @@ function mockQuota(overrides: Record<string, unknown> = {}) {
 describe('QuotaDisplay', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
   });
 
   it('renders nothing while loading', () => {
@@ -96,19 +97,39 @@ describe('QuotaDisplay', () => {
     expect(screen.getByText('Quota exhausted')).toBeInTheDocument();
   });
 
-  it('calls onQuotaExceeded callback when quota is exhausted', () => {
-    const onQuotaExceeded = vi.fn();
+  const exhausted = () =>
+    mockQuota({ used: 30, remaining: 0, percentage_used: 100, is_near_limit: true, is_exhausted: true }) as any;
 
-    mockUseQuota.mockReturnValue({
-      quota: mockQuota({ used: 30, remaining: 0, percentage_used: 100, is_near_limit: true, is_exhausted: true }) as any,
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+  it('calls onQuotaExceeded from an effect when quota is exhausted', () => {
+    const onQuotaExceeded = vi.fn();
+    mockUseQuota.mockReturnValue({ quota: exhausted(), loading: false, error: null, refetch: vi.fn() });
 
     render(<QuotaDisplay onQuotaExceeded={onQuotaExceeded} />);
 
-    expect(onQuotaExceeded).toHaveBeenCalled();
+    expect(onQuotaExceeded).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call onQuotaExceeded again on re-render or poll update', () => {
+    const onQuotaExceeded = vi.fn();
+    mockUseQuota.mockReturnValue({ quota: exhausted(), loading: false, error: null, refetch: vi.fn() });
+
+    const { rerender } = render(<QuotaDisplay onQuotaExceeded={onQuotaExceeded} />);
+    mockUseQuota.mockReturnValue({ quota: exhausted(), loading: false, error: null, refetch: vi.fn() });
+    act(() => {
+      rerender(<QuotaDisplay onQuotaExceeded={onQuotaExceeded} />);
+      rerender(<QuotaDisplay onQuotaExceeded={() => onQuotaExceeded()} />);
+    });
+
+    expect(onQuotaExceeded).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call onQuotaExceeded when quota is not exhausted', () => {
+    const onQuotaExceeded = vi.fn();
+    mockUseQuota.mockReturnValue({ quota: mockQuota() as any, loading: false, error: null, refetch: vi.fn() });
+
+    render(<QuotaDisplay onQuotaExceeded={onQuotaExceeded} />);
+
+    expect(onQuotaExceeded).not.toHaveBeenCalled();
   });
 
   it('renders nothing when quota is null', () => {
