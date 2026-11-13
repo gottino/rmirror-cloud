@@ -8,6 +8,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "rMirror Dashboard",
   description: "View your transcribed reMarkable notebooks",
+  icons: { icon: "/rm-icon.png" },
 };
 
 // rMirror design system colors for Clerk components
