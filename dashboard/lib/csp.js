@@ -12,6 +12,8 @@ const DEFAULT_API_URL = 'https://rmirror.io/api/v1'; // same fallback as lib/api
 
 const CLERK_DEV_INSTANCES = 'https://*.clerk.accounts.dev';
 const CLERK_IMAGES = 'https://img.clerk.com';
+// Clerk's SDK reports usage events here for development instances (pk_test_ keys).
+const CLERK_TELEMETRY = 'https://clerk-telemetry.com';
 const CLOUDFLARE_CHALLENGES = 'https://challenges.cloudflare.com'; // Clerk bot protection
 
 const HSTS = 'max-age=31536000; includeSubDomains';
@@ -74,7 +76,7 @@ function buildContentSecurityPolicy({ apiUrl, umamiUrl, clerkPublishableKey, isD
     'style-src': ["'self'", "'unsafe-inline'"],
     'img-src': ["'self'", 'data:', 'blob:', CLERK_IMAGES],
     'font-src': ["'self'", 'data:'],
-    'connect-src': ["'self'", apiOrigin, ...clerkOrigins, umamiOrigin],
+    'connect-src': ["'self'", apiOrigin, ...clerkOrigins, CLERK_TELEMETRY, umamiOrigin],
     // Notebook pages show PDFs from blob: URLs in an iframe.
     'frame-src': ["'self'", 'blob:', CLOUDFLARE_CHALLENGES],
     'worker-src': ["'self'", 'blob:'],
