@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth } from '@clerk/nextjs';
-import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
+import { Suspense, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -128,6 +128,22 @@ function findNodeByUuid(nodes: NotebookTreeNode[], uuid: string): NotebookTreeNo
   return null;
 }
 
+// Children of the folder at the end of `folderPath` (the tree root when empty)
+function getCurrentFolderNodes(tree: NotebookTreeNode[], folderPath: string[]): NotebookTreeNode[] {
+  let currentNodes = tree;
+  for (const folderUuid of folderPath) {
+    const found = findNodeByUuid(currentNodes, folderUuid);
+    if (found && found.children) {
+      currentNodes = found.children;
+    } else {
+      return [];
+    }
+  }
+  return currentNodes;
+}
+
+const SEARCH_PAGE_SIZE = 20;
+
 // Memoized logo to prevent flickering during search
 const SidebarLogo = memo(function SidebarLogo({ onClose }: { onClose?: () => void }) {
   return (
@@ -181,10 +197,15 @@ function DashboardContent() {
   // Search state
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [dateRange, setDateRange] = useState<'any' | 'week' | 'month' | 'year'>('any');
   const debounceTimer = useRef<NodeJS.Timeout>();
   const initializedFromUrl = useRef(false);
+  // Incremented per new search so a late "load more" for an old query is dropped
+  const searchGeneration = useRef(0);
+  // Parameters of the search currently shown, reused by "load more"
+  const lastSearchParams = useRef<{ query: string; parentUuid?: string; dateFrom?: string } | null>(null);
 
   // Helper to convert date range to ISO date string
   const getDateFromRange = useCallback((range: 'any' | 'week' | 'month' | 'year'): string | undefined => {
@@ -365,7 +386,9 @@ function DashboardContent() {
 
   // Execute search (extracted for reuse)
   const executeSearch = useCallback(async (query: string, range?: 'any' | 'week' | 'month' | 'year') => {
+    const generation = ++searchGeneration.current;
     setSearchLoading(true);
+    setSearchLoadingMore(false);
     setIsSearchMode(true);
 
     try {
@@ -386,11 +409,18 @@ function DashboardContent() {
       // Use provided range or current dateRange state
       const effectiveRange = range ?? dateRange;
 
-      const results = await searchNotebooks(token, query, {
-        limit: 20,
+      const searchParamsForQuery = {
+        query,
         parentUuid: currentFolderUuid,
         dateFrom: getDateFromRange(effectiveRange),
+      };
+      const results = await searchNotebooks(token, query, {
+        limit: SEARCH_PAGE_SIZE,
+        parentUuid: searchParamsForQuery.parentUuid,
+        dateFrom: searchParamsForQuery.dateFrom,
       });
+      if (generation !== searchGeneration.current) return;
+      lastSearchParams.current = searchParamsForQuery;
       setSearchResults(results);
       trackEvent({ name: 'search_performed', data: { query_length: query.length, results: results.total_results } });
     } catch (err) {
@@ -400,6 +430,40 @@ function DashboardContent() {
       setSearchLoading(false);
     }
   }, [isDevelopmentMode, getToken, currentFolderPath, dateRange, getDateFromRange]);
+
+  // Fetch the next page of search results (same query, folder and date filter)
+  const loadMoreSearchResults = useCallback(async () => {
+    const params = lastSearchParams.current;
+    if (!params || !searchResults?.has_more || searchLoadingMore) return;
+
+    const generation = searchGeneration.current;
+    setSearchLoadingMore(true);
+    try {
+      const token = isDevelopmentMode
+        ? process.env.NEXT_PUBLIC_DEV_AUTH_TOKEN || localStorage.getItem('dev_auth_token') || ''
+        : await getToken();
+      if (!token) return;
+
+      const more = await searchNotebooks(token, params.query, {
+        skip: searchResults.results.length,
+        limit: SEARCH_PAGE_SIZE,
+        parentUuid: params.parentUuid,
+        dateFrom: params.dateFrom,
+      });
+      if (generation !== searchGeneration.current) return;
+      setSearchResults((prev) => prev && {
+        ...more,
+        results: [
+          ...prev.results,
+          ...more.results.filter((r) => !prev.results.some((p) => p.notebook_id === r.notebook_id)),
+        ],
+      });
+    } catch (err) {
+      console.error('Search load more error:', err);
+    } finally {
+      if (generation === searchGeneration.current) setSearchLoadingMore(false);
+    }
+  }, [isDevelopmentMode, getToken, searchResults, searchLoadingMore]);
 
   const handleSearch = async (query: string) => {
     // Clear previous timer
@@ -482,40 +546,27 @@ function DashboardContent() {
     }
   }, [searchParams, executeSearch]);
 
-  // Get current folder node and its contents
-  const getCurrentFolderNode = (): NotebookTreeNode[] => {
-    if (currentFolderPath.length === 0) {
-      // At root level
-      return tree;
-    }
+  // Derived tree data is memoised: the tree walk only reruns when the tree or
+  // folder changes, and the filter/grouping only when the query changes, not
+  // on every unrelated state update (search results, loading flags, modals).
+  const { notebooks, currentFolders } = useMemo(() => {
+    const currentNode = getCurrentFolderNodes(tree, currentFolderPath);
+    return {
+      // All notebooks in current scope (current folder + all subfolders)
+      notebooks: getAllNotebooks(currentNode),
+      // Folders at current level that contain notebooks
+      currentFolders: getFoldersWithNotebooks(currentNode),
+    };
+  }, [tree, currentFolderPath]);
 
-    // Navigate to current folder
-    let currentNodes = tree;
-    for (const folderUuid of currentFolderPath) {
-      const found = findNodeByUuid(currentNodes, folderUuid);
-      if (found && found.children) {
-        currentNodes = found.children;
-      } else {
-        return [];
-      }
-    }
-    return currentNodes;
-  };
-
-  const currentNode = getCurrentFolderNode();
-
-  // Get all notebooks in current scope (current folder + all subfolders)
-  const notebooks = getAllNotebooks(currentNode);
-
-  // Get folders at current level that contain notebooks
-  const currentFolders = getFoldersWithNotebooks(currentNode);
-
-  // Filter notebooks by search query
-  const filteredNotebooks = notebooks.filter((notebook) =>
-    notebook.visible_name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const groupedNotebooks = groupNotebooksByDate(filteredNotebooks);
+  // Filter notebooks by search query, then group by date
+  const { filteredNotebooks, groupedNotebooks } = useMemo(() => {
+    const needle = searchQuery.toLowerCase();
+    const filtered = notebooks.filter((notebook) =>
+      notebook.visible_name.toLowerCase().includes(needle)
+    );
+    return { filteredNotebooks: filtered, groupedNotebooks: groupNotebooksByDate(filtered) };
+  }, [notebooks, searchQuery]);
 
   // Build breadcrumb path
   const breadcrumbs: { name: string; uuid: string | null }[] = [{ name: 'Home', uuid: null }];
@@ -928,6 +979,8 @@ function DashboardContent() {
               query={searchResults.query}
               totalResults={searchResults.total_results}
               hasMore={searchResults.has_more}
+              onLoadMore={loadMoreSearchResults}
+              loadingMore={searchLoadingMore}
             />
           ) : notebooks.length === 0 ? (
             <SetupWizard
