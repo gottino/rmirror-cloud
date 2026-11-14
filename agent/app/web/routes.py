@@ -3,41 +3,126 @@ Flask routes for rMirror Agent web UI.
 """
 
 import asyncio
+import hmac
+import logging
+import secrets
 import threading
-from collections.abc import Generator
-from contextlib import contextmanager
+import time
+from collections.abc import Coroutine
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+from urllib.parse import quote, urlencode
 
+import httpx
 from flask import Flask, jsonify, redirect, render_template, request
 
 from app.__version__ import __version__
+from app.agent_loop import AgentLoopNotRunningError, AgentLoopTimeoutError
 from app.config import Config
 from app.sync.cloud_sync import CloudSync, CloudSyncError
+from app.sync.queue import PAUSED_SIGN_IN
 
-# Lock to prevent concurrent async operations from interfering with each other
-# This is necessary because Flask uses multiple threads but httpx clients are
-# bound to the event loop they were created in
-_async_lock = threading.Lock()
+logger = logging.getLogger(__name__)
+
+# How long a request waits for its coroutine on the agent loop. Routes run on
+# werkzeug threads and hand coroutines to the agent's single event loop (where
+# CloudSync and its HTTP client live) instead of running their own loops.
+BACKEND_TIMEOUT_SECONDS = 30.0  # calls that may re-authenticate or write
+QUICK_TIMEOUT_SECONDS = 15.0  # read-only lookups the UI polls
+
+# Errors from handing work to the agent loop
+_LOOP_ERRORS = (AgentLoopTimeoutError, AgentLoopNotRunningError)
 
 
-@contextmanager
-def run_async_safely(cloud_sync: CloudSync) -> Generator[asyncio.AbstractEventLoop, None, None]:
-    """
-    Context manager to safely run async code in Flask.
+def _loop_error_body(error: Exception) -> tuple[dict, int]:
+    """JSON body and status for a request whose work could not finish on the agent loop."""
+    if isinstance(error, AgentLoopTimeoutError):
+        return {
+            "success": False,
+            "error": "timeout",
+            "message": "rMirror Cloud did not answer in time. Please try again.",
+        }, 504
+    return {
+        "success": False,
+        "error": "agent_not_ready",
+        "message": "The agent is not running (starting up or shutting down). Please try again.",
+    }, 503
 
-    Uses a lock to ensure only one async operation runs at a time, preventing
-    concurrent requests from interfering with each other's httpx clients.
-    """
-    with _async_lock:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            yield loop
-        finally:
-            # Invalidate the client reference so it gets recreated on next request
-            if cloud_sync:
-                cloud_sync.client = None
-            loop.close()
+
+class InitialSyncJob:
+    """State of the initial sync, which runs as a task on the agent loop."""
+
+    IDLE = "idle"
+    RUNNING = "running"
+    DONE = "done"
+    ERROR = "error"
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._state = self.IDLE
+        self._stats: dict | None = None
+        self._message: str | None = None
+        self._started_at: str | None = None
+        self._finished_at: str | None = None
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(UTC).isoformat()
+
+    def try_begin(self) -> bool:
+        """Mark the job running; False if it already is."""
+        with self._lock:
+            if self._state == self.RUNNING:
+                return False
+            self._state = self.RUNNING
+            self._stats = None
+            self._message = None
+            self._started_at = self._now()
+            self._finished_at = None
+            return True
+
+    def reset(self) -> None:
+        """Back to idle (the job could not be started)."""
+        with self._lock:
+            self._state = self.IDLE
+            self._started_at = None
+
+    def finish(self, stats: dict) -> None:
+        with self._lock:
+            self._state = self.DONE
+            self._stats = stats
+            self._finished_at = self._now()
+
+    def fail(self, message: str) -> None:
+        with self._lock:
+            self._state = self.ERROR
+            self._message = message
+            self._finished_at = self._now()
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {
+                "state": self._state,
+                "stats": self._stats,
+                "message": self._message,
+                "started_at": self._started_at,
+                "finished_at": self._finished_at,
+            }
+
+
+async def _run_initial_sync(job: InitialSyncJob, initial_sync: Any, selected_uuids: list[str] | None) -> None:
+    """Run the initial sync on the agent loop and record the outcome in job."""
+    try:
+        stats = await initial_sync.run(selected_uuids)
+    except asyncio.CancelledError:
+        job.fail("Initial sync was cancelled (agent stopping)")
+        raise
+    except Exception as e:
+        logger.error(f"Initial sync failed: {e}", exc_info=True)
+        job.fail(str(e))
+    else:
+        job.finish(stats)
 
 
 async def register_agent_with_backend(
@@ -55,14 +140,12 @@ async def register_agent_with_backend(
         platform: Platform (e.g., "Darwin" for macOS)
         hostname: Machine hostname
     """
-    # Initialize HTTP client if not exists
-    if not cloud_sync.client:
-        import httpx
-        cloud_sync.client = httpx.AsyncClient(timeout=30.0, verify=cloud_sync._verify_ssl)
+    client = cloud_sync.ensure_client()
 
     try:
-        response = await cloud_sync.client.post(
+        response = await client.post(
             f"{cloud_sync.config.api.url}/agents/register",
+            timeout=30.0,
             headers={"Authorization": f"Bearer {cloud_sync.config.api.token}"},
             json={
                 "version": version,
@@ -77,8 +160,102 @@ async def register_agent_with_backend(
         raise
 
 
+# One-time sign-in state: issued by /auth/bridge, required by /auth/callback.
+AUTH_STATE_TTL_SECONDS = 600
+_MAX_PENDING_AUTH_STATES = 20
+
+
+class AuthStateStore:
+    """In-memory store of one-time sign-in states with a short expiry."""
+
+    def __init__(self, ttl_seconds: float = AUTH_STATE_TTL_SECONDS):
+        self._ttl = ttl_seconds
+        self._states: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def _prune(self, now: float) -> None:
+        for value, expires_at in list(self._states.items()):
+            if expires_at <= now:
+                del self._states[value]
+
+    def issue(self) -> str:
+        """Create and remember a new random state."""
+        value = secrets.token_urlsafe(32)
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            # Keep the store bounded; drop the oldest pending states first
+            while len(self._states) >= _MAX_PENDING_AUTH_STATES:
+                oldest = min(self._states, key=self._states.get)
+                del self._states[oldest]
+            self._states[value] = now + self._ttl
+        return value
+
+    def consume(self, value: str | None) -> bool:
+        """Return True if value matches a pending unexpired state; it is removed either way."""
+        if not value:
+            return False
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            match = None
+            for stored in self._states:
+                if hmac.compare_digest(stored.encode(), value.encode()):
+                    match = stored
+            if match is None:
+                return False
+            del self._states[match]
+            return True
+
+
+async def verify_agent_token(cloud_sync: CloudSync, token: str) -> bool:
+    """Check a candidate token against the backend before it is stored."""
+    client = cloud_sync.ensure_client()
+
+    try:
+        response = await client.get(
+            f"{cloud_sync.config.api.url}/sync/stats",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30.0,
+        )
+    except httpx.HTTPError:
+        return False
+    return response.status_code == 200
+
+
 def register_routes(app: Flask) -> None:
     """Register all web UI routes."""
+
+    def _sync_queue():
+        """The running watcher's sync queue, if there is one."""
+        agent = app.config.get("AGENT")
+        file_watcher = getattr(agent, "file_watcher", None) if agent else None
+        return getattr(file_watcher, "sync_queue", None)
+
+    auth_states = AuthStateStore()
+    app.config["AUTH_STATES"] = auth_states
+
+    initial_sync_job = InitialSyncJob()
+    app.config["INITIAL_SYNC_JOB"] = initial_sync_job
+
+    def _agent_loop():
+        agent_loop = app.config.get("AGENT_LOOP")
+        if agent_loop is None:
+            raise AgentLoopNotRunningError("No agent event loop configured")
+        return agent_loop
+
+    def _on_loop(coro: Coroutine[Any, Any, Any], timeout: float) -> Any:
+        """Run coro on the agent loop and wait for it (raises one of _LOOP_ERRORS)."""
+        try:
+            agent_loop = _agent_loop()
+        except AgentLoopNotRunningError:
+            coro.close()
+            raise
+        return agent_loop.run(coro, timeout)
+
+    def _loop_error(error: Exception, **extra: Any):
+        body, status = _loop_error_body(error)
+        return jsonify({**body, **extra}), status
 
     @app.route("/")
     def index():
@@ -106,6 +283,9 @@ def register_routes(app: Flask) -> None:
         """Get agent status."""
         config: Config = app.config["AGENT_CONFIG"]
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+        sync_queue = _sync_queue()
+        queue_stats = sync_queue.get_stats() if sync_queue else None
+        paused_reason = queue_stats["paused_reason"] if queue_stats else None
 
         return jsonify(
             {
@@ -116,6 +296,7 @@ def register_routes(app: Flask) -> None:
                 "authentication": {
                     "authenticated": cloud_sync.authenticated if cloud_sync else False,
                     "email": config.api.email,
+                    "sign_in_required": paused_reason == PAUSED_SIGN_IN,
                 },
                 "watching": {
                     "enabled": config.remarkable.watch_enabled,
@@ -126,6 +307,8 @@ def register_routes(app: Flask) -> None:
                     "auto_sync": config.sync.auto_sync,
                     "batch_size": config.sync.batch_size,
                     "sync_interval": config.sync.sync_interval,
+                    "paused_reason": paused_reason,
+                    "queue": queue_stats,
                 },
             }
         )
@@ -205,9 +388,10 @@ def register_routes(app: Flask) -> None:
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
 
         try:
-            with run_async_safely(cloud_sync) as loop:
-                status = loop.run_until_complete(cloud_sync.get_sync_status())
-                return jsonify(status)
+            status = _on_loop(cloud_sync.get_sync_status(), BACKEND_TIMEOUT_SECONDS)
+            return jsonify(status)
+        except _LOOP_ERRORS as e:
+            return _loop_error(e)
         except CloudSyncError as e:
             return jsonify({"error": str(e)}), 500
 
@@ -215,6 +399,10 @@ def register_routes(app: Flask) -> None:
     def api_sync_trigger():
         """Trigger immediate sync."""
         # TODO: Implement manual sync trigger
+        # A paused queue (e.g. quota exceeded) re-checks now instead of waiting
+        sync_queue = _sync_queue()
+        if sync_queue:
+            sync_queue.request_resume()
         return jsonify({"success": True, "message": "Manual sync triggered"})
 
     @app.route("/api/sync/initial", methods=["POST"])
@@ -233,26 +421,41 @@ def register_routes(app: Flask) -> None:
         if not cloud_sync or not cloud_sync.authenticated:
             return jsonify({"success": False, "message": "Not authenticated"}), 401
 
+        if not initial_sync_job.try_begin():
+            return jsonify({
+                "success": False,
+                "message": "Initial sync is already running",
+                **initial_sync_job.snapshot(),
+            }), 409
+
         try:
             # Get selected notebooks
             selected_uuids = None
             if not config.sync.sync_all_notebooks:
                 selected_uuids = config.sync.selected_notebooks
 
-            # Run initial sync
             initial_sync = InitialSync(config, cloud_sync)
 
-            with run_async_safely(cloud_sync) as loop:
-                stats = loop.run_until_complete(initial_sync.run(selected_uuids))
-                return jsonify({
-                    "success": True,
-                    "message": "Initial sync complete",
-                    "stats": stats,
-                })
-
+            # Runs as a task on the agent loop; the UI polls /api/sync/initial/status
+            _agent_loop().submit(_run_initial_sync(initial_sync_job, initial_sync, selected_uuids))
+        except AgentLoopNotRunningError as e:
+            initial_sync_job.reset()
+            return _loop_error(e)
         except Exception as e:
-            app.logger.error(f"Initial sync failed: {e}", exc_info=True)
+            app.logger.error(f"Initial sync failed to start: {e}", exc_info=True)
+            initial_sync_job.fail(str(e))
             return jsonify({"success": False, "message": str(e)}), 500
+
+        return jsonify({
+            "success": True,
+            "message": "Initial sync started",
+            **initial_sync_job.snapshot(),
+        }), 202
+
+    @app.route("/api/sync/initial/status")
+    def api_sync_initial_status():
+        """State of the initial sync: idle, running, done (with stats) or error (with message)."""
+        return jsonify(initial_sync_job.snapshot())
 
     @app.route("/api/test-connection", methods=["POST"])
     def api_test_connection():
@@ -260,14 +463,15 @@ def register_routes(app: Flask) -> None:
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
 
         try:
-            with run_async_safely(cloud_sync) as loop:
-                loop.run_until_complete(cloud_sync.authenticate())
-                return jsonify(
-                    {
-                        "success": True,
-                        "message": f"Successfully authenticated as {cloud_sync.config.api.email}",
-                    }
-                )
+            _on_loop(cloud_sync.authenticate(), BACKEND_TIMEOUT_SECONDS)
+            return jsonify(
+                {
+                    "success": True,
+                    "message": f"Successfully authenticated as {cloud_sync.config.api.email}",
+                }
+            )
+        except _LOOP_ERRORS as e:
+            return _loop_error(e)
         except CloudSyncError as e:
             return jsonify({"success": False, "message": str(e)}), 401
 
@@ -291,8 +495,6 @@ def register_routes(app: Flask) -> None:
         # Fetch Clerk publishable key from backend
         clerk_key = None
         try:
-            import httpx
-
             resp = httpx.get(f"{api_base}/v1/agents/clerk-config", timeout=10)
             if resp.status_code == 200:
                 clerk_key = resp.json().get("clerk_publishable_key")
@@ -306,17 +508,24 @@ def register_routes(app: Flask) -> None:
                 "<p><a href='/'>Back to agent</a></p>"
             ), 502
 
+        # One-time state that /auth/callback must receive back
+        state = auth_states.issue()
+
         # Production Clerk keys only work from their registered domain,
         # so redirect to the external bridge page hosted on that domain.
         if clerk_key.startswith("pk_live_"):
-            callback = f"http://localhost:{config.web.port}/auth/callback"
-            return redirect(f"{api_base}/agent?callback={callback}")
+            callback = (
+                f"http://localhost:{config.web.port}/auth/callback?"
+                + urlencode({"state": state})
+            )
+            return redirect(f"{api_base}/agent?callback={quote(callback, safe='')}")
 
         # Dev/test keys work from localhost — serve the local bridge
         return render_template(
             "auth_bridge.html",
             clerk_publishable_key=clerk_key,
             api_url=f"{api_base}/v1",
+            state=state,
         )
 
     @app.route("/auth/callback")
@@ -324,17 +533,39 @@ def register_routes(app: Flask) -> None:
         """
         Handle Clerk OAuth callback redirect with JWT token in URL.
 
-        Expected query parameter:
-        ?token=clerk_jwt_token
+        Expected query parameters:
+        ?state=<one-time state from /auth/bridge>&token=<agent token>
         """
         import platform
 
         config: Config = app.config["AGENT_CONFIG"]
 
         try:
+            # The state is single-use: consume it before looking at the token
+            if not auth_states.consume(request.args.get("state")):
+                return render_template(
+                    "auth_result.html",
+                    success=False,
+                    message="Sign-in request expired or not started from this agent. Please sign in again.",
+                ), 400
+
             token = request.args.get("token")
             if not token:
                 return render_template("auth_result.html", success=False, message="Missing authentication token")
+
+            # Verify the token with the backend before replacing the stored one
+            cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+            try:
+                token_ok = _on_loop(verify_agent_token(cloud_sync, token), BACKEND_TIMEOUT_SECONDS)
+            except _LOOP_ERRORS as e:
+                body, status = _loop_error_body(e)
+                return render_template("auth_result.html", success=False, message=body["message"]), status
+            if not token_ok:
+                return render_template(
+                    "auth_result.html",
+                    success=False,
+                    message="Could not verify the sign-in token with rMirror Cloud. Please sign in again.",
+                ), 401
 
             # Store the JWT token in config (will be saved to keychain)
             config.api.token = token
@@ -344,24 +575,25 @@ def register_routes(app: Flask) -> None:
             config.save()
 
             # Mark cloud sync as authenticated
-            cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
             cloud_sync.authenticated = True
 
             # Register agent with backend
             try:
-                with run_async_safely(cloud_sync) as loop:
-                    # Get agent info
-                    agent_version = __version__
-                    agent_platform = platform.system()
-                    agent_hostname = platform.node()
+                # Get agent info
+                agent_version = __version__
+                agent_platform = platform.system()
+                agent_hostname = platform.node()
 
-                    # Register with backend
-                    loop.run_until_complete(register_agent_with_backend(
+                # Register with backend
+                _on_loop(
+                    register_agent_with_backend(
                         cloud_sync,
                         agent_version,
                         agent_platform,
                         agent_hostname
-                    ))
+                    ),
+                    BACKEND_TIMEOUT_SECONDS,
+                )
             except Exception as e:
                 # Log error but don't fail authentication
                 app.logger.error(f"Failed to register agent: {e}")
@@ -406,9 +638,10 @@ def register_routes(app: Flask) -> None:
             return jsonify({"error": "Not authenticated"}), 401
 
         try:
-            with run_async_safely(cloud_sync) as loop:
-                user_data = loop.run_until_complete(cloud_sync.get_user_info())
-                return jsonify(user_data)
+            user_data = _on_loop(cloud_sync.get_user_info(), QUICK_TIMEOUT_SECONDS)
+            return jsonify(user_data)
+        except _LOOP_ERRORS as e:
+            return _loop_error(e)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
@@ -463,8 +696,8 @@ def register_routes(app: Flask) -> None:
         config.api.url = new_url
         config.api._token = None  # Clear in-memory token (keychain token may exist for new env)
         if cloud_sync:
+            # The HTTP client is kept: requests carry the full URL, so it serves any host
             cloud_sync.authenticated = False
-            cloud_sync.client = None
         config.save()
 
         # Check if we already have a token for the new environment
@@ -546,10 +779,11 @@ def register_routes(app: Flask) -> None:
             return jsonify({"deleted_notebooks": []})
 
         try:
-            with run_async_safely(cloud_sync) as loop:
-                deleted = loop.run_until_complete(cloud_sync.get_deleted_notebooks())
-                # Only return items that are in our excluded list (server-side tombstones)
-                return jsonify({"deleted_notebooks": deleted})
+            deleted = _on_loop(cloud_sync.get_deleted_notebooks(), QUICK_TIMEOUT_SECONDS)
+            # Only return items that are in our excluded list (server-side tombstones)
+            return jsonify({"deleted_notebooks": deleted})
+        except _LOOP_ERRORS as e:
+            return _loop_error(e, deleted_notebooks=[])
         except Exception as e:
             print(f"Deleted notebooks request error: {e}")
             return jsonify({"deleted_notebooks": []})
@@ -576,12 +810,11 @@ def register_routes(app: Flask) -> None:
                 config.save()
 
             # Acknowledge on server (removes tombstone)
-            with run_async_safely(cloud_sync) as loop:
-                loop.run_until_complete(
-                    cloud_sync.acknowledge_deleted_notebook(uuid, action)
-                )
+            _on_loop(cloud_sync.acknowledge_deleted_notebook(uuid, action), BACKEND_TIMEOUT_SECONDS)
 
             return jsonify({"success": True, "action": action})
+        except _LOOP_ERRORS as e:
+            return _loop_error(e)
         except Exception as e:
             print(f"Deleted notebook action error: {e}")
             return jsonify({"error": str(e)}), 500
@@ -595,9 +828,10 @@ def register_routes(app: Flask) -> None:
             return jsonify({"error": "Not authenticated"}), 401
 
         try:
-            with run_async_safely(cloud_sync) as loop:
-                quota_data = loop.run_until_complete(cloud_sync.get_quota_status())
-                return jsonify(quota_data)
+            quota_data = _on_loop(cloud_sync.get_quota_status(), QUICK_TIMEOUT_SECONDS)
+            return jsonify(quota_data)
+        except _LOOP_ERRORS as e:
+            return _loop_error(e)
         except Exception as e:
             print(f"Quota status request error: {e}")
             return jsonify({"error": str(e)}), 500
@@ -617,8 +851,10 @@ def register_routes(app: Flask) -> None:
         """Check for available agent updates."""
         from app.updater import check_for_updates
 
-        with run_async_safely(None) as loop:
-            update_info = loop.run_until_complete(check_for_updates())
+        try:
+            update_info = _on_loop(check_for_updates(), QUICK_TIMEOUT_SECONDS)
+        except _LOOP_ERRORS as e:
+            return _loop_error(e)
 
         return jsonify({
             "has_update": update_info.has_update,
