@@ -1,9 +1,9 @@
 """Tests for account API endpoints: data-summary, export, and delete."""
 
-from datetime import datetime, timedelta
+import zipfile
+from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -12,10 +12,8 @@ from app.api.account import router
 from app.database import get_db
 from app.dependencies import get_storage_service
 from app.models.notebook import Notebook
-from app.models.page import OcrStatus, Page
-from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
+from app.models.subscription import SubscriptionTier
 from app.models.user import User
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -101,13 +99,62 @@ def test_export_authenticated(db: Session):
     user = _create_user(db)
     client = _create_test_app(db, user)
 
-    with patch("app.api.account.AccountService.generate_data_export", new_callable=AsyncMock) as mock_export:
-        mock_export.return_value = b"PK\x03\x04fake-zip-content"
+    async def fake_export(user_id, db, storage, fileobj):
+        fileobj.write(b"PK\x03\x04fake-zip-content")
+
+    with patch("app.api.account.AccountService.write_data_export", side_effect=fake_export):
         response = client.post("/account/export")
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
     assert "rmirror-export-" in response.headers.get("content-disposition", "")
+    assert response.content == b"PK\x03\x04fake-zip-content"
+
+
+def test_export_streams_from_file_not_memory(db: Session):
+    """The ZIP is written to a temporary file and streamed in chunks."""
+    user = _create_user(db)
+    client = _create_test_app(db, user)
+    payload = bytes(range(256)) * 1024  # 256 KiB, several chunks
+    written_to = []
+
+    async def fake_export(user_id, db, storage, fileobj):
+        written_to.append(fileobj)
+        fileobj.write(payload)
+
+    with patch("app.api.account.AccountService.write_data_export", side_effect=fake_export), patch(
+        "app.api.account.AccountService.generate_data_export", new_callable=AsyncMock
+    ) as in_memory:
+        response = client.post("/account/export")
+
+    assert response.status_code == 200
+    assert response.content == payload
+    in_memory.assert_not_called()
+    assert not isinstance(written_to[0], BytesIO)
+    assert written_to[0].closed
+
+
+def test_export_real_zip(db: Session):
+    """End to end: the streamed body is a valid export ZIP."""
+    user = _create_user(db)
+    nb = Notebook(user_id=user.id, notebook_uuid="nb-export", visible_name="Export Me", document_type="notebook")
+    db.add(nb)
+    db.commit()
+    client = _create_test_app(db, user)
+
+    response = client.post("/account/export")
+
+    assert response.status_code == 200
+    names = zipfile.ZipFile(BytesIO(response.content)).namelist()
+    assert "rmirror-export/metadata.json" in names
+
+
+def test_export_failure_is_500(db: Session):
+    user = _create_user(db)
+    client = _create_test_app(db, user)
+    with patch("app.api.account.AccountService.write_data_export", side_effect=RuntimeError("boom")):
+        response = client.post("/account/export")
+    assert response.status_code == 500
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +179,6 @@ def test_delete_requires_confirmation(db: Session):
 def test_delete_success(db: Session):
     """Correct phrase, verify 200 + user gone from DB."""
     user = _create_user(db)
-    user_id = user.id
     client = _create_test_app(db, user)
 
     with patch("app.api.account.AccountService.delete_account", new_callable=AsyncMock) as mock_delete:

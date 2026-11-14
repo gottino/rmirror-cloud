@@ -12,6 +12,7 @@ from app.models.subscription import Subscription
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.todo import Todo
 from app.models.user import User
+from app.models.waitlist import WaitlistEntry
 
 __all__ = [
     "User",
@@ -28,4 +29,5 @@ __all__ = [
     "ProcessingJob",
     "Connector",
     "DeletedNotebook",
+    "WaitlistEntry",
 ]
