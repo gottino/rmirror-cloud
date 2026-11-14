@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.core.sync_engine import SyncItem, SyncItemType, SyncResult
@@ -34,6 +35,12 @@ logger = logging.getLogger(__name__)
 MAX_SYNC_RETRIES = 8
 RETRY_BASE_DELAY_SECONDS = 60
 RETRY_MAX_DELAY_SECONDS = 3600  # cap a single backoff at 1 hour
+
+# A claimed row is 'processing' with started_at stamped at claim time and again
+# just before each item runs. A row still 'processing' this long after its
+# started_at belongs to a worker that died (deploy, crash, OOM kill), so the
+# next sweep takes it back. Must comfortably exceed the slowest single item.
+PROCESSING_LEASE = timedelta(minutes=10)
 
 # A FAILED result whose message matches this is permanent: retrying can't fix
 # revoked credentials, a bad request, or a block the user archived (CLAUDE.md:
@@ -111,6 +118,69 @@ def apply_sync_result(
     if isinstance(retry_after, datetime) and retry_after > queue_item.scheduled_at:
         queue_item.scheduled_at = retry_after
     return "retry"
+
+
+def reclaim_stale_processing(db: Session, *, now: Optional[datetime] = None) -> tuple[int, int]:
+    """Take back queue rows stranded in 'processing' by a worker that went away.
+
+    A row whose ``started_at`` is older than PROCESSING_LEASE (or NULL) is
+    treated as abandoned. It counts as one failed attempt (retry_count + 1), like
+    apply_sync_failure, and is either returned to 'pending' or, once
+    MAX_SYNC_RETRIES is reached, dead-lettered as 'failed'.
+
+    Unlike apply_sync_failure no backoff is applied: the row did not fail, its
+    worker vanished, so it is retryable immediately (scheduled_at = now). The
+    attempt cap still bounds a row that keeps killing its worker.
+
+    Done as two set-based UPDATE statements rather than read-then-write per row,
+    so two uvicorn workers sweeping at once are safe: the loser of a row lock
+    re-checks ``status = 'processing'`` and skips rows the winner already moved.
+
+    Returns (requeued, dead_lettered).
+    """
+    now = now or datetime.utcnow()
+    cutoff = now - PROCESSING_LEASE
+    stale = (
+        SyncQueue.status == 'processing',
+        (SyncQueue.started_at.is_(None)) | (SyncQueue.started_at < cutoff),
+    )
+
+    dead = db.execute(
+        update(SyncQueue)
+        .where(*stale, SyncQueue.retry_count + 1 >= MAX_SYNC_RETRIES)
+        .values(
+            status='failed',
+            retry_count=SyncQueue.retry_count + 1,
+            error_message=(
+                f"Abandoned in 'processing' after {MAX_SYNC_RETRIES} attempts "
+                "(worker stopped before finishing); giving up"
+            ),
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    requeued = db.execute(
+        update(SyncQueue)
+        .where(*stale, SyncQueue.retry_count + 1 < MAX_SYNC_RETRIES)
+        .values(
+            status='pending',
+            retry_count=SyncQueue.retry_count + 1,
+            scheduled_at=now,
+            error_message="Reclaimed: worker stopped before finishing this item",
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    db.commit()
+
+    if requeued or dead:
+        logger.warning(
+            "Reclaimed stale 'processing' sync items: %d requeued, %d dead-lettered",
+            requeued,
+            dead,
+            extra={"event": "sync.reclaim", "requeued": requeued, "dead_lettered": dead},
+        )
+    return requeued, dead
 
 
 class SyncWorker:
@@ -199,6 +269,9 @@ class SyncWorker:
         """
         db: Session = SessionLocal()
         try:
+            # Recover rows a dead worker left in 'processing' before claiming more.
+            reclaim_stale_processing(db)
+
             # Get pending items with row-level locking to prevent race conditions
             # FOR UPDATE SKIP LOCKED ensures each worker gets different items
             pending_items = (
@@ -227,50 +300,98 @@ class SyncWorker:
 
             # Mark all items as 'processing' immediately to prevent other workers
             # from picking them up (FOR UPDATE locks are released on commit)
+            claimed_ids = [item.id for item in pending_items]
+            index = -1  # position of the item in flight, for cancellation cleanup
             for item in pending_items:
                 item.status = 'processing'
                 item.started_at = datetime.utcnow()
             db.commit()
 
-            for queue_item in pending_items:
-                try:
-                    await self._process_queue_item(db, queue_item)
-                except Exception as e:
-                    # The failed attempt may have left the session needing a
-                    # rollback (e.g. an IntegrityError on commit); discard its
-                    # partial writes before recording the failure.
-                    db.rollback()
-                    # Unexpected exceptions (network, provider 5xx) are transient:
-                    # reschedule with backoff, or dead-letter once retries exhausted.
-                    retrying = apply_sync_failure(queue_item, str(e))
-                    logger.error(
-                        "Sync item failed",
-                        exc_info=True,
-                        extra={
-                            "event": "sync.retry" if retrying else "sync.fail",
-                            "queue_id": queue_item.id,
-                            "target": queue_item.target_name,
-                            "error": str(e),
-                            "retry_count": queue_item.retry_count,
-                            "retrying": retrying,
-                            "next_attempt_at": (
-                                queue_item.scheduled_at.isoformat() if retrying else None
-                            ),
-                        },
-                    )
+            try:
+                for index, queue_item in enumerate(pending_items):
                     try:
+                        # Renew the lease: a long batch must not have its later
+                        # items reclaimed while this worker is alive. Guarded on
+                        # status so an item another sweep already reclaimed
+                        # (we were stalled past the lease) is not run twice.
+                        renewed = db.execute(
+                            update(SyncQueue)
+                            .where(
+                                SyncQueue.id == queue_item.id,
+                                SyncQueue.status == 'processing',
+                            )
+                            .values(started_at=datetime.utcnow())
+                            .execution_options(synchronize_session=False)
+                        ).rowcount
                         db.commit()
-                    except Exception:
-                        # Leave this item for later; keep processing the batch.
+                        if not renewed:
+                            logger.warning(
+                                "Sync item %s was reclaimed before it started; skipping",
+                                queue_item.id,
+                            )
+                            continue
+                        db.refresh(queue_item)
+                        await self._process_queue_item(db, queue_item)
+                    except Exception as e:
+                        # The failed attempt may have left the session needing a
+                        # rollback (e.g. an IntegrityError on commit); discard its
+                        # partial writes before recording the failure.
                         db.rollback()
+                        # Unexpected exceptions (network, provider 5xx) are transient:
+                        # reschedule with backoff, or dead-letter once retries exhausted.
+                        retrying = apply_sync_failure(queue_item, str(e))
                         logger.error(
-                            "Could not record sync failure",
+                            "Sync item failed",
                             exc_info=True,
-                            extra={"event": "sync.fail_unrecorded", "queue_id": queue_item.id},
+                            extra={
+                                "event": "sync.retry" if retrying else "sync.fail",
+                                "queue_id": queue_item.id,
+                                "target": queue_item.target_name,
+                                "error": str(e),
+                                "retry_count": queue_item.retry_count,
+                                "retrying": retrying,
+                                "next_attempt_at": (
+                                    queue_item.scheduled_at.isoformat() if retrying else None
+                                ),
+                            },
                         )
-
+                        try:
+                            db.commit()
+                        except Exception:
+                            # Leave this item for later; keep processing the batch.
+                            db.rollback()
+                            logger.error(
+                                "Could not record sync failure",
+                                exc_info=True,
+                                extra={"event": "sync.fail_unrecorded", "queue_id": queue_item.id},
+                            )
+            except asyncio.CancelledError:
+                # Shutdown mid-batch: hand back the claimed rows not yet started
+                # so they do not wait out the lease. The item in flight (if any)
+                # is left to the lease reclaim, since it may have partly synced.
+                self._release_unstarted(db, claimed_ids[index + 1:])
+                raise
         finally:
             db.close()
+
+    @staticmethod
+    def _release_unstarted(db: Session, ids: list[int]) -> None:
+        """Return claimed-but-unstarted rows to 'pending' (no attempt counted)."""
+        if not ids:
+            return
+        try:
+            db.rollback()
+            db.execute(
+                update(SyncQueue)
+                .where(SyncQueue.id.in_(ids), SyncQueue.status == 'processing')
+                .values(status='pending', started_at=None)
+                .execution_options(synchronize_session=False)
+            )
+            db.commit()
+        except Exception:
+            # Best effort: the lease reclaim recovers them anyway.
+            db.rollback()
+            logger.error("Could not release unstarted sync items", exc_info=True)
 
     async def _process_dirty_notebook_pdfs(self):
         """Rebuild combined notebook PDFs for notebooks that have gone quiet.
