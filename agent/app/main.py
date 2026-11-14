@@ -149,8 +149,13 @@ class Agent:
         """Run the file watcher."""
         from app.watcher.file_watcher import FileWatcher
 
-        self.file_watcher = FileWatcher(self.config, self.cloud_sync)
+        self.file_watcher = FileWatcher(self.config, self.cloud_sync, on_status=self._set_tray_status)
         await self.file_watcher.start()
+
+    def _set_tray_status(self, status: str) -> None:
+        """Show a status in the menu bar, if there is one."""
+        if self.tray_app:
+            self.tray_app.update_status(status)
 
     def start_file_watcher_sync(self) -> None:
         """

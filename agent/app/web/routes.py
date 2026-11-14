@@ -18,6 +18,7 @@ from flask import Flask, jsonify, redirect, render_template, request
 from app.__version__ import __version__
 from app.config import Config
 from app.sync.cloud_sync import CloudSync, CloudSyncError
+from app.sync.queue import PAUSED_SIGN_IN
 
 # Lock to prevent concurrent async operations from interfering with each other
 # This is necessary because Flask uses multiple threads but httpx clients are
@@ -148,6 +149,12 @@ async def verify_agent_token(cloud_sync: CloudSync, token: str) -> bool:
 def register_routes(app: Flask) -> None:
     """Register all web UI routes."""
 
+    def _sync_queue():
+        """The running watcher's sync queue, if there is one."""
+        agent = app.config.get("AGENT")
+        file_watcher = getattr(agent, "file_watcher", None) if agent else None
+        return getattr(file_watcher, "sync_queue", None)
+
     auth_states = AuthStateStore()
     app.config["AUTH_STATES"] = auth_states
 
@@ -177,6 +184,9 @@ def register_routes(app: Flask) -> None:
         """Get agent status."""
         config: Config = app.config["AGENT_CONFIG"]
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
+        sync_queue = _sync_queue()
+        queue_stats = sync_queue.get_stats() if sync_queue else None
+        paused_reason = queue_stats["paused_reason"] if queue_stats else None
 
         return jsonify(
             {
@@ -187,6 +197,7 @@ def register_routes(app: Flask) -> None:
                 "authentication": {
                     "authenticated": cloud_sync.authenticated if cloud_sync else False,
                     "email": config.api.email,
+                    "sign_in_required": paused_reason == PAUSED_SIGN_IN,
                 },
                 "watching": {
                     "enabled": config.remarkable.watch_enabled,
@@ -197,6 +208,8 @@ def register_routes(app: Flask) -> None:
                     "auto_sync": config.sync.auto_sync,
                     "batch_size": config.sync.batch_size,
                     "sync_interval": config.sync.sync_interval,
+                    "paused_reason": paused_reason,
+                    "queue": queue_stats,
                 },
             }
         )
@@ -286,6 +299,10 @@ def register_routes(app: Flask) -> None:
     def api_sync_trigger():
         """Trigger immediate sync."""
         # TODO: Implement manual sync trigger
+        # A paused queue (e.g. quota exceeded) re-checks now instead of waiting
+        sync_queue = _sync_queue()
+        if sync_queue:
+            sync_queue.request_resume()
         return jsonify({"success": True, "message": "Manual sync triggered"})
 
     @app.route("/api/sync/initial", methods=["POST"])
