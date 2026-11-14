@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -22,6 +22,24 @@ class Notebook(Base):
     """reMarkable notebooks and documents."""
 
     __tablename__ = "notebooks"
+    __table_args__ = (
+        # One row per reMarkable document per user; find-or-create sites
+        # insert with ON CONFLICT against this index (app/core/upserts.py).
+        Index("uq_notebooks_user_notebook_uuid", "user_id", "notebook_uuid", unique=True),
+        # PostgreSQL-only search indexes (migrations f8a2b4c9d1e7, b3c7e1f2a4d6).
+        Index(
+            "idx_notebooks_user_deleted_updated",
+            "user_id",
+            text("updated_at DESC"),
+            postgresql_where=text("deleted = false"),
+        ).ddl_if(dialect="postgresql"),
+        Index(
+            "idx_notebooks_visible_name_trgm",
+            "visible_name",
+            postgresql_using="gin",
+            postgresql_ops={"visible_name": "gin_trgm_ops"},
+        ).ddl_if(dialect="postgresql"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(
