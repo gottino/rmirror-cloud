@@ -7,8 +7,38 @@
 # 2. Builds app with PyInstaller
 # 3. Creates a .dmg installer
 #
+# Usage:
+#   CODESIGN_IDENTITY="Developer ID Application: ..." ./build_macos.sh
+#   ./build_macos.sh --unsigned    # local test build only: not signed, not
+#                                  # notarized, and release.sh refuses to
+#                                  # upload it
+#
+# Without CODESIGN_IDENTITY the script exits with an error unless --unsigned
+# is passed. Any signing, notarization or stapling failure exits non-zero.
+#
 
 set -e  # Exit on error
+
+UNSIGNED=0
+for arg in "$@"; do
+    case "$arg" in
+        --unsigned) UNSIGNED=1 ;;
+        -h|--help)
+            sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $arg (see --help)" >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [ "$UNSIGNED" -eq 0 ] && [ -z "${CODESIGN_IDENTITY:-}" ]; then
+    echo "ERROR: CODESIGN_IDENTITY is not set. Set it to your Developer ID Application identity," >&2
+    echo "       or pass --unsigned for a local test build that must not be released." >&2
+    exit 1
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -110,7 +140,7 @@ echo ""
 
 # Step 3: Sign the app (optional, requires Apple Developer certificate)
 echo -e "${YELLOW}→${NC} Code signing..."
-if [ -n "$CODESIGN_IDENTITY" ]; then
+if [ "$UNSIGNED" -eq 0 ]; then
     echo -e "   Signing with identity: $CODESIGN_IDENTITY"
 
     # Strip existing signatures from bundled binaries first
@@ -127,7 +157,7 @@ if [ -n "$CODESIGN_IDENTITY" ]; then
         "$DIST_DIR/rMirror.app"
     echo -e "${GREEN}✓${NC} App signed with hardened runtime"
 else
-    echo -e "${YELLOW}⚠${NC}  Skipping code signing (CODESIGN_IDENTITY not set)"
+    echo -e "${YELLOW}⚠${NC}  Skipping code signing (--unsigned)"
     echo -e "   The app will work but macOS will show a security warning"
 fi
 echo ""
@@ -165,17 +195,17 @@ echo ""
 
 # Step 5: Sign the DMG (required for notarization)
 echo -e "${YELLOW}→${NC} Signing DMG..."
-if [ -n "$CODESIGN_IDENTITY" ]; then
+if [ "$UNSIGNED" -eq 0 ]; then
     codesign --sign "$CODESIGN_IDENTITY" "$DMG_PATH"
     echo -e "${GREEN}✓${NC} DMG signed"
 else
-    echo -e "${YELLOW}⚠${NC}  Skipping DMG signing (CODESIGN_IDENTITY not set)"
+    echo -e "${YELLOW}⚠${NC}  Skipping DMG signing (--unsigned)"
 fi
 echo ""
 
 # Step 6: Notarize the DMG with Apple
 echo -e "${YELLOW}→${NC} Notarizing with Apple..."
-if [ -n "$CODESIGN_IDENTITY" ]; then
+if [ "$UNSIGNED" -eq 0 ]; then
     echo -e "   This may take several minutes..."
 
     # Submit for notarization
@@ -194,16 +224,18 @@ if [ -n "$CODESIGN_IDENTITY" ]; then
 
         # Step 7: Staple the notarization ticket
         echo -e "${YELLOW}→${NC} Stapling notarization ticket..."
-        xcrun stapler staple "$DMG_PATH"
+        xcrun stapler staple "$DMG_PATH" || {
+            echo -e "${RED}✗${NC} Stapling failed"
+            exit 1
+        }
         echo -e "${GREEN}✓${NC} Notarization ticket stapled"
     else
         echo -e "${RED}✗${NC} Notarization failed"
         echo "$NOTARIZE_OUTPUT"
-        echo -e "${YELLOW}⚠${NC}  The DMG is signed but not notarized"
-        echo -e "   Users may see warnings when opening"
+        exit 1
     fi
 else
-    echo -e "${YELLOW}⚠${NC}  Skipping notarization (CODESIGN_IDENTITY not set)"
+    echo -e "${YELLOW}⚠${NC}  Skipping notarization (--unsigned)"
     echo -e "   Keychain profile 'rmirror-notarization' must be configured"
 fi
 echo ""
@@ -211,14 +243,20 @@ echo ""
 # Step 8: Verify code signing and notarization
 echo -e "${YELLOW}→${NC} Verifying signatures..."
 echo -e "   App bundle:"
-codesign --verify --deep --strict --verbose=2 "$DIST_DIR/rMirror.app" 2>&1 | head -3
-echo ""
-echo -e "   DMG:"
-codesign --verify --verbose=2 "$DMG_PATH" 2>&1 | head -3
-echo ""
-if [ -n "$CODESIGN_IDENTITY" ]; then
+if [ "$UNSIGNED" -eq 0 ]; then
+    codesign --verify --deep --strict --verbose=2 "$DIST_DIR/rMirror.app"
+    echo ""
+    echo -e "   DMG:"
+    codesign --verify --verbose=2 "$DMG_PATH"
+    echo ""
     echo -e "   Notarization status:"
-    xcrun stapler validate "$DMG_PATH" 2>&1 | head -3
+    xcrun stapler validate "$DMG_PATH"
+    spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG_PATH"
+    rm -f "$DIST_DIR/.unsigned"
+else
+    echo -e "   Skipped (--unsigned)"
+    # Marker so release.sh refuses to upload this build
+    touch "$DIST_DIR/.unsigned"
 fi
 echo ""
 
@@ -236,11 +274,11 @@ echo -e "Installer: $DMG_PATH"
 echo -e "Size:      $DMG_SIZE"
 echo -e "SHA256:    $DMG_SHA256"
 echo ""
-if [ -n "$CODESIGN_IDENTITY" ]; then
+if [ "$UNSIGNED" -eq 0 ]; then
     echo -e "${GREEN}✓${NC} Signed with: $CODESIGN_IDENTITY"
-    if echo "$NOTARIZE_OUTPUT" | grep -q "status: Accepted" 2>/dev/null; then
-        echo -e "${GREEN}✓${NC} Notarized and stapled"
-    fi
+    echo -e "${GREEN}✓${NC} Notarized and stapled"
+else
+    echo -e "${YELLOW}⚠${NC}  UNSIGNED build: for local testing only, do not release"
 fi
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
