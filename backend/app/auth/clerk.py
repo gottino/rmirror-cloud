@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
+from app.middleware.rate_limit import set_rate_limit_user
 from app.middleware.request_context import user_id_var
 from app.models.user import User
 
@@ -185,6 +186,8 @@ async def get_clerk_user(
 
         # Store user_id in context for structured logging
         user_id_var.set(user.id)
+        # Key this request's rate limits by user instead of IP
+        set_rate_limit_user(request, user.id)
 
         return user
 
