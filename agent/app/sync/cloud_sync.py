@@ -68,6 +68,20 @@ class CloudSync:
         """
         return not self.config.dev.dev_mode
 
+    def ensure_client(self) -> httpx.AsyncClient:
+        """Return the long-lived HTTP client, creating it on first use.
+
+        The client belongs to the agent's event loop (app.agent_loop): call this
+        only from coroutines running there. It is closed by close() at shutdown.
+        """
+        if self.client is None:
+            # SSL verification controlled by RMIRROR_DEV_MODE env var
+            # Default: verify=True (secure). Set RMIRROR_DEV_MODE=true for corporate proxies
+            self.client = httpx.AsyncClient(timeout=300.0, verify=self._verify_ssl)
+            ssl_status = "enabled" if self._verify_ssl else "disabled (dev mode)"
+            logger.debug(f"Created HTTP client with 300s timeout (SSL verification {ssl_status})")
+        return self.client
+
     async def authenticate(self) -> bool:
         """
         Authenticate with the backend API and store the access token.
@@ -75,13 +89,7 @@ class CloudSync:
         Returns:
             True if authentication successful, False otherwise.
         """
-        # Create HTTP client if not exists
-        if self.client is None:
-            # SSL verification controlled by RMIRROR_DEV_MODE env var
-            # Default: verify=True (secure). Set RMIRROR_DEV_MODE=true for corporate proxies
-            self.client = httpx.AsyncClient(timeout=300.0, verify=self._verify_ssl)
-            ssl_status = "enabled" if self._verify_ssl else "disabled (dev mode)"
-            logger.debug(f"Created HTTP client with 300s timeout (SSL verification {ssl_status})")
+        self.ensure_client()
 
         # If we already have a token (from any source), verify it's valid
         if self.config.api.token:
@@ -168,13 +176,7 @@ class CloudSync:
 
     async def ensure_authenticated(self) -> None:
         """Ensure we have a valid authentication token and HTTP client."""
-        # Always create a new HTTP client if it doesn't exist
-        # This is necessary because Flask creates a new event loop for each request,
-        # and httpx clients are bound to the event loop they were created in
-        if not self.client:
-            self.client = httpx.AsyncClient(timeout=300.0, verify=self._verify_ssl)
-            ssl_status = "enabled" if self._verify_ssl else "disabled (dev mode)"
-            logger.debug(f"Created new HTTP client for current event loop (SSL verification {ssl_status})")
+        self.ensure_client()
 
         # Re-authenticate if needed
         if not self.authenticated or not self.config.api.token:

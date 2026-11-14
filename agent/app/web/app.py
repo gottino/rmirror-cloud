@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, request
 
+from app.agent_loop import AgentLoop
 from app.config import Config
 from app.logging_config import install_werkzeug_redaction
 from app.sync.cloud_sync import CloudSync
@@ -49,7 +50,12 @@ def _allowed_hosts(port: int) -> set[str]:
     return hosts
 
 
-def create_app(config: Config, cloud_sync: CloudSync, agent: "Agent" = None) -> Flask:
+def create_app(
+    config: Config,
+    cloud_sync: CloudSync,
+    agent: "Agent" = None,
+    agent_loop: AgentLoop | None = None,
+) -> Flask:
     """
     Create and configure the Flask web application.
 
@@ -57,6 +63,7 @@ def create_app(config: Config, cloud_sync: CloudSync, agent: "Agent" = None) -> 
         config: Agent configuration
         cloud_sync: Cloud sync client
         agent: Reference to the main Agent instance (optional)
+        agent_loop: The agent's event loop; routes run their coroutines on it
 
     Returns:
         Configured Flask app
@@ -68,6 +75,7 @@ def create_app(config: Config, cloud_sync: CloudSync, agent: "Agent" = None) -> 
     app.config["AGENT_CONFIG"] = config
     app.config["CLOUD_SYNC"] = cloud_sync
     app.config["AGENT"] = agent
+    app.config["AGENT_LOOP"] = agent_loop
 
     # Only serve requests addressed to this agent on the loopback names, and
     # refuse state-changing requests that come from another site.

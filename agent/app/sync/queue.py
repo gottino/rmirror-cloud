@@ -201,11 +201,17 @@ class SyncQueue:
     # ------------------------------------------------------------------
 
     async def add(self, file_path: Path, notebook_uuid: str, file_type: str) -> bool:
+        """Note a changed file from a coroutine (see note_change)."""
+        return self.note_change(file_path, notebook_uuid, file_type)
+
+    def note_change(self, file_path: Path, notebook_uuid: str, file_type: str) -> bool:
         """
         Note a changed file. It is queued once no further change to the same path
         has been seen for ``sync.cooldown_seconds`` (trailing debounce).
 
-        Safe to call from any thread (the watchdog thread calls it).
+        Plain function that only touches the lock-guarded pending dict, so it is
+        safe to call from any thread without an event loop (the watchdog thread
+        calls it directly).
 
         Args:
             file_path: Path to the file

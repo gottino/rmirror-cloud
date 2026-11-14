@@ -5,6 +5,7 @@ Monitors reMarkable Desktop app folder and syncs files to rMirror Cloud.
 """
 
 import asyncio
+import concurrent.futures
 import logging
 import signal
 import sys
@@ -14,6 +15,7 @@ from typing import Optional
 
 import click
 
+from app.agent_loop import AgentLoop, AgentLoopNotRunningError
 from app.browser_utils import launch_browser_app_mode
 from app.config import Config
 from app.logging_config import setup_logging
@@ -22,14 +24,32 @@ logger = logging.getLogger(__name__)
 
 
 class Agent:
-    """Main rMirror Agent application."""
+    """Main rMirror Agent application.
 
-    def __init__(self, config: Config, foreground: bool = False, tray_app: Optional[object] = None):
+    Threads: the agent's coroutines (start, the file watcher and its sync queue
+    worker, CloudSync and its HTTP client) all run on one AgentLoop thread. The
+    web server runs in its own thread and hands coroutines to that loop. In tray
+    mode rumps owns the main thread.
+    """
+
+    # File watcher states (guarded by _watcher_lock)
+    WATCHER_IDLE = "idle"
+    WATCHER_STARTING = "starting"
+    WATCHER_RUNNING = "running"
+
+    def __init__(
+        self,
+        config: Config,
+        foreground: bool = False,
+        tray_app: Optional[object] = None,
+        agent_loop: AgentLoop | None = None,
+    ):
         """Initialize the agent."""
         self.config = config
         self.foreground = foreground
         self.running = False
         self.tray_app = tray_app
+        self.loop = agent_loop if agent_loop is not None else AgentLoop()
 
         # Components (initialized later)
         self.file_watcher = None
@@ -38,103 +58,109 @@ class Agent:
         self._web_server = None
         self.remarkable_folder_missing = False
 
+        self._watcher_lock = threading.Lock()
+        self._watcher_state = self.WATCHER_IDLE
+        self._watcher_task: asyncio.Task | None = None
+        self._shutdown_lock = threading.Lock()
+        self._shut_down = False
+
     async def start(self) -> None:
-        """Start the agent and all components."""
+        """Start the agent and all components. Runs on the agent loop until shutdown()."""
         print("Starting rMirror Agent...")
         self.running = True
 
+        # Update tray status
+        if self.tray_app:
+            self.tray_app.update_status("Starting...")
+
+        # Initialize CloudSync object BEFORE starting web server
+        # This way the web server has a reference to the actual object
+        from app.sync.cloud_sync import CloudSync
+        self.cloud_sync = CloudSync(self.config)
+
+        # Start web server in background thread (before auth)
+        # This ensures users can access the login page even if auth fails
+        if self.config.web.enabled:
+            web_thread = threading.Thread(
+                target=self._run_web_server_thread,
+                daemon=True,
+            )
+            web_thread.start()
+            # Give the web server a moment to start
+            await asyncio.sleep(0.5)
+
+            # Auto-launch browser if configured
+            if self.config.web.auto_launch_browser:
+                url = f"http://{self.config.web.host}:{self.config.web.port}"
+                launch_browser_app_mode(url, app_mode=self.config.web.app_mode)
+                print(f"Opened web UI in browser: {url}")
+
+        # Try to authenticate
         try:
-            # Update tray status
+            await self.cloud_sync.authenticate()
+
+            # Update tray status if authentication succeeded
             if self.tray_app:
-                self.tray_app.update_status("Starting...")
+                self.tray_app.update_status("Connected")
 
-            # Initialize CloudSync object BEFORE starting web server
-            # This way the web server has a reference to the actual object
-            from app.sync.cloud_sync import CloudSync
-            self.cloud_sync = CloudSync(self.config)
-
-            # Start web server in background thread (before auth)
-            # This ensures users can access the login page even if auth fails
-            if self.config.web.enabled:
-                web_thread = threading.Thread(
-                    target=self._run_web_server_thread,
-                    daemon=True,
-                )
-                web_thread.start()
-                # Give the web server a moment to start
-                await asyncio.sleep(0.5)
-
-                # Auto-launch browser if configured
-                if self.config.web.auto_launch_browser:
-                    url = f"http://{self.config.web.host}:{self.config.web.port}"
-                    launch_browser_app_mode(url, app_mode=self.config.web.app_mode)
-                    print(f"Opened web UI in browser: {url}")
-
-            # Try to authenticate
+            # Display quota status after successful authentication
             try:
-                await self.cloud_sync.authenticate()
+                quota_status = await self.cloud_sync.get_quota_status()
+                quota_display = self.cloud_sync.format_quota_display(quota_status)
+                print(f"\n{quota_display}\n")
+                logger.info(f"Quota: {quota_status['used']}/{quota_status['limit']} pages used")
+            except Exception as quota_error:
+                logger.warning(f"Could not fetch quota status: {quota_error}")
+                # Don't block startup if quota fetch fails
 
-                # Update tray status if authentication succeeded
-                if self.tray_app:
-                    self.tray_app.update_status("Connected")
+        except Exception as e:
+            # Authentication failed - log it but keep running
+            print(f"\n⚠️  {e}")
+            print(f"Please sign in via the web interface at http://{self.config.web.host}:{self.config.web.port}\n")
 
-                # Display quota status after successful authentication
-                try:
-                    quota_status = await self.cloud_sync.get_quota_status()
-                    quota_display = self.cloud_sync.format_quota_display(quota_status)
-                    print(f"\n{quota_display}\n")
-                    logger.info(f"Quota: {quota_status['used']}/{quota_status['limit']} pages used")
-                except Exception as quota_error:
-                    logger.warning(f"Could not fetch quota status: {quota_error}")
-                    # Don't block startup if quota fetch fails
+            if self.tray_app:
+                self.tray_app.update_status("Not authenticated")
 
-            except Exception as e:
-                # Authentication failed - log it but keep running
-                print(f"\n⚠️  {e}")
-                print(f"Please sign in via the web interface at http://{self.config.web.host}:{self.config.web.port}\n")
+        # Keep running until stopped
+        if self.foreground:
+            print("\nrMirror Agent running in foreground mode. Press Ctrl+C to stop.")
+            print(f"Web UI: http://{self.config.web.host}:{self.config.web.port}")
+            if self.cloud_sync and self.cloud_sync.authenticated:
+                print(f"Watching: {self.config.remarkable.source_directory}")
+            print()
 
-                if self.tray_app:
-                    self.tray_app.update_status("Not authenticated")
+        # Update tray status
+        if self.remarkable_folder_missing:
+            if self.tray_app:
+                self.tray_app.update_status("Folder not found")
+            print("⚠️  reMarkable folder not found. Waiting for folder or custom path...")
+        elif self.tray_app and self.cloud_sync and self.cloud_sync.authenticated:
+            self.tray_app.update_status("Watching")
 
-            # Keep running until stopped
-            if self.foreground:
-                print("\nrMirror Agent running in foreground mode. Press Ctrl+C to stop.")
-                print(f"Web UI: http://{self.config.web.host}:{self.config.web.port}")
-                if self.cloud_sync and self.cloud_sync.authenticated:
-                    print(f"Watching: {self.config.remarkable.source_directory}")
-                print()
+        # Start file watcher - only if authenticated and folder exists
+        if self._can_watch():
+            self._request_watcher_start()
 
-            # Update tray status
+        # Keep the agent running; poll for the folder to appear if it is missing
+        while self.running:
+            await asyncio.sleep(5)
             if self.remarkable_folder_missing:
-                if self.tray_app:
-                    self.tray_app.update_status("Folder not found")
-                print("⚠️  reMarkable folder not found. Waiting for folder or custom path...")
-            elif self.tray_app and self.cloud_sync and self.cloud_sync.authenticated:
-                self.tray_app.update_status("Watching")
+                if Path(self.config.remarkable.source_directory).exists():
+                    self.remarkable_folder_missing = False
+                    logger.info("reMarkable folder detected!")
+                    print("✓ reMarkable folder detected!")
+                    if self.tray_app:
+                        self.tray_app.update_status("Watching" if self.cloud_sync and self.cloud_sync.authenticated else "Connected")
+                    if self._can_watch():
+                        self._request_watcher_start()
 
-            # Start file watcher (this will block) - only if authenticated and folder exists
-            if not self.remarkable_folder_missing and self.config.remarkable.watch_enabled and self.cloud_sync and self.cloud_sync.authenticated:
-                await self._run_file_watcher()
-            else:
-                # Keep agent running even without file watcher
-                # Poll for folder appearance if missing
-                while self.running:
-                    await asyncio.sleep(5)
-                    if self.remarkable_folder_missing:
-                        if Path(self.config.remarkable.source_directory).exists():
-                            self.remarkable_folder_missing = False
-                            logger.info("reMarkable folder detected!")
-                            print("✓ reMarkable folder detected!")
-                            if self.tray_app:
-                                self.tray_app.update_status("Watching" if self.cloud_sync and self.cloud_sync.authenticated else "Connected")
-                            if self.config.remarkable.watch_enabled and self.cloud_sync and self.cloud_sync.authenticated:
-                                await self._run_file_watcher()
-                                break  # _run_file_watcher blocks
-
-        except KeyboardInterrupt:
-            print("\nReceived interrupt signal, shutting down...")
-        finally:
-            await self.stop()
+    def _can_watch(self) -> bool:
+        return bool(
+            not self.remarkable_folder_missing
+            and self.config.remarkable.watch_enabled
+            and self.cloud_sync
+            and self.cloud_sync.authenticated
+        )
 
     async def _initialize_components(self) -> None:
         """Initialize all agent components."""
@@ -146,50 +172,84 @@ class Agent:
         await self.cloud_sync.authenticate()
 
     async def _run_file_watcher(self) -> None:
-        """Run the file watcher."""
+        """Run the file watcher (on the agent loop; returns when the watcher stops)."""
         from app.watcher.file_watcher import FileWatcher
 
+        with self._watcher_lock:
+            self._watcher_state = self.WATCHER_RUNNING
         self.file_watcher = FileWatcher(self.config, self.cloud_sync, on_status=self._set_tray_status)
         await self.file_watcher.start()
+
+    def _request_watcher_start(self) -> bool:
+        """Schedule the file watcher on the agent loop, unless one is starting or running.
+
+        Safe to call from any thread. Returns True if a watcher was scheduled.
+        """
+        with self._watcher_lock:
+            if self._watcher_state != self.WATCHER_IDLE:
+                logger.info(f"File watcher already {self._watcher_state}")
+                return False
+            self._watcher_state = self.WATCHER_STARTING
+        try:
+            self.loop.call_soon(self._spawn_watcher_task)
+        except AgentLoopNotRunningError:
+            with self._watcher_lock:
+                self._watcher_state = self.WATCHER_IDLE
+            logger.warning("Cannot start file watcher: agent loop is not running")
+            return False
+        return True
+
+    def _spawn_watcher_task(self) -> None:
+        """Create the watcher task (runs on the agent loop thread)."""
+        if self._shut_down:
+            with self._watcher_lock:
+                self._watcher_state = self.WATCHER_IDLE
+            return
+        task = asyncio.get_running_loop().create_task(self._run_file_watcher())
+        self._watcher_task = task
+        task.add_done_callback(self._on_watcher_done)
+
+    def _on_watcher_done(self, task: "asyncio.Task[None]") -> None:
+        with self._watcher_lock:
+            self._watcher_state = self.WATCHER_IDLE
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.error(f"File watcher stopped with an error: {error}", exc_info=error)
+            print(f"⚠️  File watcher stopped: {error}")
 
     def _set_tray_status(self, status: str) -> None:
         """Show a status in the menu bar, if there is one."""
         if self.tray_app:
             self.tray_app.update_status(status)
 
-    def start_file_watcher_sync(self) -> None:
+    def start_file_watcher_sync(self) -> bool:
         """
-        Start the file watcher after authentication (called from Flask route).
-        This is called from a Flask thread, so we need to create a new task in the agent's event loop.
-        """
-        if self.file_watcher is not None:
-            logger.info("File watcher already running")
-            return
+        Start the file watcher after authentication (called from a Flask thread).
 
+        Schedules the watcher on the agent loop and returns immediately. Idempotent:
+        does nothing while a watcher is starting or running. Returns True if a
+        watcher was scheduled.
+        """
         if not Path(self.config.remarkable.source_directory).exists():
             logger.warning("Cannot start file watcher: reMarkable folder not found")
-            return
+            return False
 
         self.remarkable_folder_missing = False
 
         if not self.cloud_sync or not self.cloud_sync.authenticated:
             logger.warning("Cannot start file watcher: not authenticated")
-            return
+            return False
 
-        # Schedule the file watcher to start in the agent's event loop
         logger.info("Starting file watcher after authentication...")
-        import threading
-        watcher_thread = threading.Thread(
-            target=lambda: asyncio.run(self._run_file_watcher()),
-            daemon=True
-        )
-        watcher_thread.start()
+        return self._request_watcher_start()
 
     def _run_web_server_thread(self) -> None:
         """Run the web server in a background thread."""
         from app.web.app import create_app
 
-        app = create_app(self.config, self.cloud_sync, agent=self)
+        app = create_app(self.config, self.cloud_sync, agent=self, agent_loop=self.loop)
 
         # Use SO_REUSEADDR to avoid "Address already in use" on restart
         from werkzeug.serving import make_server
@@ -207,17 +267,52 @@ class Agent:
         server.serve_forever()
 
     async def stop(self) -> None:
-        """Stop the agent and all components."""
+        """Stop the agent's loop-side components (runs on the agent loop)."""
         print("Stopping rMirror Agent...")
         self.running = False
 
         if self.file_watcher:
             await self.file_watcher.stop()
 
-        if self._web_server:
-            self._web_server.shutdown()
+        task = self._watcher_task
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except BaseException:  # Cancelled, or the error already logged by _on_watcher_done
+                pass
+
+        # Close the long-lived HTTP client on the loop it belongs to
+        if self.cloud_sync:
+            await self.cloud_sync.close()
 
         print("Agent stopped.")
+
+    def shutdown(self, timeout: float = 15.0) -> None:
+        """Stop everything and join the loop thread. Safe from any thread but the loop's.
+
+        Order: web server first (no new work arrives), then the watcher, queue worker
+        and HTTP client on the loop, then the loop itself. Idempotent.
+        """
+        with self._shutdown_lock:
+            if self._shut_down:
+                return
+            self._shut_down = True
+
+        self.running = False
+
+        if self._web_server:
+            try:
+                self._web_server.shutdown()
+            except Exception as e:
+                logger.warning(f"Web server shutdown failed: {e}")
+
+        if self.loop.is_running:
+            try:
+                self.loop.run(self.stop(), timeout=timeout)
+            except Exception as e:
+                logger.warning(f"Agent did not stop cleanly: {e}")
+        self.loop.stop(timeout=timeout)
 
 
 def setup_signal_handlers(agent: Agent) -> None:
@@ -225,8 +320,7 @@ def setup_signal_handlers(agent: Agent) -> None:
 
     def signal_handler(sig: int, frame: object) -> None:
         print(f"\nReceived signal {sig}, initiating shutdown...")
-        # Create task to stop agent
-        asyncio.create_task(agent.stop())
+        agent.shutdown()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -313,15 +407,18 @@ def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> Non
     agent.remarkable_folder_missing = remarkable_folder_missing
     setup_signal_handlers(agent)
 
-    # Run the agent
+    # Run the agent: all of its coroutines run on one long-lived loop thread
     if foreground or not config.tray.enabled:
-        # Foreground mode: run asyncio in main thread
+        # Foreground mode: main thread waits for the agent
+        agent.loop.start()
         try:
-            asyncio.run(agent.start())
-        except KeyboardInterrupt:
+            agent.loop.submit(agent.start()).result()
+        except (KeyboardInterrupt, concurrent.futures.CancelledError):
             pass
+        finally:
+            agent.shutdown()
     else:
-        # Background mode with menu bar: run asyncio in thread, tray in main thread
+        # Background mode with menu bar: agent on the loop thread, tray in main thread
         from app.tray import TrayApp
 
         # Create tray app
@@ -329,17 +426,23 @@ def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> Non
 
         # Set tray app reference in agent
         agent.tray_app = app
+        app.update_status("Idle")
 
-        # Run agent in background thread
-        agent_thread = threading.Thread(
-            target=lambda: asyncio.run(agent.start()),
-            daemon=True,
-        )
-        agent_thread.start()
+        agent.loop.start()
+        agent_future = agent.loop.submit(agent.start())
+        agent_future.add_done_callback(_log_agent_exit)
 
         # Run tray app in main thread (blocking)
-        app.update_status("Idle")
         app.run()
+
+
+def _log_agent_exit(future: "concurrent.futures.Future[None]") -> None:
+    """Log an unexpected end of the agent's main coroutine (tray mode)."""
+    if future.cancelled():
+        return
+    error = future.exception()
+    if error is not None:
+        logger.error(f"Agent stopped with an error: {error}", exc_info=error)
 
 
 if __name__ == "__main__":
