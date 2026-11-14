@@ -111,6 +111,7 @@ class CloudSync:
                     logger.warning("JWT token expired or invalid")
                     # Token expired - if using Clerk, need to re-auth via web
                     if self.config.api.use_clerk_auth:
+                        self._sign_out("backend rejected the stored token (401)")
                         raise AuthenticationRequiredError(
                             "Authentication token expired. Please sign in again via the web interface.",
                             status_code=401,
@@ -431,6 +432,7 @@ class CloudSync:
                 self.authenticated = False
                 if _reauthenticated:
                     # Re-auth succeeded but the upload is still rejected: retry only once
+                    self._sign_out("upload rejected with 401 after re-authentication")
                     raise AuthenticationRequiredError(
                         f"Upload of {file_path.name} rejected after re-authentication. Please sign in again.",
                         status_code=401,
@@ -707,9 +709,11 @@ class CloudSync:
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
-                # Token expired
-                self.authenticated = False
-                raise CloudSyncError("Authentication expired. Please sign in again.")
+                # Token expired or revoked
+                self._sign_out("backend rejected the stored token (401)")
+                raise AuthenticationRequiredError(
+                    "Authentication expired. Please sign in again.", status_code=401
+                )
 
             logger.error(f"User info request failed: status={e.response.status_code}")
             raise CloudSyncError(f"User info request failed: {e}")
@@ -717,20 +721,32 @@ class CloudSync:
             logger.error(f"User info request error: {e}")
             raise CloudSyncError(f"User info request error: {e}")
 
-    def logout(self) -> None:
-        """
-        Clear authentication state and stored token.
+    def _sign_out(self, reason: str) -> None:
+        """Drop all authenticated state: memory, keychain and cached user info.
 
-        Note: We keep use_clerk_auth unchanged so the sign-in modal
-        shows the OAuth option, not password auth.
+        Used by logout() and when the backend answers 401 (token revoked or
+        expired). The HTTP client carries no credentials of its own (the bearer
+        header is built per request from the token), so removing the token is
+        enough to stop authenticated requests. The sync queue pauses itself with
+        "Sign in required" on the next AuthenticationRequiredError.
+
+        Note: use_clerk_auth is left unchanged so the sign-in modal shows the
+        OAuth option, not password auth. The backend revoke endpoint is never
+        called from here (agent tokens cannot revoke themselves).
         """
         self.authenticated = False
         self.user_email = None
         self.user_id = None
-        self.config.api.token = None
-        # Keep use_clerk_auth unchanged - don't reset auth method preference
-        self.config.save()
-        logger.info("User logged out, token cleared")
+        self.config.api.clear_token()
+        try:
+            self.config.save()
+        except Exception as e:
+            logger.warning(f"Could not save config after sign-out: {e}")
+        logger.info(f"Signed out, token cleared ({reason})")
+
+    def logout(self) -> None:
+        """Clear authentication state and stored token."""
+        self._sign_out("user signed out")
 
     def format_quota_display(self, quota_data: dict) -> str:
         """

@@ -1,5 +1,6 @@
 """Configuration management for rMirror Agent."""
 
+import logging
 import os
 import tempfile
 import threading
@@ -12,6 +13,8 @@ from pydantic import Field, PrivateAttr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.auth.keychain import get_keychain_manager
+
+logger = logging.getLogger(__name__)
 
 
 class APIConfig(BaseSettings):
@@ -67,7 +70,10 @@ class APIConfig(BaseSettings):
         """Clear token from both memory and keychain."""
         self._token = None
         keychain = get_keychain_manager()
-        keychain.delete_token(self._keychain_user_id)
+        if not keychain.delete_token(self._keychain_user_id) and keychain.get_token(
+            self._keychain_user_id
+        ):
+            logger.warning("Stored token could not be removed from the keychain")
 
 
 class ReMarkableConfig(BaseSettings):
