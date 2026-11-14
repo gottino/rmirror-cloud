@@ -68,14 +68,16 @@ def queue_sync(
     # For page_text items, check by page_uuid (reMarkable's unique page identifier)
     # This ensures we update existing pages rather than creating duplicates
     if item_type == 'page_text' and page_uuid:
-        # Check if already queued for this specific page
+        # Check if already queued for this specific page. Only a 'pending' row can
+        # still absorb new content; a 'processing' row keeps the content it
+        # started with, so changed content gets its own new pending row below.
         existing_queue = (
             db.query(SyncQueue)
             .filter(
                 SyncQueue.page_uuid == page_uuid,
                 SyncQueue.target_name == target_name,
                 SyncQueue.user_id == user_id,
-                SyncQueue.status.in_(['pending', 'processing']),
+                SyncQueue.status == 'pending',
             )
             .first()
         )

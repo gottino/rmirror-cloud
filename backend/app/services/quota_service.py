@@ -6,6 +6,7 @@ Provides functions to check, consume, and reset user quotas based on subscriptio
 import logging
 from datetime import datetime, timedelta
 
+from sqlalchemy import case, update
 from sqlalchemy.orm import Session
 
 from app.models.quota_usage import QuotaType, QuotaUsage
@@ -45,6 +46,10 @@ class QuotaExceededError(Exception):
             f"Quota exceeded: {quota.used}/{quota.limit} pages used. "
             f"Resets on {quota.reset_at.strftime('%Y-%m-%d')}."
         )
+
+
+class NoSubscriptionError(ValueError):
+    """Raised when a user has neither a quota row nor a subscription to create one from."""
 
 
 def get_or_create_quota(
@@ -90,7 +95,7 @@ def get_or_create_quota(
     ).first()
 
     if not subscription:
-        raise ValueError(f"No subscription found for user {user_id}")
+        raise NoSubscriptionError(f"No subscription found for user {user_id}")
 
     # Determine quota limit based on tier and beta status
     tier = subscription.tier
@@ -221,6 +226,111 @@ def consume_quota(
         )
 
     return quota
+
+
+def _percentage(used: int, limit: int) -> float:
+    """Same formula as ``QuotaUsage.percentage_used``, for plain values."""
+    if limit == 0:
+        return 100.0
+    return min(100.0, (used / limit) * 100)
+
+
+def reserve_quota(
+    db: Session,
+    user_id: int,
+    amount: int = 1,
+    quota_type: str = QuotaType.OCR,
+) -> bool:
+    """
+    Atomically reserve ``amount`` units of quota before doing the work.
+
+    One conditional UPDATE increments ``used`` only if the result stays within
+    the limit, so concurrent callers (several uploads, several uvicorn workers)
+    can never push ``used`` past ``limit``: the database serializes the row
+    updates and re-checks the condition for each one. The unlimited tier
+    (``limit == -1``) always succeeds and, as in ``consume_quota``, its counter
+    is not incremented.
+
+    The reservation is committed right away (so the row lock is not held while
+    OCR runs). Undo it with ``release_quota`` if the work fails or is not
+    chargeable. Sends the 90% / 100% emails when this reservation crosses a
+    threshold, like ``consume_quota`` does.
+
+    Returns:
+        True if reserved, False if the quota would be exceeded.
+
+    Raises:
+        NoSubscriptionError: If the user has no quota row and no subscription.
+    """
+    # Creates the row if missing and applies the lazy period reset first.
+    quota = get_or_create_quota(db, user_id, quota_type)
+
+    table = QuotaUsage.__table__
+    stmt = (
+        update(table)
+        .where(
+            table.c.user_id == user_id,
+            table.c.quota_type == quota_type,
+            (table.c.limit == -1) | (table.c.used + amount <= table.c.limit),
+        )
+        .values(
+            used=case((table.c.limit == -1, table.c.used), else_=table.c.used + amount),
+            updated_at=datetime.utcnow(),
+        )
+        .returning(table.c.used, table.c.limit)
+    )
+    row = db.execute(stmt).first()
+    db.commit()
+
+    if row is None:
+        return False
+
+    used_after, limit = row
+    if limit == -1:
+        return True
+
+    db.refresh(quota)
+    subscription = db.query(Subscription).filter(Subscription.user_id == user_id).first()
+    if subscription and subscription.tier == SubscriptionTier.FREE:
+        # Thresholds come from this reservation's own before/after values, so
+        # exactly one of several concurrent reservations crosses each one.
+        _send_quota_notification_if_needed(
+            db=db,
+            user_id=user_id,
+            quota=quota,
+            percentage_before=_percentage(used_after - amount, limit),
+            percentage_after=_percentage(used_after, limit),
+        )
+
+    return True
+
+
+def release_quota(
+    db: Session,
+    user_id: int,
+    amount: int = 1,
+    quota_type: str = QuotaType.OCR,
+) -> None:
+    """
+    Give back units taken by ``reserve_quota`` (OCR failed, or nothing to charge).
+
+    Atomic like the reservation and never takes ``used`` below zero. A no-op
+    for the unlimited tier, whose reservations are not counted.
+    """
+    table = QuotaUsage.__table__
+    db.execute(
+        update(table)
+        .where(
+            table.c.user_id == user_id,
+            table.c.quota_type == quota_type,
+            table.c.limit != -1,
+        )
+        .values(
+            used=case((table.c.used > amount, table.c.used - amount), else_=0),
+            updated_at=datetime.utcnow(),
+        )
+    )
+    db.commit()
 
 
 def _send_quota_notification_if_needed(
