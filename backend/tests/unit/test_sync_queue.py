@@ -171,6 +171,30 @@ class TestQueueSync:
         )
         assert entry.status == "completed"
 
+    def test_queue_sync_inserts_new_pending_row_when_existing_is_processing(self, db, user):
+        """An in-flight row keeps its content; new content gets a new pending row."""
+        from app.services.sync_queue import queue_sync
+
+        inflight = queue_sync(
+            db=db, user_id=user.id, item_type="page_text", item_id="1",
+            content_hash="old_hash", target_name="notion", page_uuid="page-uuid-inflight",
+        )
+        inflight.status = "processing"
+        inflight.started_at = datetime.utcnow()
+        db.commit()
+
+        fresh = queue_sync(
+            db=db, user_id=user.id, item_type="page_text", item_id="1",
+            content_hash="new_hash", target_name="notion", page_uuid="page-uuid-inflight",
+        )
+
+        assert fresh.id != inflight.id
+        assert fresh.status == "pending"
+        assert fresh.content_hash == "new_hash"
+        db.refresh(inflight)
+        assert inflight.status == "processing"
+        assert inflight.content_hash == "old_hash"
+
     def test_queue_sync_dedup_by_content_hash_for_non_page(self, db, user):
         """Non-page_text items should dedup by content_hash."""
         from app.services.sync_queue import queue_sync
