@@ -60,20 +60,13 @@ class TestSecurityHeaders:
 # ---------- Rate Limit Tests ----------
 
 class TestRateLimit:
-    """Tests for rate limit key extraction and dynamic limits."""
+    """Tests for rate limit key extraction.
 
-    @pytest.fixture(autouse=True)
-    def _mock_jwt_settings(self):
-        """Mock settings used by the JWT module that rate_limit imports."""
-        mock_settings = MagicMock()
-        mock_settings.secret_key = "test-secret-for-rate-limit"
-        mock_settings.algorithm = "HS256"
-        mock_settings.access_token_expire_minutes = 60
+    The key comes from ``request.state`` (set by the auth dependencies), never
+    from decoding the Authorization header.
+    """
 
-        with patch("app.auth.jwt.settings", mock_settings):
-            yield mock_settings
-
-    def _make_request(self, auth_header: str | None = None) -> MagicMock:
+    def _make_request(self, auth_header: str | None = None, user_id=None) -> MagicMock:
         """Create a mock FastAPI Request."""
         request = MagicMock()
         headers = {}
@@ -83,17 +76,17 @@ class TestRateLimit:
         request.client = MagicMock()
         request.client.host = "127.0.0.1"
         request.scope = {"type": "http"}
+        request.state = MagicMock(spec=[])  # no attributes set
+        if user_id is not None:
+            request.state.rate_limit_user_id = user_id
         return request
 
-    def test_rate_limit_key_valid_bearer_token(self):
-        """Valid Bearer token should return user:{id} key."""
-        from app.auth.jwt import create_access_token
+    def test_rate_limit_key_uses_user_recorded_by_auth(self):
+        """A user recorded on request.state gives a user:{id} key."""
         from app.middleware.rate_limit import get_rate_limit_key
 
-        token = create_access_token({"sub": "user42"})
-        request = self._make_request(f"Bearer {token}")
-        key = get_rate_limit_key(request)
-        assert key == "user:user42"
+        request = self._make_request("Bearer whatever", user_id=42)
+        assert get_rate_limit_key(request) == "user:42"
 
     def test_rate_limit_key_missing_auth(self):
         """Missing auth should fall back to IP-based key."""
@@ -104,27 +97,17 @@ class TestRateLimit:
             key = get_rate_limit_key(request)
         assert key == "192.168.1.1"
 
-    def test_rate_limit_key_invalid_token(self):
-        """Invalid Bearer token should fall back to IP-based key."""
+    def test_rate_limit_key_ignores_unverified_token(self):
+        """A bearer token alone (auth not run or failed) does not pick the key."""
+        from app.auth.jwt import create_access_token
         from app.middleware.rate_limit import get_rate_limit_key
 
-        request = self._make_request("Bearer invalid.token.here")
+        with patch("app.auth.jwt.settings") as mock_settings:
+            mock_settings.secret_key = "test-secret-for-rate-limit"
+            mock_settings.algorithm = "HS256"
+            mock_settings.access_token_expire_minutes = 60
+            token = create_access_token({"sub": "user42"})
+        request = self._make_request(f"Bearer {token}")
         with patch("app.middleware.rate_limit.get_remote_address", return_value="10.0.0.1"):
             key = get_rate_limit_key(request)
         assert key == "10.0.0.1"
-
-    def test_dynamic_limit_authenticated(self):
-        """Valid token should return authenticated limit."""
-        from app.auth.jwt import create_access_token
-        from app.middleware.rate_limit import get_dynamic_limit, AUTHENTICATED_LIMIT
-
-        token = create_access_token({"sub": "user42"})
-        request = self._make_request(f"Bearer {token}")
-        assert get_dynamic_limit(request) == AUTHENTICATED_LIMIT
-
-    def test_dynamic_limit_unauthenticated(self):
-        """No token should return unauthenticated limit."""
-        from app.middleware.rate_limit import get_dynamic_limit, UNAUTHENTICATED_LIMIT
-
-        request = self._make_request()
-        assert get_dynamic_limit(request) == UNAUTHENTICATED_LIMIT
