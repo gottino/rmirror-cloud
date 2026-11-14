@@ -13,8 +13,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.config import get_settings
-
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Middleware to add security headers to all responses."""
@@ -22,15 +20,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
 
-        settings = get_settings()
-
-        # Only add HSTS in production (when not in debug mode)
-        # HSTS tells browsers to only use HTTPS for this domain
-        if not settings.debug:
-            # max-age=31536000 (1 year), includeSubDomains
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains"
-            )
+        # HSTS tells browsers to only use HTTPS for this domain. Always sent:
+        # browsers ignore it on plain-http responses, so local development
+        # over http://localhost is unaffected.
+        # max-age=31536000 (1 year), includeSubDomains
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
 
         # Prevent clickjacking - page cannot be embedded in iframes
         response.headers["X-Frame-Options"] = "DENY"

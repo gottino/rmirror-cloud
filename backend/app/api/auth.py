@@ -10,20 +10,16 @@ import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Request
-from slowapi import Limiter
 
 from app.auth.clerk import get_clerk_session_user
 from app.auth.jwt import create_access_token
-from app.middleware.rate_limit import AUTH_ENDPOINT_LIMIT, get_rate_limit_key
+from app.middleware.rate_limit import AUTH_ENDPOINT_LIMIT, limiter
 from app.models.user import User
 from app.schemas.auth import Token
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Rate limiter for auth endpoints - strict limits to prevent brute force
-limiter = Limiter(key_func=get_rate_limit_key)
 
 
 @router.post("/agent-token", response_model=Token)

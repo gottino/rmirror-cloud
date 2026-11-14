@@ -7,8 +7,6 @@ from typing import List, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
@@ -16,6 +14,7 @@ from app.core.sync_engine import SyncItem
 from app.core.unified_sync_manager import UnifiedSyncManager
 from app.database import get_db
 from app.integrations.notion_sync import NotionSyncTarget
+from app.middleware.rate_limit import limiter
 from app.models.deleted_notebook import DeletedNotebook
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
@@ -26,9 +25,6 @@ from app.services.sync_worker import apply_sync_failure, apply_sync_result
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["sync"])
-
-# Rate limiter for sync endpoints
-limiter = Limiter(key_func=get_remote_address)
 
 
 class SyncRequest(BaseModel):
