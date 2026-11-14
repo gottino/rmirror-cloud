@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -30,10 +30,14 @@ class Subscription(Base):
     """User subscription details including billing info."""
 
     __tablename__ = "subscriptions"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_subscriptions_user_id"),
+        Index("ix_subscriptions_user_id", "user_id"),
+    )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
 
     # Subscription details

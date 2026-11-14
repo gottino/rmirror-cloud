@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -80,6 +80,16 @@ class SyncRecord(Base):
         Index('idx_sync_content_target_item', 'content_hash', 'target_name', 'item_id'),
         Index('idx_sync_page_uuid', 'page_uuid', 'target_name', 'user_id', unique=True),
         Index('idx_sync_notebook_page', 'notebook_uuid', 'page_number'),
+        # One metadata-sync record per notebook and target (migration b4e7d2a9c1f3).
+        Index(
+            'uq_sync_notebook_metadata',
+            'user_id',
+            'target_name',
+            'notebook_uuid',
+            unique=True,
+            postgresql_where=text("item_type = 'notebook_metadata'"),
+            sqlite_where=text("item_type = 'notebook_metadata'"),
+        ),
     )
 
     def __repr__(self) -> str:
@@ -95,9 +105,11 @@ class SyncQueue(Base):
 
     __tablename__ = "sync_queue"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # Column indexes are declared once, in __table_args__ (idx_queue_*), as the
+    # migrations create them.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
 
     # Item to sync
@@ -111,10 +123,10 @@ class SyncQueue(Base):
     page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Target
-    target_name: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    target_name: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # Queue status
-    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True, default="pending")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=5)  # 1-10, lower = higher priority
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

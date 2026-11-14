@@ -16,20 +16,6 @@ class NotebookBase(BaseModel):
     author: str | None = None
 
 
-class NotebookCreate(NotebookBase):
-    """Notebook creation schema."""
-
-    notebook_uuid: str
-
-
-class NotebookUpdate(BaseModel):
-    """Notebook update schema."""
-
-    visible_name: str | None = None
-    title: str | None = None
-    author: str | None = None
-
-
 class Notebook(NotebookBase):
     """Notebook response schema."""
 

@@ -96,6 +96,9 @@ S3_ACCESS_KEY=your-access-key
 S3_SECRET_KEY=your-secret-key
 ```
 
+**Local development without Clerk:** with no `CLERK_JWKS_URL`, set `ALLOW_UNVERIFIED_CLERK_TOKENS=true` (and `ALLOW_UNSIGNED_WEBHOOKS=true` if you post webhooks without `CLERK_WEBHOOK_SECRET`).
+These flags work only with a SQLite `DATABASE_URL`; the API refuses to start with them on PostgreSQL. `DEBUG` only changes log verbosity.
+
 ## Documentation
 
 ### Quick References

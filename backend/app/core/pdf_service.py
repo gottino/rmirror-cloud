@@ -3,7 +3,7 @@
 import logging
 from io import BytesIO
 
-from pypdf import PdfMerger, PdfReader
+from pypdf import PdfMerger
 
 logger = logging.getLogger(__name__)
 
@@ -126,22 +126,3 @@ class PDFService:
         xref += f"trailer<</Size 6/Root 1 0 R>>\nstartxref\n{xref_offset}\n%%EOF"
 
         return body + xref.encode("latin-1")
-
-    @staticmethod
-    def get_page_count(pdf_bytes: bytes) -> int:
-        """
-        Get the number of pages in a PDF.
-
-        Args:
-            pdf_bytes: PDF content as bytes
-
-        Returns:
-            Number of pages
-        """
-        try:
-            pdf_stream = BytesIO(pdf_bytes)
-            reader = PdfReader(pdf_stream)
-            return len(reader.pages)
-        except Exception as e:
-            logger.error(f"Failed to get page count: {e}")
-            return 0
