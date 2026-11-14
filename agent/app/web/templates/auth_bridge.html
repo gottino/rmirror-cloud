@@ -101,6 +101,7 @@
         var API_URL = '{{ api_url }}';
         var CLERK_KEY = '{{ clerk_publishable_key }}';
         var CALLBACK_URL = window.location.origin + '/auth/callback';
+        var AUTH_STATE = {{ state|tojson }};
 
         // Determine Clerk SDK URL based on key type
         // Dev/test keys: load from instance CDN (needed for UI components)
@@ -184,7 +185,8 @@
 
                 var data = await response.json();
                 statusText.textContent = 'Redirecting to agent...';
-                window.location.href = CALLBACK_URL + '?token=' + encodeURIComponent(data.access_token);
+                window.location.href = CALLBACK_URL + '?state=' + encodeURIComponent(AUTH_STATE) +
+                    '&token=' + encodeURIComponent(data.access_token);
             } catch (err) {
                 errorBox.style.display = 'block';
                 errorText.textContent = 'Authentication failed: ' + err.message;

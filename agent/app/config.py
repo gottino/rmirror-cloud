@@ -1,15 +1,20 @@
 """Configuration management for rMirror Agent."""
 
+import logging
 import os
+import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
 import yaml
-from pydantic import Field, field_validator
+from pydantic import Field, PrivateAttr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.auth.keychain import get_keychain_manager
+
+logger = logging.getLogger(__name__)
 
 
 class APIConfig(BaseSettings):
@@ -65,7 +70,10 @@ class APIConfig(BaseSettings):
         """Clear token from both memory and keychain."""
         self._token = None
         keychain = get_keychain_manager()
-        keychain.delete_token(self._keychain_user_id)
+        if not keychain.delete_token(self._keychain_user_id) and keychain.get_token(
+            self._keychain_user_id
+        ):
+            logger.warning("Stored token could not be removed from the keychain")
 
 
 class ReMarkableConfig(BaseSettings):
@@ -165,6 +173,10 @@ class Config(BaseSettings):
     sync: SyncConfig = Field(default_factory=SyncConfig)
     dev: DevConfig = Field(default_factory=DevConfig)
 
+    # Serialises save() calls: Flask request threads and the agent loop thread
+    # both save the config. Re-entrant so a caller holding it can still save.
+    _save_lock: threading.RLock = PrivateAttr(default_factory=threading.RLock)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -231,34 +243,53 @@ class Config(BaseSettings):
             return cls()
 
     def save(self, config_path: Optional[Path] = None) -> None:
-        """Save configuration to YAML file with secure permissions."""
+        """Save configuration to YAML file with secure permissions.
+
+        Thread-safe: saves are serialised by a lock, and the file is written to a
+        temporary file in the same directory and then renamed over the old one, so
+        a reader never sees a half-written file.
+        """
         if config_path is None:
             config_path = self.get_default_config_path()
 
-        # Create parent directory with restricted permissions (owner-only access)
-        config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with self._save_lock:
+            # Create parent directory with restricted permissions (owner-only access)
+            config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
-        # Convert to dict and save
-        config_dict = {
-            "api": self.api.model_dump(exclude={"token"}),  # Don't save token
-            "remarkable": self.remarkable.model_dump(),
-            "web": self.web.model_dump(),
-            "tray": self.tray.model_dump(),
-            "sync": self.sync.model_dump(),
-            "dev": self.dev.model_dump(),
-        }
+            # Convert to dict and save
+            config_dict = {
+                "api": self.api.model_dump(exclude={"token"}),  # Don't save token
+                "remarkable": self.remarkable.model_dump(),
+                "web": self.web.model_dump(),
+                "tray": self.tray.model_dump(),
+                "sync": self.sync.model_dump(),
+                "dev": self.dev.model_dump(),
+            }
 
-        with open(config_path, "w") as f:
-            # Prevent YAML from wrapping long strings (like paths with spaces)
-            yaml.safe_dump(
-                config_dict,
-                f,
-                default_flow_style=False,
-                sort_keys=False,
-                width=float('inf'),  # Never wrap lines
+            # mkstemp creates the file with owner-only (0o600) permissions
+            fd, tmp_name = tempfile.mkstemp(
+                dir=config_path.parent, prefix=f".{config_path.name}.", suffix=".tmp"
             )
-
-        # Set file permissions to owner-only read/write (0o600)
-        config_path.chmod(0o600)
+            try:
+                with os.fdopen(fd, "w") as f:
+                    # Prevent YAML from wrapping long strings (like paths with spaces)
+                    yaml.safe_dump(
+                        config_dict,
+                        f,
+                        default_flow_style=False,
+                        sort_keys=False,
+                        width=float('inf'),  # Never wrap lines
+                    )
+                    f.flush()
+                    os.fsync(f.fileno())
+                # Owner-only read/write (0o600), set before the file becomes visible
+                os.chmod(tmp_name, 0o600)
+                os.replace(tmp_name, config_path)
+            except BaseException:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
 
         print(f"Configuration saved to: {config_path}")
