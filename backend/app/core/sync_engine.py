@@ -18,12 +18,31 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
+from enum import Enum
 from typing import Any, Dict, Optional
 
 from app.models.sync_record import SyncItemType, SyncStatus
 
 logger = logging.getLogger(__name__)
+
+
+# Wait this long after a rate limit when the provider gives no Retry-After.
+RATE_LIMIT_DEFAULT_DELAY = timedelta(seconds=30)
+
+
+class SyncErrorKind(str, Enum):
+    """Why a sync attempt failed, as classified by the target itself.
+
+    The sync worker acts on this when a target sets it, and only falls back to
+    matching the error text when it is absent.
+    """
+
+    RATE_LIMITED = "rate_limited"  # retry at retry_after; does not use up a retry
+    AUTH = "auth"  # token revoked or access removed: permanent for the item
+    PARENT_GONE = "parent_gone"  # the notebook's page in the target is archived/missing
+    PERMANENT = "permanent"  # bad request; retrying cannot help
+    TRANSIENT = "transient"  # network / provider 5xx; retry with backoff
 
 
 @dataclass
@@ -33,8 +52,9 @@ class SyncResult:
     status: SyncStatus
     target_id: Optional[str] = None  # External ID in target system
     error_message: Optional[str] = None
-    retry_after: Optional[datetime] = None
+    retry_after: Optional[datetime] = None  # naive UTC; earliest time to retry
     metadata: Dict[str, Any] = field(default_factory=dict)
+    error_kind: Optional[SyncErrorKind] = None
 
     @property
     def success(self) -> bool:
@@ -236,7 +256,10 @@ class ContentFingerprint:
         last_modified_at = notebook_data.get("last_modified_at", "")
 
         # Create normalized metadata string (no content)
+        # The notebook uuid is part of the hash: identical metadata of two
+        # notebooks must not dedupe against each other in the sync queue.
         content_parts = [
+            f"notebook:{notebook_data.get('notebook_uuid', '')}",
             f"title:{title}",
             f"pages:{page_count}",
             f"path:{full_path}",

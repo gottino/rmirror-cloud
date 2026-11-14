@@ -1,8 +1,10 @@
 """Account management endpoints: data export, data summary, and account deletion."""
 
 import logging
+import tempfile
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, BinaryIO
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -38,18 +40,36 @@ async def get_data_summary(
     return summary
 
 
+_EXPORT_CHUNK_SIZE = 64 * 1024
+
+
+def _iter_file(fileobj: BinaryIO) -> Iterator[bytes]:
+    """Yield a file in chunks and close it afterwards."""
+    try:
+        while chunk := fileobj.read(_EXPORT_CHUNK_SIZE):
+            yield chunk
+    finally:
+        fileobj.close()
+
+
 @router.post("/export")
 async def export_data(
     current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageService, Depends(get_storage_service)],
 ):
-    """Generate and return a ZIP file containing all user data."""
+    """Generate and return a ZIP file containing all user data.
+
+    The ZIP is written to a temporary file and streamed from there in chunks,
+    so a large export does not sit in memory.
+    """
+    export_file = tempfile.TemporaryFile()
     try:
-        zip_bytes = await AccountService.generate_data_export(
-            current_user.id, db, storage
+        await AccountService.write_data_export(
+            current_user.id, db, storage, export_file
         )
     except Exception as e:
+        export_file.close()
         logger.error(f"Failed to generate data export for user {current_user.id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -59,8 +79,9 @@ async def export_data(
     date_str = datetime.utcnow().strftime("%Y-%m-%d")
     filename = f"rmirror-export-{date_str}.zip"
 
+    export_file.seek(0)
     return StreamingResponse(
-        iter([zip_bytes]),
+        _iter_file(export_file),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

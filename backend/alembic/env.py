@@ -2,6 +2,9 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
+# Importing app.models registers every table on Base.metadata, which
+# `alembic check` (CI schema-drift job) compares against the migrated schema.
+import app.models  # noqa: F401
 from alembic import context
 
 # Import application settings and models

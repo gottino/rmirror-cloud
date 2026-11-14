@@ -3,7 +3,7 @@
 Tests TC-AUTO-03 through TC-AUTO-09 from the test plan:
 - Upload with quota exhausted (graceful degradation)
 - Hard cap enforcement (100 pending pages)
-- Rate limiting (10 uploads/minute)
+- Rate limiting (per-user upload limit)
 - Retroactive processing (newest first)
 - Content hash deduplication
 - Integration blocking
@@ -13,7 +13,6 @@ Tests TC-AUTO-03 through TC-AUTO-09 from the test plan:
 import asyncio
 import io
 import json
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -104,7 +103,7 @@ def mock_metadata_parser():
 def test_rm_file():
     """Create a fake .rm file for testing."""
     content = b"fake_remarkable_file_content_with_drawing_data"
-    return ("test_page.rm", io.BytesIO(content), "application/octet-stream")
+    return ("11111111-2222-4333-8444-555555555555.rm", io.BytesIO(content), "application/octet-stream")
 
 
 @pytest.fixture
@@ -333,7 +332,7 @@ async def test_hard_cap_allows_99_pending(
 
 
 # =============================================================================
-# TC-AUTO-05: Rate Limiting (10 uploads/minute)
+# TC-AUTO-05: Rate Limiting (settings.rate_limit_upload, default 120/minute)
 # =============================================================================
 
 
@@ -348,15 +347,19 @@ async def test_rate_limiting(
     mock_pdf_service,
 ):
     """
-    TC-AUTO-05: Should enforce 10 uploads per minute rate limit.
+    TC-AUTO-05: Should enforce the configured upload rate limit.
 
     Expected behavior:
-    - First 10 uploads succeed (HTTP 200)
-    - 11th upload fails with HTTP 429
+    - First N uploads succeed (HTTP 200), N = UPLOAD_LIMIT amount
+    - Upload N+1 fails with HTTP 429
     - Error message indicates rate limit
     """
+    from limits import parse
+
     from app.auth.clerk import get_clerk_active_user
-    from app.api.processing import limiter
+    from app.middleware.rate_limit import UPLOAD_LIMIT, limiter
+
+    allowed = parse(UPLOAD_LIMIT).amount
 
     # Reset rate limiter storage before test
     if hasattr(limiter, '_storage') and limiter._storage:
@@ -373,12 +376,12 @@ async def test_rate_limiting(
 
     # Create client with fresh limiter state
     with TestClient(test_app) as client:
-        # Action: Upload 11 pages rapidly
+        # Action: Upload one page more than the limit allows, rapidly
         responses = []
-        for i in range(11):
+        for i in range(allowed + 1):
             # Create unique file for each upload
             test_file = (
-                f"test_page_{i}.rm",
+                f"00000000-0000-4000-8000-{i:012d}.rm",
                 io.BytesIO(f"fake_rm_content_{i}".encode()),
                 "application/octet-stream",
             )
@@ -386,21 +389,20 @@ async def test_rate_limiting(
             files = {"rm_file": test_file}
             response = client.post("/v1/processing/rm-file", files=files)
             responses.append(response)
-            time.sleep(0.1)  # Small delay between uploads
 
-        # Verify first 10 succeeded
-        for i in range(10):
+        # Verify the first `allowed` uploads succeeded
+        for i in range(allowed):
             assert (
                 responses[i].status_code == 200
             ), f"Upload {i} should succeed, got {responses[i].status_code}: {responses[i].json()}"
 
-        # Verify 11th was rate limited
+        # Verify the next one was rate limited
         assert (
-            responses[10].status_code == 429
-        ), f"11th upload should be rate limited, got {responses[10].status_code}"
+            responses[allowed].status_code == 429
+        ), f"Upload {allowed + 1} should be rate limited, got {responses[allowed].status_code}"
 
         # Verify error message indicates rate limiting (slowapi returns "X per Y minute" format)
-        error_detail = str(responses[10].json().get("detail", ""))
+        error_detail = str(responses[allowed].json().get("detail", ""))
         assert "per" in error_detail.lower() or "rate" in error_detail.lower(), (
             f"Error should indicate rate limit: {error_detail}"
         )
@@ -551,8 +553,8 @@ async def test_content_hash_deduplication(
     db.commit()
 
     # Use a consistent page UUID for both uploads (from filename)
-    page_uuid = "dedup-test-page-uuid"
-    notebook_uuid = "dedup-test-notebook-uuid"
+    page_uuid = "3f2b8c1e-5a47-4d90-8e12-6b7a9c0d1e2f"
+    notebook_uuid = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
 
     # Create metadata file with consistent notebook UUID
     import json
@@ -627,7 +629,7 @@ async def test_content_hash_changed_consumes_quota(
 
     # First upload
     test_file_1 = (
-        "page_v1.rm",
+        "7e6d5c4b-3a29-4817-8605-f4e3d2c1b0a9.rm",
         io.BytesIO(b"original_content_version_1"),
         "application/octet-stream",
     )
@@ -641,7 +643,7 @@ async def test_content_hash_changed_consumes_quota(
 
     # Second upload (DIFFERENT content, different hash)
     test_file_2 = (
-        "page_v1.rm",  # Same filename
+        "7e6d5c4b-3a29-4817-8605-f4e3d2c1b0a9.rm",  # Same filename
         io.BytesIO(b"modified_content_version_2"),  # Different content!
         "application/octet-stream",
     )

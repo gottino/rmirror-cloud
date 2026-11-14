@@ -12,6 +12,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from app.core.sync_engine import ContentFingerprint
+from app.integrations.registry import TODO, targets_supporting
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import Page
@@ -229,7 +230,7 @@ def _queue_todos_for_sync(db: Session, user_id: int, page: Page):
             .filter(
                 IntegrationConfig.user_id == user_id,
                 IntegrationConfig.is_enabled == True,  # noqa: E712
-                IntegrationConfig.target_name.in_(["todoist", "notion-todos"]),
+                IntegrationConfig.target_name.in_(targets_supporting(TODO)),
             )
             .all()
         )
