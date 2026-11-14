@@ -303,3 +303,74 @@ class TestSyncConfigEdgeCases:
         # Large batch
         config = SyncConfig(batch_size=100)
         assert config.batch_size == 100
+
+
+class TestConfigSaveConcurrency:
+    """Config.save() is called from Flask threads and the agent loop thread."""
+
+    def test_concurrent_saves_do_not_interleave(self, tmp_path, mock_keychain):
+        import threading
+        import time
+
+        import yaml
+
+        config = Config()
+        config_path = tmp_path / "config.yaml"
+        in_flight = [0]
+        overlaps = []
+        counter_lock = threading.Lock()
+        real_dump = yaml.safe_dump
+
+        def slow_dump(data, stream, **kwargs):
+            with counter_lock:
+                in_flight[0] += 1
+                if in_flight[0] > 1:
+                    overlaps.append(in_flight[0])
+            try:
+                time.sleep(0.002)
+                return real_dump(data, stream, **kwargs)
+            finally:
+                with counter_lock:
+                    in_flight[0] -= 1
+
+        def worker(i):
+            for n in range(10):
+                config.sync.batch_size = i * 100 + n
+                config.save(config_path)
+
+        with patch("app.config.yaml.safe_dump", side_effect=slow_dump):
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(6)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(30)
+
+        assert overlaps == []
+        saved = yaml.safe_load(config_path.read_text())
+        assert isinstance(saved["sync"]["batch_size"], int)
+        # No temporary files left behind
+        assert [p.name for p in tmp_path.iterdir()] == ["config.yaml"]
+
+    def test_saved_file_is_owner_only(self, tmp_path, mock_keychain):
+        import stat
+
+        config_path = tmp_path / "config.yaml"
+        Config().save(config_path)
+        assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+        # Overwriting keeps the permissions
+        Config().save(config_path)
+        assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+
+    def test_failed_write_keeps_previous_file(self, tmp_path, mock_keychain):
+        config = Config(sync=SyncConfig(batch_size=7))
+        config_path = tmp_path / "config.yaml"
+        config.save(config_path)
+        before = config_path.read_text()
+
+        config.sync.batch_size = 99
+        with patch("app.config.yaml.safe_dump", side_effect=OSError("disk full")):
+            with pytest.raises(OSError):
+                config.save(config_path)
+
+        assert config_path.read_text() == before
+        assert [p.name for p in tmp_path.iterdir()] == ["config.yaml"]

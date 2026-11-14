@@ -4,16 +4,8 @@ import { useAuth, useUser, SignIn, useClerk } from '@clerk/nextjs';
 import { useSearchParams } from 'next/navigation';
 import { useState, useCallback, Suspense } from 'react';
 import Image from 'next/image';
+import { validateCallbackUrl, buildAgentRedirectUrl } from '@/lib/agent-callback';
 import { ApiError, exchangeAgentToken } from '@/lib/api';
-
-function validateCallbackUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return ['localhost', '127.0.0.1'].includes(parsed.hostname);
-  } catch {
-    return false;
-  }
-}
 
 type BridgeState =
   | { phase: 'confirm' }
@@ -34,7 +26,7 @@ function AgentAuthBridgeInner() {
 
   const exchangeAndRedirect = useCallback(async () => {
     if (!validateCallbackUrl(callbackUrl)) {
-      setState({ phase: 'error', message: 'Invalid callback URL: must be localhost' });
+      setState({ phase: 'error', message: 'Invalid callback URL: must be a local agent address' });
       return;
     }
 
@@ -60,7 +52,12 @@ function AgentAuthBridgeInner() {
       }
 
       setState({ phase: 'exchanging', message: 'Redirecting to your local agent...' });
-      window.location.href = `${callbackUrl}?token=${encodeURIComponent(access_token)}`;
+      const redirectUrl = buildAgentRedirectUrl(callbackUrl, access_token);
+      if (!redirectUrl) {
+        setState({ phase: 'error', message: 'Invalid callback URL' });
+        return;
+      }
+      window.location.assign(redirectUrl);
     } catch (error) {
       console.error('Agent auth bridge error:', error);
       setState({ phase: 'error', message: 'Failed to complete authentication. Please try again.' });
