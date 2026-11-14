@@ -1,6 +1,7 @@
 """API endpoints for todo management."""
 
 import logging
+from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -9,11 +10,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user, reject_agent_token
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models.notebook import Notebook
-from app.models.todo import Todo
+from app.models.todo import REMOVED_BY_USER, Todo
 from app.models.user import User
 from app.processors.todo_extractor import process_notebook_todos
+from app.services.sync_queue import queue_stored_todos, queue_todo_sync
 
 logger = logging.getLogger(__name__)
 # Todos are dashboard-only; the Mac agent never calls them, so block agent tokens.
@@ -88,7 +90,7 @@ async def list_todos(
 
     Supports filtering by notebook and completion status.
     """
-    query = db.query(Todo).filter(Todo.user_id == current_user.id)
+    query = db.query(Todo).filter(Todo.user_id == current_user.id, Todo.removed_at.is_(None))
 
     if notebook_id is not None:
         query = query.filter(Todo.notebook_id == notebook_id)
@@ -131,7 +133,9 @@ async def get_todo(
     """Get a specific todo by ID."""
     todo = (
         db.query(Todo)
-        .filter(Todo.id == todo_id, Todo.user_id == current_user.id)
+        .filter(
+            Todo.id == todo_id, Todo.user_id == current_user.id, Todo.removed_at.is_(None)
+        )
         .first()
     )
 
@@ -166,7 +170,9 @@ async def update_todo(
     """Update a todo (e.g., mark as completed)."""
     todo = (
         db.query(Todo)
-        .filter(Todo.id == todo_id, Todo.user_id == current_user.id)
+        .filter(
+            Todo.id == todo_id, Todo.user_id == current_user.id, Todo.removed_at.is_(None)
+        )
         .first()
     )
 
@@ -185,6 +191,10 @@ async def update_todo(
 
     db.commit()
     db.refresh(todo)
+
+    # Send the change to the user's todo targets (queued; the worker syncs it).
+    notebook = db.query(Notebook).filter(Notebook.id == todo.notebook_id).first()
+    queue_todo_sync(db, todo, notebook.notebook_uuid if notebook else None)
 
     return TodoSchema(
         id=todo.id,
@@ -208,10 +218,17 @@ async def delete_todo(
     current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    """Delete a todo."""
+    """Delete a todo.
+
+    The todo is marked removed (it disappears from the list and is not
+    extracted again from its page). Its task in Todoist or Notion is left as
+    it is: nothing is deleted there.
+    """
     todo = (
         db.query(Todo)
-        .filter(Todo.id == todo_id, Todo.user_id == current_user.id)
+        .filter(
+            Todo.id == todo_id, Todo.user_id == current_user.id, Todo.removed_at.is_(None)
+        )
         .first()
     )
 
@@ -220,7 +237,8 @@ async def delete_todo(
             status_code=status.HTTP_404_NOT_FOUND, detail="Todo not found"
         )
 
-    db.delete(todo)
+    todo.removed_at = datetime.utcnow()
+    todo.removed_reason = REMOVED_BY_USER
     db.commit()
 
 
@@ -232,10 +250,12 @@ async def extract_todos(
     db: Annotated[Session, Depends(get_db)],
 ):
     """
-    Extract todos from notebooks.
+    Extract todos from notebooks (backfill).
 
-    This will process OCR text from notebooks and extract todo items.
-    The extraction runs in the background.
+    Todos are extracted automatically after every OCR; this re-runs the same
+    extraction for pages OCR'd before that, and then queues every stored todo
+    that a connected todo target does not have yet (once per target). Runs in
+    the background.
     """
     # Get notebooks to process
     if request.notebook_ids:
@@ -258,7 +278,7 @@ async def extract_todos(
     # Start extraction in background
     notebook_ids = [nb.id for nb in notebooks]
     background_tasks.add_task(
-        _run_todo_extraction, db, notebook_ids, current_user.id, request.force_reprocess
+        _run_todo_extraction, notebook_ids, current_user.id, request.force_reprocess
     )
 
     return TodoExtractionResponse(
@@ -269,10 +289,9 @@ async def extract_todos(
     )
 
 
-async def _run_todo_extraction(
-    db: Session, notebook_ids: list[int], user_id: int, force_reprocess: bool
-):
-    """Run todo extraction in background."""
+def _run_todo_extraction(notebook_ids: list[int], user_id: int, force_reprocess: bool):
+    """Run todo extraction in the background (in a worker thread, own session)."""
+    db = SessionLocal()
     try:
         total_todos = 0
         for notebook_id in notebook_ids:
@@ -280,17 +299,23 @@ async def _run_todo_extraction(
                 count = process_notebook_todos(db, notebook_id, user_id, force_reprocess)
                 total_todos += count
             except Exception as e:
+                db.rollback()
                 logger.error(
                     f"Error extracting todos from notebook {notebook_id}: {e}",
                     exc_info=True,
                 )
                 continue
 
+        queued = queue_stored_todos(db, user_id)
         logger.info(
-            f"Todo extraction completed: {len(notebook_ids)} notebooks, {total_todos} todos"
+            f"Todo extraction completed: {len(notebook_ids)} notebooks, "
+            f"{total_todos} todos, {queued} queued for todo targets"
         )
     except Exception as e:
+        db.rollback()
         logger.error(f"Error in background todo extraction: {e}", exc_info=True)
+    finally:
+        db.close()
 
 
 @router.get("/stats/summary", response_model=TodoStatsResponse)
@@ -299,11 +324,12 @@ async def get_todo_stats(
     db: Annotated[Session, Depends(get_db)],
 ):
     """Get todo statistics for the current user."""
-    total_todos = db.query(Todo).filter(Todo.user_id == current_user.id).count()
+    live = (Todo.user_id == current_user.id, Todo.removed_at.is_(None))
+    total_todos = db.query(Todo).filter(*live).count()
 
     completed_todos = (
         db.query(Todo)
-        .filter(Todo.user_id == current_user.id, Todo.completed == True)
+        .filter(*live, Todo.completed == True)  # noqa: E712
         .count()
     )
 
@@ -311,7 +337,7 @@ async def get_todo_stats(
 
     notebooks_with_todos = (
         db.query(func.count(func.distinct(Todo.notebook_id)))
-        .filter(Todo.user_id == current_user.id)
+        .filter(*live)
         .scalar()
     )
 

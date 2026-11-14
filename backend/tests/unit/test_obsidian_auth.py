@@ -33,8 +33,11 @@ class TestGetObsidianUser:
         mock_credentials = MagicMock()
         mock_credentials.credentials = raw_key
 
-        user = await get_obsidian_user(mock_credentials, mock_db)
+        mock_request = MagicMock()
+        user = await get_obsidian_user(mock_request, mock_credentials, mock_db)
         assert user == mock_user
+        # The resolved user keys this request's rate limits
+        assert mock_request.state.rate_limit_user_id == 1
 
     async def test_invalid_api_key_raises_401(self):
         mock_db = MagicMock()
@@ -44,7 +47,7 @@ class TestGetObsidianUser:
         mock_credentials.credentials = "invalid-key"
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_obsidian_user(mock_credentials, mock_db)
+            await get_obsidian_user(MagicMock(), mock_credentials, mock_db)
         assert exc_info.value.status_code == 401
 
     async def test_disabled_integration_raises_403(self):
@@ -61,5 +64,5 @@ class TestGetObsidianUser:
         mock_credentials.credentials = raw_key
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_obsidian_user(mock_credentials, mock_db)
+            await get_obsidian_user(MagicMock(), mock_credentials, mock_db)
         assert exc_info.value.status_code == 403

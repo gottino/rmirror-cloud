@@ -1,12 +1,7 @@
 """API endpoints for Todoist OAuth flow and project management."""
 
-import base64
-import hashlib
-import hmac
-import json
 import logging
 import time
-from datetime import datetime
 from typing import List, Optional
 
 import httpx
@@ -14,14 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth import signing
 from app.auth.clerk import get_clerk_active_user, reject_agent_token
-from app.config import get_settings
-from app.core.sync_engine import ContentFingerprint
 from app.database import get_db
-from app.models.notebook import Notebook
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
-from app.models.todo import Todo
 from app.models.user import User
+from app.services.sync_queue import queue_stored_todos
 from app.services.todoist_oauth import TodoistOAuthService
 
 logger = logging.getLogger(__name__)
@@ -33,30 +26,16 @@ router = APIRouter(
 _OAUTH_STATE_EXPIRY_SECONDS = 600  # 10 minutes
 
 
-def _create_oauth_state(user_id: int, secret_key: str) -> str:
+def _create_oauth_state(user_id: int) -> str:
     """Create an HMAC-signed OAuth state token encoding user_id and expiration."""
-    payload = json.dumps({"uid": user_id, "exp": int(time.time()) + _OAUTH_STATE_EXPIRY_SECONDS})
-    payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode()
-    signature = hmac.new(secret_key.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
-    return f"{payload_b64}.{signature}"
+    payload = {"uid": user_id, "exp": int(time.time()) + _OAUTH_STATE_EXPIRY_SECONDS}
+    return signing.sign(payload, signing.derive_key(signing.TODOIST_OAUTH_STATE_PURPOSE))
 
 
-def _validate_oauth_state(state: str, secret_key: str) -> Optional[int]:
+def _validate_oauth_state(state: str) -> Optional[int]:
     """Validate an HMAC-signed OAuth state token. Returns user_id if valid, None otherwise."""
-    try:
-        parts = state.split(".")
-        if len(parts) != 2:
-            return None
-        payload_b64, signature = parts
-        expected_sig = hmac.new(secret_key.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(signature, expected_sig):
-            return None
-        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-        if payload.get("exp", 0) < int(time.time()):
-            return None
-        return payload.get("uid")
-    except Exception:
-        return None
+    payload = signing.verify(state, [signing.derive_key(signing.TODOIST_OAUTH_STATE_PURPOSE)])
+    return payload.get("uid") if payload is not None else None
 
 
 # --- Pydantic Models ---
@@ -106,8 +85,7 @@ async def get_authorization_url(
     """Generate Todoist OAuth authorization URL."""
     try:
         oauth_service = TodoistOAuthService()
-        settings = get_settings()
-        state = _create_oauth_state(current_user.id, settings.secret_key)
+        state = _create_oauth_state(current_user.id)
         authorization_url = oauth_service.get_authorization_url(state)
         return OAuthUrlResponse(authorization_url=authorization_url, state=state)
     except Exception as e:
@@ -123,10 +101,8 @@ async def oauth_callback(
 ):
     """Handle OAuth callback from Todoist. Exchanges code for access token."""
     try:
-        settings = get_settings()
-
         # Validate state
-        state_user_id = _validate_oauth_state(request.state, settings.secret_key)
+        state_user_id = _validate_oauth_state(request.state)
         if state_user_id is None or state_user_id != current_user.id:
             raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
@@ -283,8 +259,8 @@ async def set_project(
     config.is_enabled = True
     db.commit()
 
-    # Queue existing todos for initial sync
-    queued = _queue_existing_todos(db, current_user.id)
+    # Queue stored todos Todoist does not have yet (per-todo sync records)
+    queued = queue_stored_todos(db, current_user.id, ["todoist"])
 
     logger.info(
         f"Todoist project set for user {current_user.id}: "
@@ -293,61 +269,6 @@ async def set_project(
     )
 
     return {"success": True, "message": f"Project '{request.project_name}' selected", "todos_queued": queued}
-
-
-def _queue_existing_todos(db: Session, user_id: int) -> int:
-    """Queue all existing todos for Todoist sync."""
-    todos = db.query(Todo).filter(Todo.user_id == user_id).all()
-    if not todos:
-        return 0
-
-    queued = 0
-    for todo in todos:
-        # Skip if already queued
-        existing = (
-            db.query(SyncQueue)
-            .filter(
-                SyncQueue.user_id == user_id,
-                SyncQueue.item_type == "todo",
-                SyncQueue.item_id == str(todo.id),
-                SyncQueue.target_name == "todoist",
-                SyncQueue.status.in_(["pending", "processing", "completed"]),
-            )
-            .first()
-        )
-        if existing:
-            continue
-
-        # Get notebook UUID
-        notebook = db.query(Notebook).filter(Notebook.id == todo.notebook_id).first()
-        notebook_uuid = notebook.notebook_uuid if notebook else None
-
-        content_hash = ContentFingerprint.for_todo({
-            "text": todo.text,
-            "notebook_uuid": notebook_uuid or "",
-            "page_number": todo.page_number or 0,
-        })
-
-        queue_item = SyncQueue(
-            user_id=user_id,
-            item_type="todo",
-            item_id=str(todo.id),
-            content_hash=content_hash,
-            notebook_uuid=notebook_uuid,
-            page_number=todo.page_number,
-            target_name="todoist",
-            status="pending",
-            priority=8,  # Lower priority than real-time syncs
-            scheduled_at=datetime.utcnow(),
-        )
-        db.add(queue_item)
-        queued += 1
-
-    if queued > 0:
-        db.commit()
-        logger.info(f"Queued {queued} existing todos for Todoist sync (user {user_id})")
-
-    return queued
 
 
 @router.get("/status", response_model=TodoistStatusResponse)
