@@ -120,6 +120,7 @@ td.where { color: var(--muted); white-space: nowrap; }
 <nav class="toc" aria-label="Sections">
   <ol>
     <li><a href="#verdict">Verdict</a></li>
+    <li><a href="#recheck">Re-check, 22 Nov</a></li>
     <li><a href="#journey">The journey today</a></li>
     <li><a href="#blockers">Conversion blockers</a></li>
     <li><a href="#friction">High-friction areas</a></li>
@@ -134,7 +135,7 @@ td.where { color: var(--muted); white-space: nowrap; }
 
 <main>
 <section id="verdict">
-  <span class="eyebrow">Design review · sign-up to first synced notebook to first integration · 10 Nov 2026</span>
+  <span class="eyebrow">Design review · sign-up to first synced notebook to first integration · 10 Nov 2026, re-checked 22 Nov 2026</span>
   <h1>rMirror onboarding review</h1>
   <p class="lede">The product has a calm, coherent look and a setup wizard that is better than most at this stage. But a first-time user has to cross about twelve steps and three different interfaces before seeing their handwriting as text, and the path to Notion is broken at its three most prominent entry points.</p>
   <div class="verdict">
@@ -142,6 +143,26 @@ td.where { color: var(--muted); white-space: nowrap; }
     <p><strong>Connecting Notion: currently broken for new users on the guided path.</strong> The wizard, the onboarding checklist and the day-3 email all link to the database picker, which fails unless the user has already authorised Notion somewhere else. Users who find the Integrations page on their own get through, but face three decisions and no confirmation that anything is syncing.</p>
     <p><strong>Biggest lever:</strong> fix the Notion link (hours of work), make the wizard wait for a real first notebook, and reduce the agent's first run to one screen with one button.</p>
   </div>
+</section>
+
+<section id="recheck">
+  <h2>Re-check after the security work, 22 Nov</h2>
+  <p>Between the first review and this one, 382 files changed on <code>main</code>. I repeated every check against the latest code. The security work changed how the product is built, not what a new user sees: <strong>all fourteen findings still apply</strong>, the landing page, sign-up, checklist and terms modal are untouched, and file references below are updated to the current code.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Change</th><th>Effect on onboarding</th><th></th></tr></thead>
+    <tbody>
+      <tr><td>Agent returns to its main window after sign-in with a "Signed in" notice</td><td>Removes the confusing "Return to Dashboard" result page on the success path</td><td><span class="pill p-ok">Better</span></td></tr>
+      <tr><td>"Initial Sync" button shows live counts while running</td><td>The user can see the first sync progressing inside the agent. The website still shows nothing (B2)</td><td><span class="pill p-ok">Better</span></td></tr>
+      <tr><td>All dashboard API calls go through one client that keeps the server's explanation</td><td>Makes the Notion fix (B1) simpler. The page still shows the fixed text "Failed to list databases", because a fixed message takes priority over the server's</td><td><span class="pill p-med">Neutral</span></td></tr>
+      <tr><td>Password login removed from the server</td><td>The agent's settings still show email and password fields that can no longer work (added to F4)</td><td><span class="pill p-high">New</span></td></tr>
+      <tr><td>New agent sync result messages</td><td>Wording such as "rate limited" and "Check the log" reaches end users (added to F4)</td><td><span class="pill p-med">New</span></td></tr>
+      <tr><td>Agent is now version 1.7.0</td><td>The dashboard's backup download link, used when the version lookup fails, still points at version 1.5.6 (<code>dashboard/app/dashboard/page.tsx:238</code>)</td><td><span class="pill p-med">New</span></td></tr>
+      <tr><td>New page state <code>pending_retry</code></td><td>Shown as "OCR Pending"; one more system-flavoured label alongside "Awaiting Quota" (F5)</td><td><span class="pill p-med">Neutral</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Two things could not be judged from code and are worth one manual pass on staging. The new browser security policy restricts which scripts, frames and connections the dashboard may use; I found nothing in it that should block sign-up, the wizard, or the Notion and Todoist redirects, but only a real browser session confirms that. The agent sign-in link is now validated more strictly on both sides, so an agent older than 1.7.0 should be tested against the current website.</p>
 </section>
 
 <section id="journey">
@@ -175,7 +196,7 @@ td.where { color: var(--muted); white-space: nowrap; }
   <article class="finding">
     <header><span class="fid">B1</span><h3>"Connect Notion" leads to an error for anyone who has not connected yet</h3><span class="pill p-crit">Broken</span></header>
     <p>The wizard's final screen, the onboarding checklist and the "Your notes + Notion = magic" email all link to <code>/integrations/notion/setup</code>. That page is the second half of the flow: it lists Notion databases. Without a prior authorisation the API answers "Notion integration not found. Please complete OAuth flow first", and the dashboard shows only "Failed to list databases". The one working entry point is the "Connect Notion" button on the Integrations page, which none of the guided paths point to.</p>
-    <p class="evidence">Evidence: <code>dashboard/app/dashboard/components/SetupWizard.tsx:341</code>, <code>dashboard/components/OnboardingChecklist.tsx:434</code>, <code>backend/app/utils/email.py:849</code>, <code>backend/app/api/notion_oauth.py:319</code>, <code>dashboard/lib/api.ts:314</code></p>
+    <p class="evidence">Evidence: <code>dashboard/app/dashboard/components/SetupWizard.tsx:337</code>, <code>dashboard/components/OnboardingChecklist.tsx:434</code>, <code>backend/app/templates/email/notion_nudge.html:30</code>, <code>backend/app/api/notion_oauth.py:304</code>, <code>dashboard/lib/api.ts:347</code>, <code>dashboard/lib/apiClient.ts:100–104</code></p>
     <div class="fix"><strong>Fix</strong>
       <ul>
         <li>Make the setup page check connection state first. If Notion is not authorised, show a single "Connect Notion" button that starts authorisation and returns to the same page.</li>
@@ -188,7 +209,7 @@ td.where { color: var(--muted); white-space: nowrap; }
   <article class="finding">
     <header><span class="fid">B2</span><h3>The wizard celebrates before anything has synced</h3><span class="pill p-crit">Blocker</span></header>
     <p>Step 3 shows a screenshot of the agent and a "Continue" button that is always enabled. Step 4 says "You're All Set!" and offers "Go to Dashboard". That button only reloads the notebook list; while the list is empty the dashboard renders the wizard again, so the button appears to do nothing. A user who clicked through without syncing is stuck on a success screen with no notebooks and no explanation. The backend already records <code>first_notebook_synced_at</code>, but the wizard never reads it.</p>
-    <p class="evidence">Evidence: <code>SetupWizard.tsx:298</code>, <code>SetupWizard.tsx:324–337</code>, <code>dashboard/app/dashboard/page.tsx:932–943</code></p>
+    <p class="evidence">Evidence: <code>SetupWizard.tsx:298</code>, <code>SetupWizard.tsx:320–333</code>, <code>dashboard/app/dashboard/page.tsx:898–909</code></p>
     <div class="fix"><strong>Fix</strong>
       <ul>
         <li>Turn step 3 into a live waiting state, the same pattern step 2 already uses: "Waiting for your first notebook…", then "Meeting Notes · 4 of 12 pages uploaded".</li>
@@ -223,7 +244,7 @@ td.where { color: var(--muted); white-space: nowrap; }
   <article class="finding">
     <header><span class="fid">B4</span><h3>Requirements are hidden until after sign-up</h3><span class="pill p-crit">Blocker</span></header>
     <p>rMirror needs a Mac and the reMarkable desktop app, already installed and synced. The landing page mentions "your Mac" once in a step description and confirms macOS-only in the fourth FAQ answer. The desktop-app requirement appears nowhere on the website; a user discovers it as a "reMarkable Folder Not Found" error inside the agent. Windows users, and anyone who signs up on a phone, create an account and then meet a single "Download for macOS" button labelled "Choose your platform".</p>
-    <p class="evidence">Evidence: <code>dashboard/app/page.tsx:753–754</code> (FAQ), <code>SetupWizard.tsx:136–159</code>, <code>agent/app/web/templates/index.html</code> (folder-not-found panel)</p>
+    <p class="evidence">Evidence: <code>dashboard/app/page.tsx:753–754</code> (FAQ), <code>SetupWizard.tsx:132–155</code>, <code>agent/app/web/templates/index.html</code> (folder-not-found panel)</p>
     <div class="fix"><strong>Fix</strong>
       <ul>
         <li>Put one line under the main button: "Needs a Mac with the reMarkable desktop app. Windows is on the way."</li>
@@ -250,7 +271,7 @@ td.where { color: var(--muted); white-space: nowrap; }
     </table>
     </div>
     <p>The wizard figure does the most damage: it tells a beta user to limit their first sync to 5–10 pages when they have 200, which makes the first impression smaller than it needs to be.</p>
-    <p class="evidence">Evidence: <code>dashboard/app/page.tsx:196</code>, <code>:492</code>, <code>:673</code>; <code>SetupWizard.tsx:291</code>; <code>dashboard/lib/constants.ts:17–27</code></p>
+    <p class="evidence">Evidence: <code>dashboard/app/page.tsx:196</code>, <code>:492</code>, <code>:673</code>; <code>SetupWizard.tsx:287</code>; <code>dashboard/lib/constants.ts:17–27</code></p>
     <div class="fix"><strong>Fix</strong>
       <p>Read the allowance from the quota API everywhere it is shown, wizard included. Decide what Pro is and state it once in <code>constants.ts</code>, then have the landing page use the same constants. Remove the past launch date and any feature that is not live.</p>
     </div>
@@ -285,7 +306,7 @@ td.where { color: var(--muted); white-space: nowrap; }
   <article class="finding">
     <header><span class="fid">F2</span><h3>Consent is asked twice</h3><span class="pill p-med">Medium</span></header>
     <p>The sign-up page states that creating an account means agreeing to the terms. The first thing the new user then sees is a blocking modal asking them to tick a box and agree again, before the welcome screen. It is the first interaction with the product and it is legal paperwork.</p>
-    <p class="evidence">Evidence: <code>dashboard/app/sign-up/[[...sign-up]]/page.tsx:30</code>, <code>dashboard/app/dashboard/page.tsx:1269</code>, <code>dashboard/components/TermsAcceptanceModal.tsx</code></p>
+    <p class="evidence">Evidence: <code>dashboard/app/sign-up/[[...sign-up]]/page.tsx:30</code>, <code>dashboard/app/dashboard/page.tsx:1230</code>, <code>dashboard/components/TermsAcceptanceModal.tsx</code></p>
     <div class="fix"><strong>Fix</strong><p>Collect consent once, as a required checkbox in the sign-up form (Clerk supports a legal-consent field), and record it from the sign-up webhook. Keep the modal only for existing users when the terms change.</p></div>
   </article>
 
@@ -298,7 +319,7 @@ td.where { color: var(--muted); white-space: nowrap; }
       <li>The Gatekeeper reassurance is in small type inside step 3 of the list. It is the one moment of fear in the install; give it a small illustration of the actual dialog.</li>
       <li>The project notes say the agent needs Full Disk Access to read the reMarkable folder. Neither the wizard nor the agent mentions it. Test on a clean Mac; if macOS prompts or silently blocks, this needs its own guided step.</li>
     </ul>
-    <p class="evidence">Evidence: <code>SetupWizard.tsx:79–88</code>, <code>:97–116</code>, <code>:198–230</code></p>
+    <p class="evidence">Evidence: <code>SetupWizard.tsx:75–84</code>, <code>:93–112</code>, <code>:194–226</code></p>
   </article>
 
   <article class="finding">
@@ -307,9 +328,11 @@ td.where { color: var(--muted); white-space: nowrap; }
       <li>The menu offers "Open Web UI" and "Settings", which open the same window. Use one item: "Open rMirror".</li>
       <li>Settings shows Environment (Production, Staging, Custom), API URL, and an email and password form next to the browser sign-in. Move these to a hidden developer section.</li>
       <li>The sign-in bridge narrates "Exchanging for agent token…". Say "Connecting your Mac…".</li>
-      <li>After sign-in the result page offers "Close Window" and "Return to Dashboard", where "Dashboard" means the agent, not the website the user just came from. Go straight into the first-run screen from B3.</li>
+      <li>Settings still offers an email and password sign-in, but the server no longer accepts passwords (the login endpoint was removed in the security work). The fields can only fail. Remove them.</li>
+      <li>New sync messages added since the first review use system terms: "3 rate limited", "skipped (page limit)", "Check the log and try again". Say what happened and what to do: "3 pages will retry in a minute".</li>
+      <li>After sign-in the agent now returns to its main window with a "Signed in" notice, which is better than the old result page. It should go one step further and open the first-run screen from B3.</li>
     </ul>
-    <p class="evidence">Evidence: <code>agent/app/tray/menu_bar.py:39–41</code>, <code>agent/app/web/templates/index.html</code> (Account Settings), <code>dashboard/app/agent/page.tsx:51</code>, <code>agent/app/web/templates/auth_result.html:76–83</code></p>
+    <p class="evidence">Evidence: <code>agent/app/tray/menu_bar.py:49–51</code>, <code>agent/app/web/templates/index.html:1505–1547</code> (Account Settings), <code>dashboard/app/agent/page.tsx</code> (exchange messages), <code>agent/app/sync/cloud_sync.py:139–167</code></p>
   </article>
 
   <article class="finding">
@@ -321,7 +344,7 @@ td.where { color: var(--muted); white-space: nowrap; }
       <li>Page status is shown raw: "Awaiting Quota", "pending", "OCR Pending - Quota Exhausted". Use plain states: "Transcribing…", "Waiting for next month's pages (resets 1 Dec)".</li>
       <li>A notebook page offers Export and Delete only. There is no sign of whether it reached Notion and no way to send it there, so the integration's value is invisible where the user spends their time.</li>
     </ul>
-    <p class="evidence">Evidence: <code>dashboard/components/OnboardingChecklist.tsx:415–423</code>, <code>dashboard/components/Sidebar.tsx:206–211</code>, <code>dashboard/app/notebooks/[id]/page.tsx:201</code>, <code>:222</code></p>
+    <p class="evidence">Evidence: <code>dashboard/components/OnboardingChecklist.tsx:415–423</code>, <code>dashboard/components/Sidebar.tsx:184–189</code>, <code>dashboard/app/dashboard/page.tsx:692–697</code>, <code>dashboard/app/notebooks/[id]/page.tsx:197</code>, <code>:218</code></p>
   </article>
 </section>
 
@@ -332,14 +355,14 @@ td.where { color: var(--muted); white-space: nowrap; }
   <article class="finding">
     <header><span class="fid">I1</span><h3>Three decisions where one would do</h3><span class="pill p-high">High</span></header>
     <p>After authorising in Notion the user waits on a two-second "Successfully Connected!" screen, then must choose between "Select Existing Database" and "Create New Database", and if creating, name it and pick an optional parent page. Most first-time users have no existing database that fits and do not know what a parent page is for.</p>
-    <p class="evidence">Evidence: <code>dashboard/app/integrations/notion/callback/page.tsx:46–49</code>, <code>dashboard/app/integrations/notion/setup/page.tsx:189–321</code></p>
+    <p class="evidence">Evidence: <code>dashboard/app/integrations/notion/callback/page.tsx:41–44</code>, <code>dashboard/app/integrations/notion/setup/page.tsx</code> (choose, select and create steps)</p>
     <div class="fix"><strong>Fix</strong><p>After authorisation, create "rMirror Notebooks" automatically and start syncing. Show one confirmation screen with the result and a quiet link, "Use a database I already have", for the few who need it.</p></div>
   </article>
 
   <article class="finding">
     <header><span class="fid">I2</span><h3>No confirmation and no way to see the result</h3><span class="pill p-high">High</span></header>
     <p>Choosing a database redirects to <code>/integrations?success=true</code>, but the Integrations page does not read that parameter, so nothing acknowledges the setup. The backend starts an initial sync of existing notebooks in the background and exposes its status, yet the screen shows only "Status: Connected". There is no link to the Notion database. The user has to open Notion and search to find out whether it worked.</p>
-    <p class="evidence">Evidence: <code>notion/setup/page.tsx:93</code>, <code>:121</code>; <code>dashboard/app/integrations/page.tsx:332–339</code>; <code>backend/app/api/notion_oauth.py</code> (initial sync status endpoint)</p>
+    <p class="evidence">Evidence: <code>notion/setup/page.tsx</code> (redirects to <code>/integrations?success=true</code>); <code>dashboard/app/integrations/page.tsx:324–331</code>; <code>backend/app/api/notion_oauth.py</code> (initial sync status endpoint)</p>
     <div class="fix"><strong>Fix</strong><p>End the flow on a result: "Sending 3 notebooks to Notion… 14 of 23 pages" with a prominent "Open in Notion" button. Keep that link permanently on the Notion row.</p></div>
   </article>
 
@@ -353,7 +376,7 @@ td.where { color: var(--muted); white-space: nowrap; }
       <li>Disconnecting uses the browser's native confirm box, which looks unlike the rest of the product. Use the modal style already built for notebook deletion.</li>
       <li>Integrations sits at the bottom of the sidebar under a spacer. For a product whose promise is "your notes in your tools", it deserves the second position.</li>
     </ul>
-    <p class="evidence">Evidence: <code>dashboard/app/integrations/page.tsx:119</code>, <code>:322–634</code>; <code>dashboard/components/Sidebar.tsx:139–152</code></p>
+    <p class="evidence">Evidence: <code>dashboard/app/integrations/page.tsx:112</code>, <code>:167</code>, <code>:184</code>, <code>:221</code>; <code>dashboard/components/Sidebar.tsx</code> (bottom navigation)</p>
   </article>
 </section>
 
@@ -492,7 +515,7 @@ td.where { color: var(--muted); white-space: nowrap; }
 
 <section id="method">
   <h2>Method and limits</h2>
-  <p>This is an expert review of the code and shipped assets on the <code>main</code> branch: the landing page, sign-up, setup wizard, dashboard, notebook view, integrations and Notion setup, the Mac agent's menu and local window, the sign-in bridge, and the onboarding emails. Screens were assessed from their source and from the screenshots in <code>dashboard/public</code>.</p>
+  <p>This is an expert review of the code and shipped assets on the <code>main</code> branch (first pass at commit <code>17660af</code>, re-checked at <code>d75b434</code>): the landing page, sign-up, setup wizard, dashboard, notebook view, integrations and Notion setup, the Mac agent's menu and local window, the sign-in bridge, and the onboarding emails. Screens were assessed from their source and from the screenshots in <code>dashboard/public</code>.</p>
   <ul>
     <li>I did not run the live product or install the agent on a Mac, so timing, macOS permission prompts and the real Notion authorisation screen were not observed. The Full Disk Access point in F3 needs a clean-machine test.</li>
     <li>No analytics data was available. Severity ratings are judgement based on the flow, not measured drop-off. The funnel above will show which step loses the most people.</li>
