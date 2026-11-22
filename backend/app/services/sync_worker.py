@@ -704,6 +704,18 @@ class SyncWorker:
             db.commit()
             return
 
+        # Credentials this server cannot decrypt (e.g. encrypted under another
+        # environment's key) will not become readable by retrying: fail the
+        # item for good. The user has to reconnect the integration.
+        if config.get_config_or_none() is None:
+            queue_item.status = 'failed'
+            queue_item.error_message = (
+                f"Stored {queue_item.target_name} credentials cannot be decrypted; "
+                f"reconnect the integration"
+            )
+            db.commit()
+            return
+
         # The target registry says which item types each target accepts
         if not supports(queue_item.target_name, queue_item.item_type):
             logger.warning(

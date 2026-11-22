@@ -19,6 +19,9 @@ class OcrStatus(str, Enum):
     FAILED = "failed"
     SKIPPED = "skipped"
     PENDING_QUOTA = "pending_quota"  # Page uploaded, PDF generated, OCR pending due to quota
+    # Page uploaded, PDF stored, OCR call failed (provider error, timeout,
+    # network); the sync worker retries it with backoff, see ``ocr_attempts``.
+    PENDING_RETRY = "pending_retry"
 
 
 class Page(Base):
@@ -57,6 +60,11 @@ class Page(Base):
     )
     ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     ocr_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Failed OCR calls for the current content (PENDING_RETRY backoff and
+    # give-up bound); reset to 0 whenever new content is OCR'd or queued.
+    ocr_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
