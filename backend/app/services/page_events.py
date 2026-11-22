@@ -3,7 +3,7 @@
 Both the upload endpoint (``app/api/processing.py``) and the retroactive OCR of
 ``PENDING_QUOTA`` pages (``app/jobs/process_pending_pages.py``) call
 ``on_ocr_completed`` so a page reaches Obsidian and the push integrations
-(Notion, ...) the same way however it was OCR'd.
+(Notion, ...) and has its todos extracted the same way however it was OCR'd.
 """
 
 import logging
@@ -15,6 +15,7 @@ from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
 from app.models.sync_record import IntegrationConfig
+from app.processors.todo_extractor import extract_todos_after_ocr
 from app.services.fingerprinting import fingerprint_page
 from app.services.obsidian_service import compute_notebook_content_hash
 from app.services.sync_queue import queue_sync
@@ -137,8 +138,13 @@ def on_ocr_completed(db: Session, page: Page, notebook: Notebook) -> None:
     consume OCR quota, and the page that used the last unit must sync too.
     (Pages that were not OCR'd because the quota ran out have no text and are
     never queued here.)
+
+    A page with text also has its todos extracted into the ``todos`` table
+    and queued for the user's todo targets (Todoist, Notion todos), if any.
+    That step makes no external calls and never raises.
     """
     update_obsidian_content_hash(db, notebook)
 
     if page.ocr_status == OcrStatus.COMPLETED and page.ocr_text:
         enqueue_integration_syncs(db, page, notebook)
+        extract_todos_after_ocr(db, page, notebook)

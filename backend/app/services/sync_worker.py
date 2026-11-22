@@ -25,6 +25,7 @@ from app.models.notebook import Notebook
 from app.models.page import Page
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord, SyncStatus
 from app.models.todo import Todo
+from app.services.fingerprinting import fingerprint_todo
 
 logger = logging.getLogger(__name__)
 
@@ -1128,7 +1129,12 @@ class SyncWorker:
         config: IntegrationConfig,
         _item_start: float = 0.0,
     ):
-        """Process a todo sync to Todoist or Notion Todos."""
+        """Process a todo sync to Todoist or Notion Todos.
+
+        The todo is read now, so the target gets its current text and completed
+        state; the sync record keeps the hash of what was sent. A removed todo
+        is not sent (its remote task is left as it is).
+        """
         # Get the todo
         todo = db.query(Todo).filter(Todo.id == int(queue_item.item_id)).first()
         if not todo:
@@ -1140,32 +1146,16 @@ class SyncWorker:
 
         # Get notebook info
         notebook = db.query(Notebook).filter(Notebook.id == todo.notebook_id).first()
+        notebook_uuid = notebook.notebook_uuid if notebook else queue_item.notebook_uuid
 
-        # Get decrypted config
-        config_dict = config.get_config()
+        if todo.removed_at is not None:
+            logger.info(f"Todo {todo.id} was removed; not syncing it to {queue_item.target_name}")
+            queue_item.status = 'completed'
+            queue_item.completed_at = datetime.utcnow()
+            db.commit()
+            return
 
-        target = create_target(queue_item.target_name, config_dict)
-
-        # Build sync item
-        metadata = json.loads(queue_item.metadata_json) if queue_item.metadata_json else {}
-        sync_item = SyncItem(
-            item_type=SyncItemType.TODO,
-            item_id=str(todo.id),
-            content_hash=queue_item.content_hash,
-            data={
-                'text': todo.text,
-                'completed': todo.completed,
-                'notebook_uuid': queue_item.notebook_uuid,
-                'notebook_name': notebook.visible_name if notebook else 'Unknown',
-                'page_number': todo.page_number,
-                'confidence': todo.confidence,
-                'date_extracted': todo.date_extracted.isoformat() if todo.date_extracted else None,
-                **metadata,
-            },
-            source_table='todos',
-            created_at=todo.created_at,
-            updated_at=todo.updated_at,
-        )
+        current_hash = fingerprint_todo(todo.text, todo.completed, notebook_uuid, todo.page_number)
 
         # Check for existing sync record (update vs create)
         existing_record = (
@@ -1180,12 +1170,45 @@ class SyncWorker:
         )
 
         # If exists and content unchanged, skip
-        if existing_record and existing_record.content_hash == queue_item.content_hash:
+        if existing_record and existing_record.content_hash == current_hash:
             logger.info(f"Todo {todo.id} unchanged for {queue_item.target_name}, skipping")
             queue_item.status = 'completed'
             queue_item.completed_at = datetime.utcnow()
             db.commit()
             return
+
+        # Get decrypted config
+        config_dict = config.get_config()
+
+        target = create_target(queue_item.target_name, config_dict)
+
+        # Build sync item
+        metadata = json.loads(queue_item.metadata_json) if queue_item.metadata_json else {}
+        metadata.pop(RATE_LIMIT_DEFERRALS_KEY, None)
+        data = {
+            **metadata,
+            'text': todo.text,
+            'completed': todo.completed,
+            'notebook_uuid': notebook_uuid,
+            'notebook_name': notebook.visible_name if notebook else 'Unknown',
+            'page_number': todo.page_number,
+            'confidence': todo.confidence,
+            'date_extracted': todo.date_extracted.isoformat() if todo.date_extracted else None,
+        }
+        if existing_record:
+            # Completed state the target was last given (unknown: created open).
+            data['previous_completed'] = bool(
+                _load_json(existing_record.metadata_json).get('completed', False)
+            )
+        sync_item = SyncItem(
+            item_type=SyncItemType.TODO,
+            item_id=str(todo.id),
+            content_hash=current_hash,
+            data=data,
+            source_table='todos',
+            created_at=todo.created_at,
+            updated_at=todo.updated_at,
+        )
 
         # Sync
         if existing_record:
@@ -1193,25 +1216,51 @@ class SyncWorker:
         else:
             result = await target.sync_item(sync_item)
 
+        if not result.success and result.target_id and not existing_record:
+            # Created remotely but not finished (e.g. created, then closing the
+            # task failed): record the task as open so the retry updates it
+            # instead of creating a second one.
+            db.add(
+                SyncRecord(
+                    user_id=queue_item.user_id,
+                    target_name=queue_item.target_name,
+                    item_type='todo',
+                    item_id=str(todo.id),
+                    content_hash=fingerprint_todo(
+                        todo.text, False, notebook_uuid, todo.page_number
+                    ),
+                    external_id=result.target_id,
+                    status='success',
+                    synced_at=datetime.utcnow(),
+                    notebook_uuid=notebook_uuid,
+                    page_number=todo.page_number,
+                    metadata_json=json.dumps({'completed': False}),
+                )
+            )
+
         if result.success:
+            record_meta = json.dumps({'completed': bool(todo.completed)})
             if existing_record:
-                existing_record.external_id = result.target_id
-                existing_record.content_hash = queue_item.content_hash
+                existing_record.external_id = result.target_id or existing_record.external_id
+                existing_record.content_hash = current_hash
                 existing_record.status = 'success'
                 existing_record.synced_at = datetime.utcnow()
                 existing_record.updated_at = datetime.utcnow()
+                existing_record.page_number = todo.page_number
+                existing_record.metadata_json = record_meta
             else:
                 sync_record = SyncRecord(
                     user_id=queue_item.user_id,
                     target_name=queue_item.target_name,
                     item_type='todo',
                     item_id=str(todo.id),
-                    content_hash=queue_item.content_hash,
+                    content_hash=current_hash,
                     external_id=result.target_id,
                     status='success',
                     synced_at=datetime.utcnow(),
-                    notebook_uuid=queue_item.notebook_uuid,
+                    notebook_uuid=notebook_uuid,
                     page_number=todo.page_number,
+                    metadata_json=record_meta,
                 )
                 db.add(sync_record)
 

@@ -14,6 +14,7 @@ from app.core.sync_engine import ContentFingerprint
 from app.integrations.registry import NOTEBOOK_METADATA, PAGE_TEXT, TODO, targets_supporting
 from app.models.notebook import Notebook
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
+from app.models.todo import Todo
 from app.services.fingerprinting import fingerprint_page, fingerprint_todo
 
 
@@ -155,6 +156,45 @@ def queue_sync(
         )
         if existing_sync and existing_sync.content_hash == content_hash:
             return None
+    elif item_type == TODO:
+        # One pending row per todo and target; the worker reads the todo when
+        # it runs, so a pending row just takes the newest hash.
+        existing_queue = (
+            db.query(SyncQueue)
+            .filter(
+                SyncQueue.user_id == user_id,
+                SyncQueue.target_name == target_name,
+                SyncQueue.item_type == TODO,
+                SyncQueue.item_id == item_id,
+                SyncQueue.status == 'pending',
+            )
+            .first()
+        )
+        if existing_queue:
+            if existing_queue.content_hash != content_hash:
+                existing_queue.content_hash = content_hash
+                existing_queue.updated_at = datetime.utcnow()
+                if existing_queue.retry_count:
+                    existing_queue.retry_count = 0
+                    existing_queue.scheduled_at = datetime.utcnow()
+                db.commit()
+            return existing_queue
+
+        # The sync record of this todo for this target says what the target
+        # has; completed queue rows are pruned and are not consulted.
+        existing_sync = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == user_id,
+                SyncRecord.target_name == target_name,
+                SyncRecord.item_type == TODO,
+                SyncRecord.item_id == item_id,
+                SyncRecord.status == 'success',
+            )
+            .first()
+        )
+        if existing_sync and existing_sync.content_hash == content_hash:
+            return None
     else:
         # For other item types, use content_hash for deduplication
         existing_queue = (
@@ -283,65 +323,96 @@ def queue_page_sync(
     return queued_entries
 
 
-def queue_todo_sync(
-    db: Session,
-    user_id: int,
-    todo_id: int,
-    todo_text: str,
-    notebook_uuid: str,
-    page_number: Optional[int] = None,
-    page_uuid: Optional[str] = None,
-) -> list[SyncQueue]:
-    """
-    Queue todo sync to all enabled todo-specific integrations.
-
-    Only queues to integrations that support todos (notion-todos, todoist).
-    Does NOT queue to general notebook integrations (notion).
-
-    Args:
-        db: Database session
-        user_id: User ID
-        todo_id: Todo database ID
-        todo_text: Todo text content
-        notebook_uuid: Notebook UUID
-        page_number: Optional page number
-        page_uuid: Optional reMarkable page UUID
-
-    Returns:
-        List of created SyncQueue entries
-    """
-    # Generate content hash and fuzzy signature
-    content_hash, _ = fingerprint_todo(todo_text, notebook_uuid, page_number)
-
-    # Get all enabled integrations that accept todos (target registry)
-    integrations = (
-        db.query(IntegrationConfig)
+def enabled_todo_targets(db: Session, user_id: int) -> list[str]:
+    """Names of the user's enabled integrations that accept todos (target registry)."""
+    rows = (
+        db.query(IntegrationConfig.target_name)
         .filter(
             IntegrationConfig.user_id == user_id,
-            IntegrationConfig.is_enabled == True,
+            IntegrationConfig.is_enabled == True,  # noqa: E712
             IntegrationConfig.target_name.in_(targets_supporting(TODO)),
         )
         .all()
     )
+    return [row.target_name for row in rows]
+
+
+def queue_todo_sync(
+    db: Session,
+    todo: Todo,
+    notebook_uuid: Optional[str],
+    target_names: Optional[list[str]] = None,
+    priority: int = 2,
+) -> list[SyncQueue]:
+    """Queue one todo for every enabled integration that accepts todos.
+
+    Only todo targets (notion-todos, todoist) get rows, never notebook targets.
+    A removed todo is not queued. Nothing is queued for a target whose sync
+    record already has this todo's text and completed state (see queue_sync).
+    Makes no external calls.
+
+    Args:
+        target_names: the user's enabled todo targets when the caller already
+            has them (``enabled_todo_targets``); looked up when None.
+
+    Returns:
+        The pending queue rows, new or reused.
+    """
+    if todo.removed_at is not None:
+        return []
+    if target_names is None:
+        target_names = enabled_todo_targets(db, todo.user_id)
+
+    content_hash = fingerprint_todo(todo.text, todo.completed, notebook_uuid, todo.page_number)
 
     queued_entries = []
-    for integration in integrations:
+    for target_name in target_names:
         queue_entry = queue_sync(
             db=db,
-            user_id=user_id,
-            item_type='todo',
-            item_id=str(todo_id),
+            user_id=todo.user_id,
+            item_type=TODO,
+            item_id=str(todo.id),
             content_hash=content_hash,
-            target_name=integration.target_name,
-            page_uuid=page_uuid,
+            target_name=target_name,
             notebook_uuid=notebook_uuid,
-            page_number=page_number,
-            priority=2,  # Higher priority for todos
+            page_number=todo.page_number,
+            priority=priority,
         )
         if queue_entry is not None:
             queued_entries.append(queue_entry)
 
     return queued_entries
+
+
+def queue_stored_todos(
+    db: Session, user_id: int, target_names: Optional[list[str]] = None
+) -> int:
+    """Queue the user's stored, not removed todos that a todo target does not have yet.
+
+    Used when a todo target is connected (Todoist project selected, Notion
+    todos database chosen) and by the ``POST /todos/extract`` backfill.
+    De-duplicated per todo and target against ``sync_records`` (queue_sync),
+    so running it again queues nothing new. Makes no external calls.
+
+    Returns the number of pending queue rows (new or reused).
+    """
+    if target_names is None:
+        target_names = enabled_todo_targets(db, user_id)
+    if not target_names:
+        return 0
+
+    rows = (
+        db.query(Todo, Notebook.notebook_uuid)
+        .join(Notebook, Todo.notebook_id == Notebook.id)
+        .filter(Todo.user_id == user_id, Todo.removed_at.is_(None))
+        .order_by(Todo.id)
+        .all()
+    )
+    queued = 0
+    for todo, notebook_uuid in rows:
+        # Backfill runs behind fresh todos.
+        queued += len(queue_todo_sync(db, todo, notebook_uuid, target_names, priority=8))
+    return queued
 
 
 def _page_count_from_content(content_json: Optional[str]) -> int:

@@ -223,27 +223,3 @@ class ContentFingerprint:
 
         content_str = "|".join(content_parts)
         return hashlib.sha256(content_str.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def for_todo(todo_data: Dict[str, Any]) -> str:
-        """
-        Generate content fingerprint for a todo item.
-
-        Args:
-            todo_data: Todo content dictionary
-
-        Returns:
-            SHA-256 hash of the normalized content
-        """
-        text = todo_data.get("text", "")
-        notebook_uuid = todo_data.get("notebook_uuid", "")
-        page_number = todo_data.get("page_number", 0)
-
-        content_parts = [
-            f"text:{text}",
-            f"notebook:{notebook_uuid}",
-            f"page:{page_number}",
-        ]
-
-        content_str = "|".join(content_parts)
-        return hashlib.sha256(content_str.encode("utf-8")).hexdigest()
