@@ -90,13 +90,13 @@ async def clerk_webhook(
     global _webhook_secret_warned
 
     if not settings.clerk_webhook_secret:
-        # In production, webhook secret is required
-        if not settings.debug:
+        # Webhook secret is required unless explicitly allowed for local dev
+        if not settings.allow_unsigned_webhooks:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Webhook secret not configured",
             )
-        # In development, warn once and allow
+        # ALLOW_UNSIGNED_WEBHOOKS (SQLite only): warn once and allow
         if not _webhook_secret_warned:
             logger.warning(
                 "CLERK_WEBHOOK_SECRET not configured - webhook signature verification disabled. "

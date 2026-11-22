@@ -3,7 +3,6 @@
 Tests security header injection and rate limit key extraction.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
@@ -11,16 +10,16 @@ from fastapi.testclient import TestClient
 
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
-
 # ---------- Security Headers Tests ----------
 
 class TestSecurityHeaders:
     """Tests for SecurityHeadersMiddleware."""
 
-    def _get_response(self, debug: bool):
-        """Create a test app, make a request with mocked settings, return response."""
-        mock_settings = MagicMock()
-        mock_settings.debug = debug
+    def _get_response(self, debug: bool = False):
+        """Create a test app, make a request with DEBUG set as given, return response."""
+        from app.config import get_settings
+
+        settings = get_settings().model_copy(update={"debug": debug})
 
         app = FastAPI()
 
@@ -30,8 +29,13 @@ class TestSecurityHeaders:
 
         app.add_middleware(SecurityHeadersMiddleware)
 
-        # Patch must be active during the request (dispatch reads settings)
-        with patch("app.middleware.security_headers.get_settings", return_value=mock_settings):
+        # create=True: the middleware no longer reads settings, but if it ever
+        # does again, it must see these ones.
+        with patch(
+            "app.middleware.security_headers.get_settings",
+            return_value=settings,
+            create=True,
+        ):
             client = TestClient(app)
             return client.get("/test")
 
@@ -51,10 +55,10 @@ class TestSecurityHeaders:
         assert "Strict-Transport-Security" in response.headers
         assert "max-age=31536000" in response.headers["Strict-Transport-Security"]
 
-    def test_hsts_absent_in_debug(self):
-        """HSTS header should be absent when debug=True."""
+    def test_hsts_present_in_debug(self):
+        """DEBUG only changes log verbosity: HSTS is still sent."""
         response = self._get_response(debug=True)
-        assert "Strict-Transport-Security" not in response.headers
+        assert "Strict-Transport-Security" in response.headers
 
 
 # ---------- Rate Limit Tests ----------
