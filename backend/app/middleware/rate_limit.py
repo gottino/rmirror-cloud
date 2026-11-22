@@ -15,7 +15,8 @@ Where limits are checked
       route's dependencies. Authenticated routes are therefore keyed per user.
       Requests that fail authentication never reach the decorator.
     * Every other route gets ``settings.rate_limit_default`` from
-      ``SlowAPIASGIMiddleware``. The middleware runs before authentication, so
+      ``RateLimitMiddleware`` (slowapi's ASGI middleware with a fix for
+      streamed responses). The middleware runs before authentication, so
       the default limit is always keyed by client IP.
 
 Storage
@@ -30,8 +31,9 @@ import logging
 from fastapi import FastAPI, Request
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIASGIMiddleware
+from slowapi.middleware import SlowAPIASGIMiddleware, _ASGIMiddlewareResponder
 from slowapi.util import get_remote_address
+from starlette.types import Message, Receive, Scope, Send
 
 from app.config import get_settings
 
@@ -86,8 +88,37 @@ limiter = Limiter(
 )
 
 
+class _StartOnceResponder(_ASGIMiddlewareResponder):
+    """slowapi's responder, sending ``http.response.start`` only once.
+
+    slowapi 0.1.9 holds back the start message and re-sends it before every
+    body message. A response sent in more than one body message (any
+    ``StreamingResponse``) then fails on its second chunk, and the client
+    receives only the first one: page PDFs arrived as 9 bytes.
+    """
+
+    _started = False
+
+    async def send_wrapper(self, message: Message) -> None:
+        if message["type"] == "http.response.body" and self._started:
+            await self.send(message)
+            return
+        if message["type"] == "http.response.body":
+            self._started = True
+        await super().send_wrapper(message)
+
+
+class RateLimitMiddleware(SlowAPIASGIMiddleware):
+    """``SlowAPIASGIMiddleware`` that passes multi-chunk responses through intact."""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        await _StartOnceResponder(self.app)(scope, receive, send)
+
+
 def install_rate_limiting(app: FastAPI) -> None:
     """Attach the shared limiter, its 429 handler and the default-limit middleware."""
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    app.add_middleware(SlowAPIASGIMiddleware)
+    app.add_middleware(RateLimitMiddleware)
