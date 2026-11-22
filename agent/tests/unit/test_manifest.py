@@ -97,6 +97,20 @@ class TestUploadManifest:
         assert manifest.record_baseline(g, fingerprint_file(g)) is True
         assert manifest.get(g).is_baseline
 
+    def test_forget_baseline_keeps_uploaded_entries(self, tmp_path):
+        manifest = make_manifest(tmp_path)
+        uploaded = tmp_path / "uploaded.rm"
+        uploaded.write_bytes(b"u")
+        manifest.record_upload(uploaded, fingerprint_file(uploaded))
+        baseline = tmp_path / "baseline.rm"
+        baseline.write_bytes(b"b")
+        manifest.record_baseline(baseline, fingerprint_file(baseline))
+
+        assert manifest.forget_baseline(uploaded) is False
+        assert manifest.forget_baseline(baseline) is True
+        assert manifest.get(uploaded) is not None
+        assert manifest.changed_fingerprint(baseline) is not None
+
     def test_concurrent_writes_from_threads(self, tmp_path):
         manifest = make_manifest(tmp_path)
         files = []

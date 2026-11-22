@@ -2,12 +2,34 @@
 Pytest fixtures for agent tests.
 """
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.config import APIConfig, Config, ReMarkableConfig, SyncConfig, TrayConfig, WebConfig
+
+# The developer's real config locations, recorded before any test changes HOME,
+# so the guard test can check that tests never write there.
+REAL_HOME = Path(os.path.expanduser("~"))
+REAL_CONFIG_DIRS = (REAL_HOME / ".config" / "rmirror", REAL_HOME / ".rmirror")
+
+
+@pytest.fixture(autouse=True)
+def isolated_home(tmp_path_factory, monkeypatch) -> Path:
+    """Run every test with HOME (and the working directory) in a temp directory.
+
+    App code calls ``config.save()`` without a path and keeps the upload manifest
+    next to the config, both under ``Config.get_default_config_path()``. That
+    resolves from the home directory (or ``./config.yaml``), so without this
+    fixture the suite overwrote the developer's real config with test values.
+    """
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("RMIRROR_CONFIG_PATH", raising=False)
+    monkeypatch.chdir(home)
+    return home
 
 
 @pytest.fixture

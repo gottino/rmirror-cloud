@@ -197,6 +197,22 @@ class UploadManifest:
         finally:
             conn.close()
 
+    def forget_baseline(self, path: Union[str, Path]) -> bool:
+        """Remove a file's baseline entry (never uploaded), so the next scan uploads it.
+
+        Entries of uploaded files are kept. Returns True if an entry was removed.
+        """
+        conn = self._connect()
+        try:
+            with conn:
+                cur = conn.execute(
+                    "DELETE FROM files WHERE api_host = ? AND path = ? AND uploaded_at IS NULL",
+                    (self.api_host, _key(path)),
+                )
+                return cur.rowcount > 0
+        finally:
+            conn.close()
+
     def _touch(self, path: Union[str, Path], fingerprint: Fingerprint) -> None:
         """Refresh size/mtime of an entry whose content hash still matches."""
         self._run(

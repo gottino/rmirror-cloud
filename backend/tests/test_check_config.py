@@ -16,7 +16,7 @@ FULL_ENV = {
     "CLERK_SECRET_KEY": "clerk-secret-value",
     "CLERK_WEBHOOK_SECRET": "whsec-value",
     "GOOGLE_AI_API_KEY": "google-key-value",
-    "INTEGRATION_MASTER_KEY": "master-key-value",
+    "INTEGRATION_MASTER_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     "S3_ENDPOINT_URL": "https://s3.example.invalid",
     "S3_ACCESS_KEY": "s3-access-value",
     "S3_SECRET_KEY": "s3-secret-value",
