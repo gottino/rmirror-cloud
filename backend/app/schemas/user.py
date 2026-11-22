@@ -12,20 +12,6 @@ class UserBase(BaseModel):
     full_name: str | None = None
 
 
-class UserCreate(UserBase):
-    """User creation schema."""
-
-    password: str
-
-
-class UserUpdate(BaseModel):
-    """User update schema."""
-
-    email: EmailStr | None = None
-    full_name: str | None = None
-    password: str | None = None
-
-
 class User(UserBase):
     """User response schema."""
 

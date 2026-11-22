@@ -13,9 +13,7 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-OCR_PROMPT = (
-    "Transcribe all handwritten text from this page. "
-    "The content is mixed German and English.\n\n"
+_OCR_PROMPT_RULES = (
     "Rules:\n"
     "- Preserve the EXACT layout: line breaks, indentation, and spatial hierarchy as written\n"
     "- Each new line of handwriting = a new line in output\n"
@@ -41,6 +39,24 @@ OCR_PROMPT = (
 )
 
 
+def build_ocr_prompt(language_hint: str) -> str:
+    """Build the OCR prompt.
+
+    Args:
+        language_hint: Languages the handwriting is expected in (setting
+            OCR_LANGUAGE_HINT, e.g. "German and English"). Empty means any
+            language, and the prompt names none.
+    """
+    hint = language_hint.strip()
+    if hint:
+        language = f"The content is written in {hint}.\n\n"
+    else:
+        language = (
+            "Keep each word in the language it is written in; do not translate.\n\n"
+        )
+    return "Transcribe all handwritten text from this page. " + language + _OCR_PROMPT_RULES
+
+
 class OCRService:
     """OCR service for extracting handwritten text using Google Gemini Vision."""
 
@@ -64,6 +80,7 @@ class OCRService:
 
         self.client = genai.Client(api_key=api_key)
         self.model = settings.ocr_model
+        self.prompt = build_ocr_prompt(settings.ocr_language_hint)
         logger.info("Initialized OCR service with model=%s", self.model)
 
     async def extract_text_from_pdf(
@@ -91,36 +108,8 @@ class OCRService:
             content_part=types.Part.from_bytes(
                 data=pdf_bytes, mime_type="application/pdf"
             ),
-            prompt=prompt or OCR_PROMPT,
+            prompt=prompt or self.prompt,
             input_bytes=len(pdf_bytes),
-        )
-
-    async def extract_text_from_image(
-        self, image_bytes: bytes, media_type: str = "image/png", prompt: str | None = None
-    ) -> str:
-        """
-        Extract handwritten text from image using Gemini Vision.
-
-        Args:
-            image_bytes: Image content as bytes
-            media_type: MIME type (image/png, image/jpeg, etc.)
-            prompt: Custom prompt
-
-        Returns:
-            Extracted text
-
-        Raises:
-            Exception: If Gemini API call fails
-        """
-        logger.info(f"Extracting text from image ({media_type}, {len(image_bytes)} bytes)")
-
-        return await asyncio.to_thread(
-            self._call_vision_api,
-            content_part=types.Part.from_bytes(
-                data=image_bytes, mime_type=media_type
-            ),
-            prompt=prompt or OCR_PROMPT,
-            input_bytes=len(image_bytes),
         )
 
     def _call_vision_api(self, content_part: types.Part, prompt: str, input_bytes: int) -> str:

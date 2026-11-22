@@ -55,12 +55,6 @@ class ProcessRMFileResponse(BaseModel):
     page_id: int | None = None
 
 
-class ProcessRMFileRequest(BaseModel):
-    """Request to process an uploaded .rm file."""
-
-    notebook_id: str | None = None  # Optional: link to existing notebook
-
-
 @router.post("/rm-file", response_model=ProcessRMFileResponse)
 # Per user (settings.rate_limit_upload, default 120/minute): sized for an
 # initial sync, where the agent uploads every page back to back.

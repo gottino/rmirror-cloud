@@ -14,7 +14,7 @@ from app.core.sync_engine import ContentFingerprint
 from app.integrations.registry import NOTEBOOK_METADATA, PAGE_TEXT, TODO, targets_supporting
 from app.models.notebook import Notebook
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
-from app.services.fingerprinting import fingerprint_highlight, fingerprint_page, fingerprint_todo
+from app.services.fingerprinting import fingerprint_page, fingerprint_todo
 
 
 def queue_sync(
@@ -425,67 +425,6 @@ def queue_notebook_metadata_sync(db: Session, notebook: Notebook) -> list[SyncQu
         if entry is not None:
             queued.append(entry)
     return queued
-
-
-def queue_highlight_sync(
-    db: Session,
-    user_id: int,
-    highlight_id: int,
-    original_text: str,
-    corrected_text: str,
-    source_file: str,
-    page_num: int,
-    notebook_uuid: Optional[str] = None,
-    page_uuid: Optional[str] = None,
-) -> list[SyncQueue]:
-    """
-    Queue highlight sync to all enabled integrations.
-
-    Args:
-        db: Database session
-        user_id: User ID
-        highlight_id: Highlight database ID
-        original_text: Original highlighted text
-        corrected_text: User-corrected text
-        source_file: Source file identifier
-        page_num: Page number
-        notebook_uuid: Optional notebook UUID
-        page_uuid: Optional reMarkable page UUID
-
-    Returns:
-        List of created SyncQueue entries
-    """
-    # Generate content hash
-    content_hash = fingerprint_highlight(original_text, corrected_text, source_file, page_num)
-
-    # Get all enabled integrations
-    integrations = (
-        db.query(IntegrationConfig)
-        .filter(
-            IntegrationConfig.user_id == user_id,
-            IntegrationConfig.is_enabled == True,
-        )
-        .all()
-    )
-
-    queued_entries = []
-    for integration in integrations:
-        queue_entry = queue_sync(
-            db=db,
-            user_id=user_id,
-            item_type='highlight',
-            item_id=str(highlight_id),
-            content_hash=content_hash,
-            target_name=integration.target_name,
-            page_uuid=page_uuid,
-            notebook_uuid=notebook_uuid,
-            page_number=page_num,
-            priority=4,  # Normal priority
-        )
-        if queue_entry is not None:
-            queued_entries.append(queue_entry)
-
-    return queued_entries
 
 
 def get_next_sync_items(db: Session, limit: int = 10) -> list[SyncQueue]:

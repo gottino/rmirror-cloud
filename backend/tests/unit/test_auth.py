@@ -1,10 +1,7 @@
-"""Unit tests for auth/jwt.py and auth/password.py.
-
-Tests JWT token creation/decoding and password hashing/verification.
-"""
+"""Unit tests for auth/jwt.py (agent token creation/decoding)."""
 
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -86,9 +83,9 @@ class TestJWT:
 
     def test_decode_access_token_wrong_secret(self):
         """Token signed with different secret should return None."""
-        from jose import jwt as jose_jwt
+        import jwt as pyjwt
 
-        token = jose_jwt.encode(
+        token = pyjwt.encode(
             {"sub": "user123", "exp": time.time() + 3600},
             "wrong-secret",
             algorithm="HS256",
@@ -100,46 +97,57 @@ class TestJWT:
         assert self.decode_access_token("") is None
 
 
-# ---------- Password Tests ----------
+# ---------- Token format compatibility ----------
 
-class TestPassword:
-    """Tests for password hashing and verification."""
+# An agent token minted by the previous JWT library (python-jose) for fixed
+# claims. Agents store their token for 30 days, so tokens minted before a
+# library change must still decode, and new tokens must keep the same format.
+LEGACY_AGENT_TOKEN = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJzdWIiOiI0MiIsInR5cGUiOiJhZ2VudCIsInZlciI6MywiZXhwIjo0MDcwOTA4ODAwfQ."
+    "3D-hKnVKueUbJGV20Loby2ZZsY-FxCYxjwf4Befw7Vw"
+)
 
-    def test_get_password_hash_returns_bcrypt_format(self):
-        """Hash should be in bcrypt format ($2b$...)."""
-        from app.auth.password import get_password_hash
 
-        hashed = get_password_hash("mysecretpassword")
-        assert hashed.startswith("$2b$")
-        assert len(hashed) == 60  # bcrypt hashes are always 60 chars
+class _FixedDatetime(datetime):
+    """datetime whose utcnow() is 30 days before 2099-01-01 00:00 UTC."""
 
-    def test_verify_password_correct(self):
-        """Correct password should verify successfully."""
-        from app.auth.password import get_password_hash, verify_password
+    @classmethod
+    def utcnow(cls):
+        return datetime(2098, 12, 2, 0, 0, 0)
 
-        hashed = get_password_hash("correctpassword")
-        assert verify_password("correctpassword", hashed) is True
 
-    def test_verify_password_wrong(self):
-        """Wrong password should fail verification."""
-        from app.auth.password import get_password_hash, verify_password
+class TestTokenFormatCompatibility:
+    @pytest.fixture(autouse=True)
+    def _mock_settings(self):
+        mock_settings = MagicMock()
+        mock_settings.secret_key = "test-secret-key-for-jwt-tests"
+        mock_settings.algorithm = "HS256"
+        mock_settings.access_token_expire_minutes = 60
+        with patch("app.auth.jwt.settings", mock_settings):
+            yield
 
-        hashed = get_password_hash("correctpassword")
-        assert verify_password("wrongpassword", hashed) is False
+    def test_new_agent_token_is_byte_identical_to_legacy_format(self):
+        from app.auth.jwt import create_access_token
 
-    def test_hash_is_salted(self):
-        """Two hashes of same password should differ (random salt)."""
-        from app.auth.password import get_password_hash
+        with patch("app.auth.jwt.datetime", _FixedDatetime):
+            token = create_access_token(
+                {"sub": "42", "type": "agent", "ver": 3},
+                expires_delta=timedelta(days=30),
+            )
+        assert token == LEGACY_AGENT_TOKEN
 
-        hash1 = get_password_hash("samepassword")
-        hash2 = get_password_hash("samepassword")
-        assert hash1 != hash2
+    def test_legacy_agent_token_still_decodes(self):
+        from app.auth.jwt import decode_access_token
 
-    def test_unicode_password_round_trip(self):
-        """Unicode passwords should hash and verify correctly."""
-        from app.auth.password import get_password_hash, verify_password
+        payload = decode_access_token(LEGACY_AGENT_TOKEN)
+        assert payload == {"sub": "42", "type": "agent", "ver": 3, "exp": 4070908800}
 
-        password = "p\u00e4ssw\u00f6rd\U0001f511"  # pässwörd🔑
-        hashed = get_password_hash(password)
-        assert verify_password(password, hashed) is True
-        assert verify_password("plainascii", hashed) is False
+    def test_legacy_agent_token_accepted_by_request_auth_decoder(self):
+        """clerk.get_current_user decodes HS256 agent tokens with PyJWT."""
+        import jwt as pyjwt
+
+        payload = pyjwt.decode(
+            LEGACY_AGENT_TOKEN, "test-secret-key-for-jwt-tests", algorithms=["HS256"]
+        )
+        assert payload["type"] == "agent"

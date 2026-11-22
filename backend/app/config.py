@@ -88,25 +88,6 @@ class Settings(BaseSettings):
         # Default to SQLite
         return "sqlite:///./rmirror.db"
 
-    # Redis
-    redis_host: str = "localhost"
-    redis_port: int = 6379
-    redis_db: int = 0
-    redis_url: Optional[str] = None
-
-    @field_validator("redis_url", mode="before")
-    @classmethod
-    def assemble_redis_connection(cls, v: Optional[str], info) -> str:
-        """Build Redis URL from components if not provided."""
-        if isinstance(v, str):
-            return v
-
-        data = info.data
-        host = data.get("redis_host", "localhost")
-        port = data.get("redis_port", 6379)
-        db = data.get("redis_db", 0)
-        return f"redis://{host}:{port}/{db}"
-
     # S3/MinIO Storage. Outside debug, local storage needs STORAGE_BACKEND=local.
     storage_backend: Optional[str] = None  # "s3" or "local"; unset = S3 if configured
     s3_endpoint_url: Optional[str] = None
@@ -119,6 +100,9 @@ class Settings(BaseSettings):
     # Google AI API for OCR (Gemini)
     google_ai_api_key: Optional[str] = None
     ocr_model: str = "gemini-2.5-flash"
+    # Languages the OCR prompt tells the model to expect, e.g. "German and
+    # English". Empty (the default) means any language: the prompt names none.
+    ocr_language_hint: str = ""
 
     # Authentication
     secret_key: str
