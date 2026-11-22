@@ -124,7 +124,9 @@ class SyncConfig(BaseSettings):
     auto_sync: bool = Field(default=True, description="Enable automatic syncing")
     batch_size: int = Field(default=10, description="Number of files to upload in one batch")
     retry_attempts: int = Field(default=3, description="Number of retry attempts for failed uploads")
-    sync_interval: int = Field(default=60, description="Sync interval in seconds")
+    sync_interval: int = Field(
+        default=60, description="Seconds between safety-net rescans of the reMarkable folder (minimum 30)"
+    )
     cooldown_seconds: int = Field(
         default=5, description="Cooldown period to deduplicate file events"
     )

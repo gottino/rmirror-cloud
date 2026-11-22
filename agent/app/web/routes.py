@@ -273,6 +273,23 @@ def register_routes(app: Flask) -> None:
         file_watcher = getattr(agent, "file_watcher", None) if agent else None
         return getattr(file_watcher, "sync_queue", None)
 
+    def _watcher_health() -> dict:
+        """Observer and rescan state of the running watcher (empty values if none)."""
+        agent = app.config.get("AGENT")
+        file_watcher = getattr(agent, "file_watcher", None) if agent else None
+        get_health = getattr(file_watcher, "get_health", None)
+        health = get_health() if callable(get_health) else None
+        if not isinstance(health, dict):
+            health = {}
+        return {
+            "observer_alive": health.get("observer_alive", False),
+            "last_event_at": health.get("last_event_at"),
+            "last_rescan_at": health.get("last_rescan_at"),
+            "last_rescan_reason": health.get("last_rescan_reason"),
+            "last_rescan_result": health.get("last_rescan_result"),
+            "observer_restarts": health.get("observer_restarts", 0),
+        }
+
     auth_states = AuthStateStore()
     app.config["AUTH_STATES"] = auth_states
 
@@ -343,6 +360,7 @@ def register_routes(app: Flask) -> None:
                     "enabled": config.remarkable.watch_enabled,
                     "directory": config.remarkable.source_directory,
                     "exists": Path(config.remarkable.source_directory).exists(),
+                    **_watcher_health(),
                 },
                 "sync": {
                     "auto_sync": config.sync.auto_sync,
