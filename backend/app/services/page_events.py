@@ -54,7 +54,8 @@ def enqueue_integration_syncs(db: Session, page: Page, notebook: Notebook) -> in
     above) get no row. Queueing failures are logged and never raised.
 
     Returns:
-        Number of integrations the page was queued for.
+        Number of integrations the page was queued for (not counting those
+        already in sync with this text).
     """
     notebook_page = (
         db.query(NotebookPage)
@@ -108,6 +109,10 @@ def enqueue_integration_syncs(db: Session, page: Page, notebook: Notebook) -> in
                     "page_id": page.id,
                 },
             )
+            if queue_entry is None:
+                # Already in sync with this content: queue_sync wrote nothing.
+                logger.info(f"Already in sync with {integration.target_name}")
+                continue
             queued += 1
 
             logger.info(

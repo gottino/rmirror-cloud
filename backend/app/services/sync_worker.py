@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.orm import Session
 
 from app.core.sync_engine import (
@@ -18,6 +18,7 @@ from app.core.sync_engine import (
     SyncItemType,
     SyncResult,
 )
+from app.core.upserts import dialect_insert
 from app.database import SessionLocal
 from app.integrations.registry import create_target, supports
 from app.models.notebook import Notebook
@@ -382,6 +383,7 @@ class SyncWorker:
         self._last_drip_check: Optional[float] = None
         # Round-robin cursor (last user id handled) for retroactive OCR
         self._pending_quota_cursor = 0
+        self._last_queue_prune: Optional[float] = None
 
     async def start(self):
         """Start the background worker."""
@@ -421,6 +423,9 @@ class SyncWorker:
 
                 # OCR pages left PENDING_QUOTA once their owner's quota has room again
                 await self._process_pending_quota_pages()
+
+                # Delete old finished queue rows (about hourly, small batches)
+                self._prune_sync_queue()
 
                 # Check drip emails every hour
                 if self._last_drip_check is None or (time.time() - self._last_drip_check) > 3600:
@@ -617,6 +622,38 @@ class SyncWorker:
                 logger.info("Retroactively OCR'd %d pending-quota page(s)", processed)
         except Exception as e:
             logger.error(f"Error processing pending-quota pages: {e}", exc_info=True)
+        finally:
+            db.close()
+
+    def _prune_sync_queue(self, interval_seconds: int = 3600):
+        """Delete finished sync_queue rows past their retention, about once an hour.
+
+        Retention comes from the SYNC_QUEUE_*_RETENTION_DAYS settings. Only
+        completed and failed queue rows are deleted, in bounded batches (see
+        ``prune_sync_queue``); sync_records and content are never touched.
+        """
+        if self._last_queue_prune is not None and (
+            time.time() - self._last_queue_prune
+        ) < interval_seconds:
+            return
+        self._last_queue_prune = time.time()
+
+        from app.config import get_settings
+        from app.services.sync_queue import prune_sync_queue
+
+        settings = get_settings()
+        db: Session = SessionLocal()
+        try:
+            deleted = prune_sync_queue(
+                db,
+                completed_days=settings.sync_queue_completed_retention_days,
+                failed_days=settings.sync_queue_failed_retention_days,
+            )
+            if deleted:
+                logger.info("Pruned %d finished sync_queue row(s)", deleted)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error pruning sync queue: {e}", exc_info=True)
         finally:
             db.close()
 
@@ -965,6 +1002,27 @@ class SyncWorker:
 
         data = notebook_metadata_payload(notebook)
         content_hash = ContentFingerprint.for_notebook_metadata(data)
+
+        # Already written with this exact metadata (e.g. by another row for the
+        # same notebook): nothing to push.
+        record = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == queue_item.user_id,
+                SyncRecord.target_name == queue_item.target_name,
+                SyncRecord.item_type == 'notebook_metadata',
+                SyncRecord.notebook_uuid == notebook.notebook_uuid,
+            )
+            .first()
+        )
+        if record is not None and record.status == 'success' and record.content_hash == content_hash:
+            _set_rate_limit_deferrals(queue_item, 0)
+            queue_item.status = 'completed'
+            queue_item.completed_at = datetime.utcnow()
+            queue_item.error_message = None
+            db.commit()
+            return
+
         target = create_target(queue_item.target_name, config.get_config())
         sync_item = SyncItem(
             item_type=SyncItemType.NOTEBOOK_METADATA,
@@ -981,31 +1039,39 @@ class SyncWorker:
 
         if result.success:
             now = datetime.utcnow()
-            record = (
-                db.query(SyncRecord)
-                .filter(
-                    SyncRecord.user_id == queue_item.user_id,
-                    SyncRecord.target_name == queue_item.target_name,
-                    SyncRecord.item_type == 'notebook_metadata',
-                    SyncRecord.notebook_uuid == notebook.notebook_uuid,
-                )
-                .first()
+            # One record per (user, target, notebook), enforced by the partial
+            # unique index uq_sync_notebook_metadata. Upsert against it so two
+            # workers finishing rows for the same notebook cannot collide.
+            insert_stmt = dialect_insert(db, SyncRecord).values(
+                user_id=queue_item.user_id,
+                target_name=queue_item.target_name,
+                item_type='notebook_metadata',
+                item_id=notebook.notebook_uuid,
+                notebook_uuid=notebook.notebook_uuid,
+                content_hash=content_hash,
+                external_id=result.target_id or "",
+                status='success',
+                error_message=None,
+                synced_at=now,
+                created_at=now,
+                updated_at=now,
             )
-            if record is None:
-                record = SyncRecord(
-                    user_id=queue_item.user_id,
-                    target_name=queue_item.target_name,
-                    item_type='notebook_metadata',
-                    item_id=notebook.notebook_uuid,
-                    notebook_uuid=notebook.notebook_uuid,
+            db.execute(
+                insert_stmt.on_conflict_do_update(
+                    index_elements=['user_id', 'target_name', 'notebook_uuid'],
+                    index_where=text("item_type = 'notebook_metadata'"),
+                    set_={
+                        'content_hash': insert_stmt.excluded.content_hash,
+                        'external_id': insert_stmt.excluded.external_id,
+                        'status': insert_stmt.excluded.status,
+                        'error_message': None,
+                        'synced_at': insert_stmt.excluded.synced_at,
+                        'updated_at': insert_stmt.excluded.updated_at,
+                    },
                 )
-                db.add(record)
-            record.content_hash = content_hash
-            record.external_id = result.target_id or ""
-            record.status = 'success'
-            record.error_message = None
-            record.synced_at = now
-            record.updated_at = now
+            )
+            if record is not None:
+                db.expire(record)
 
             _set_rate_limit_deferrals(queue_item, 0)
             queue_item.status = 'completed'

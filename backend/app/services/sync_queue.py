@@ -4,9 +4,10 @@ Provides functions to queue sync operations when OCR completes or catch-up sync 
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.core.sync_engine import ContentFingerprint
@@ -28,7 +29,7 @@ def queue_sync(
     page_number: Optional[int] = None,
     priority: int = 5,
     metadata: Optional[dict] = None,
-) -> SyncQueue:
+) -> Optional[SyncQueue]:
     """
     Queue an item for sync to an external service.
 
@@ -52,7 +53,8 @@ def queue_sync(
         metadata: Optional metadata dict
 
     Returns:
-        Created SyncQueue entry
+        The pending or processing SyncQueue entry for this item, or None when
+        the item is already synced with this content (nothing is queued).
 
     Example:
         >>> queue_entry = queue_sync(
@@ -111,28 +113,48 @@ def queue_sync(
         )
 
         if existing_sync and existing_sync.content_hash == content_hash:
-            # Already synced successfully with same content, no need to queue
-            # Create a completed queue entry for tracking
-            queue_entry = SyncQueue(
-                user_id=user_id,
-                item_type=item_type,
-                item_id=item_id,
-                content_hash=content_hash,
-                page_uuid=page_uuid,
-                notebook_uuid=notebook_uuid,
-                page_number=page_number,
-                target_name=target_name,
-                status='completed',
-                priority=priority,
-                metadata_json=json.dumps(metadata) if metadata else None,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-                completed_at=existing_sync.synced_at,
-            )
-            db.add(queue_entry)
-            db.commit()
-            return queue_entry
+            # Already synced with the same content: nothing to queue, and no
+            # row is written (the sync record already says it is in sync).
+            return None
         # If existing_sync exists but content_hash is different, we'll queue it for update
+    elif item_type == NOTEBOOK_METADATA and notebook_uuid:
+        # One pending row per notebook and target: the agent reports metadata on
+        # every open, and the worker rebuilds the payload from the notebook when
+        # it runs, so a pending row just takes the newest hash. Its retry
+        # schedule is kept, so frequent opens do not defeat the backoff.
+        existing_queue = (
+            db.query(SyncQueue)
+            .filter(
+                SyncQueue.user_id == user_id,
+                SyncQueue.target_name == target_name,
+                SyncQueue.item_type == NOTEBOOK_METADATA,
+                SyncQueue.notebook_uuid == notebook_uuid,
+                SyncQueue.status == 'pending',
+            )
+            .first()
+        )
+        if existing_queue:
+            if existing_queue.content_hash != content_hash:
+                existing_queue.content_hash = content_hash
+                existing_queue.updated_at = datetime.utcnow()
+                db.commit()
+            return existing_queue
+
+        # The worker keeps one record per notebook and target with the hash it
+        # last wrote; unchanged metadata is not queued again.
+        existing_sync = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == user_id,
+                SyncRecord.target_name == target_name,
+                SyncRecord.item_type == NOTEBOOK_METADATA,
+                SyncRecord.notebook_uuid == notebook_uuid,
+                SyncRecord.status == 'success',
+            )
+            .first()
+        )
+        if existing_sync and existing_sync.content_hash == content_hash:
+            return None
     else:
         # For other item types, use content_hash for deduplication
         existing_queue = (
@@ -163,27 +185,8 @@ def queue_sync(
         )
 
         if existing_sync:
-            # Already synced successfully, no need to queue
-            # Create a completed queue entry for tracking
-            queue_entry = SyncQueue(
-                user_id=user_id,
-                item_type=item_type,
-                item_id=item_id,
-                content_hash=content_hash,
-                page_uuid=page_uuid,
-                notebook_uuid=notebook_uuid,
-                page_number=page_number,
-                target_name=target_name,
-                status='completed',
-                priority=priority,
-                metadata_json=json.dumps(metadata) if metadata else None,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-                completed_at=existing_sync.synced_at,
-            )
-            db.add(queue_entry)
-            db.commit()
-            return queue_entry
+            # Already synced successfully: nothing to queue, no row written.
+            return None
 
     # Create new queue entry
     queue_entry = SyncQueue(
@@ -274,7 +277,8 @@ def queue_page_sync(
             page_number=page_number,
             priority=3,  # Higher priority for fresh content
         )
-        queued_entries.append(queue_entry)
+        if queue_entry is not None:
+            queued_entries.append(queue_entry)
 
     return queued_entries
 
@@ -334,7 +338,8 @@ def queue_todo_sync(
             page_number=page_number,
             priority=2,  # Higher priority for todos
         )
-        queued_entries.append(queue_entry)
+        if queue_entry is not None:
+            queued_entries.append(queue_entry)
 
     return queued_entries
 
@@ -387,8 +392,11 @@ def queue_notebook_metadata_sync(db: Session, notebook: Notebook) -> list[SyncQu
     """Queue a properties-only update of the notebook for every target that accepts one.
 
     The worker rebuilds the payload from the database when it runs, so a row
-    always writes the notebook's latest metadata. Rows are deduplicated by the
-    metadata's content hash (see queue_sync).
+    always writes the notebook's latest metadata. There is at most one pending
+    row per notebook and target, and none when the target already has this
+    metadata (see queue_sync). Makes no external calls.
+
+    Returns the pending queue rows, new or reused.
     """
     content_hash = ContentFingerprint.for_notebook_metadata(notebook_metadata_payload(notebook))
 
@@ -402,8 +410,9 @@ def queue_notebook_metadata_sync(db: Session, notebook: Notebook) -> list[SyncQu
         .all()
     )
 
-    return [
-        queue_sync(
+    queued = []
+    for integration in integrations:
+        entry = queue_sync(
             db=db,
             user_id=notebook.user_id,
             item_type=NOTEBOOK_METADATA,
@@ -413,8 +422,9 @@ def queue_notebook_metadata_sync(db: Session, notebook: Notebook) -> list[SyncQu
             notebook_uuid=notebook.notebook_uuid,
             priority=5,
         )
-        for integration in integrations
-    ]
+        if entry is not None:
+            queued.append(entry)
+    return queued
 
 
 def queue_highlight_sync(
@@ -472,7 +482,8 @@ def queue_highlight_sync(
             page_number=page_num,
             priority=4,  # Normal priority
         )
-        queued_entries.append(queue_entry)
+        if queue_entry is not None:
+            queued_entries.append(queue_entry)
 
     return queued_entries
 
@@ -512,3 +523,58 @@ def get_next_sync_items(db: Session, limit: int = 10) -> list[SyncQueue]:
         .limit(limit)
         .all()
     )
+
+
+def prune_sync_queue(
+    db: Session,
+    *,
+    completed_days: int,
+    failed_days: int,
+    now: Optional[datetime] = None,
+    batch_size: int = 500,
+    max_batches: int = 10,
+) -> int:
+    """Delete finished queue rows older than their retention period.
+
+    Only 'completed' rows (by ``completed_at``, falling back to
+    ``updated_at``) and 'failed' rows (by ``updated_at``) are deleted; pending
+    and processing rows are never touched. Deletes at most
+    ``batch_size * max_batches`` rows per call, committing after each batch,
+    so one run never holds a long lock. A retention of 0 or less disables
+    pruning for that status.
+
+    Returns the number of rows deleted.
+    """
+    now = now or datetime.utcnow()
+    conditions = []
+    if completed_days > 0:
+        conditions.append(
+            and_(
+                SyncQueue.status == 'completed',
+                func.coalesce(SyncQueue.completed_at, SyncQueue.updated_at)
+                < now - timedelta(days=completed_days),
+            )
+        )
+    if failed_days > 0:
+        conditions.append(
+            and_(
+                SyncQueue.status == 'failed',
+                SyncQueue.updated_at < now - timedelta(days=failed_days),
+            )
+        )
+
+    deleted = 0
+    for condition in conditions:
+        for _ in range(max_batches):
+            ids = [
+                row.id
+                for row in db.query(SyncQueue.id).filter(condition).limit(batch_size).all()
+            ]
+            if not ids:
+                break
+            db.query(SyncQueue).filter(SyncQueue.id.in_(ids)).delete(synchronize_session=False)
+            db.commit()
+            deleted += len(ids)
+            if len(ids) < batch_size:
+                break
+    return deleted
