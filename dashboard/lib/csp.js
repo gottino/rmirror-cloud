@@ -80,7 +80,10 @@ function buildContentSecurityPolicy({ apiUrl, umamiUrl, clerkPublishableKey, isD
     // Notebook pages show PDFs from blob: URLs in an iframe.
     'frame-src': ["'self'", 'blob:', CLOUDFLARE_CHALLENGES],
     'worker-src': ["'self'", 'blob:'],
-    'object-src': ["'none'"],
+    // Browsers render a PDF in a frame with their built-in viewer, which counts
+    // as plugin content: 'none' left the notebook's PDF view empty once the
+    // policy was enforced. Only same-origin and page-created blob: URLs.
+    'object-src': ["'self'", 'blob:'],
     'base-uri': ["'self'"],
     'form-action': ["'self'"],
     'frame-ancestors': ["'self'"],
