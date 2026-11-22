@@ -6,6 +6,7 @@ import { QuotaProvider } from '@/lib/quota-context'
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://rmirror.io'),
   title: "rMirror Dashboard",
   description: "View your transcribed reMarkable notebooks",
   icons: { icon: "/rm-icon.png" },
