@@ -114,6 +114,9 @@ dev-context/
 # Legal documents (private, not for public repo)
 legal-docs/
 
+# Code audit reports (internal findings, not for public repo)
+reports/
+
 # Claude Code workflow documentation (should be in dev-context/, not main repo)
 README-CLAUDE-SETUP.md
 CLAUDE_CODE_SETUP.md
