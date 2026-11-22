@@ -15,12 +15,14 @@ from app.models.page import Page
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord, SyncStatus
 from app.services.sync_worker import (
     MAX_SYNC_RETRIES,
+    PROCESSING_LEASE,
     RETRY_BASE_DELAY_SECONDS,
     RETRY_MAX_DELAY_SECONDS,
     SyncWorker,
     apply_sync_failure,
     apply_sync_result,
     compute_retry_delay,
+    reclaim_stale_processing,
 )
 from tests.conftest import create_user_with_quota
 
@@ -516,3 +518,207 @@ class TestFailureRecovery:
         assert result.status == "pending"
         assert result.retry_count == 1
         assert "UNIQUE constraint failed" in result.error_message
+
+
+def _stuck(item, *, age, retry_count=0):
+    item.status = "processing"
+    item.started_at = None if age is None else datetime.utcnow() - age
+    item.retry_count = retry_count
+    return item
+
+
+class TestStaleProcessingReclaim:
+    def test_stale_row_returns_to_pending_immediately_retryable(self, db, queue_item):
+        _stuck(queue_item, age=PROCESSING_LEASE + timedelta(minutes=1), retry_count=2)
+        db.commit()
+        now = datetime.utcnow()
+
+        assert reclaim_stale_processing(db, now=now) == (1, 0)
+
+        db.refresh(queue_item)
+        assert queue_item.status == "pending"
+        assert queue_item.retry_count == 3
+        assert queue_item.scheduled_at == now
+        assert queue_item.error_message
+
+    def test_null_started_at_counts_as_stale(self, db, queue_item):
+        _stuck(queue_item, age=None)
+        db.commit()
+        assert reclaim_stale_processing(db) == (1, 0)
+        db.refresh(queue_item)
+        assert queue_item.status == "pending"
+
+    def test_fresh_row_is_left_alone(self, db, queue_item):
+        _stuck(queue_item, age=PROCESSING_LEASE - timedelta(minutes=1))
+        db.commit()
+        assert reclaim_stale_processing(db) == (0, 0)
+        db.refresh(queue_item)
+        assert queue_item.status == "processing"
+        assert queue_item.retry_count == 0
+
+    def test_dead_letters_when_attempts_exhausted(self, db, queue_item):
+        _stuck(queue_item, age=PROCESSING_LEASE * 2, retry_count=MAX_SYNC_RETRIES - 1)
+        db.commit()
+        assert reclaim_stale_processing(db) == (0, 1)
+        db.refresh(queue_item)
+        assert queue_item.status == "failed"
+        assert queue_item.retry_count == MAX_SYNC_RETRIES
+        assert "giving up" in queue_item.error_message
+
+    def test_second_sweep_does_not_double_count(self, db, queue_item):
+        """Two workers sweeping in turn: the second finds nothing left to take."""
+        _stuck(queue_item, age=PROCESSING_LEASE * 2)
+        db.commit()
+        assert reclaim_stale_processing(db) == (1, 0)
+        assert reclaim_stale_processing(db) == (0, 0)
+        db.refresh(queue_item)
+        assert queue_item.retry_count == 1
+
+    @pytest.mark.asyncio
+    async def test_sweep_retries_stranded_row(self, db, user, queue_item, notion_config, page):
+        _stuck(queue_item, age=PROCESSING_LEASE * 2)
+        db.commit()
+        item_id = queue_item.id
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.target_id = "notion-block-123"
+        mock_result.metadata = {}
+
+        with patch("app.services.sync_worker.SessionLocal", return_value=db), \
+             patch.object(db, "close"), \
+             patch("app.services.sync_worker.NotionSyncTarget") as MockTarget:
+            MockTarget.return_value.sync_item = AsyncMock(return_value=mock_result)
+            with patch.object(IntegrationConfig, "get_config",
+                              return_value={"access_token": "t", "database_id": "d"}):
+                await SyncWorker()._process_pending_items()
+
+        result = db.query(SyncQueue).filter(SyncQueue.id == item_id).first()
+        assert result.status == "completed"
+
+
+class TestBatchLeaseAndShutdown:
+    def _two_items(self, db, user, queue_item):
+        second = SyncQueue(
+            user_id=user.id, item_type="page_text", item_id="999",
+            content_hash="content_hash_2", page_uuid="page-2", target_name="notion",
+            status="pending", priority=3,
+            scheduled_at=datetime.utcnow() - timedelta(minutes=1),
+            created_at=datetime.utcnow(),
+        )
+        db.add(second)
+        db.commit()
+        return queue_item, second
+
+    @pytest.mark.asyncio
+    async def test_started_at_refreshed_before_each_item(self, db, user, queue_item):
+        first, second = self._two_items(db, user, queue_item)
+        seen = {}
+        stale = datetime.utcnow() - timedelta(minutes=30)
+
+        async def fake_process(session, item):
+            seen[item.id] = item.started_at
+            item.status = "completed"
+            session.commit()
+            # Simulate a long item: age the other row's claim timestamp.
+            session.query(SyncQueue).filter(SyncQueue.id != item.id).update(
+                {"started_at": stale}, synchronize_session=False
+            )
+            session.commit()
+
+        with patch("app.services.sync_worker.SessionLocal", return_value=db), \
+             patch.object(db, "close"), \
+             patch.object(SyncWorker, "_process_queue_item", side_effect=fake_process):
+            await SyncWorker()._process_pending_items()
+
+        # The second item's claim stamp was aged during the first item, yet it
+        # was renewed right before it ran.
+        assert seen[second.id] > datetime.utcnow() - timedelta(minutes=1)
+
+    @pytest.mark.asyncio
+    async def test_lease_renewal_is_committed_before_item_runs(self, db, user, queue_item):
+        """The renewed started_at must be durable (visible to other sessions, no row
+        lock held) while the item runs. The shared in-memory connection hides
+        uncommitted writes from a second session, so discard the open transaction
+        and read back: only a committed renewal survives. Time is shifted +1h after
+        the claim commit so the renewal value differs from the claim value."""
+        import app.services.sync_worker as sw
+
+        offset = {"hours": 0}
+        real_datetime = datetime
+
+        class ShiftedDatetime(real_datetime):
+            @classmethod
+            def utcnow(cls):
+                return real_datetime.utcnow() + timedelta(hours=offset["hours"])
+
+        real_commit = db.commit
+        commits = []
+
+        def counting_commit():
+            real_commit()
+            commits.append(1)
+            if len(commits) == 2:  # reclaim, then the batch claim
+                offset["hours"] = 1
+
+        seen = {}
+
+        async def fake_process(session, item):
+            session.rollback()
+            seen["started_at"] = (
+                session.query(SyncQueue.started_at).filter(SyncQueue.id == item.id).scalar()
+            )
+            item.status = "completed"
+            real_commit()
+
+        with patch("app.services.sync_worker.SessionLocal", return_value=db), \
+             patch.object(db, "close"), \
+             patch.object(db, "commit", side_effect=counting_commit), \
+             patch.object(sw, "datetime", ShiftedDatetime), \
+             patch.object(SyncWorker, "_process_queue_item", side_effect=fake_process):
+            await SyncWorker()._process_pending_items()
+
+        assert seen["started_at"] > real_datetime.utcnow() + timedelta(minutes=30)
+
+    @pytest.mark.asyncio
+    async def test_item_reclaimed_elsewhere_is_not_run(self, db, user, queue_item):
+        first, second = self._two_items(db, user, queue_item)
+        ran = []
+
+        async def fake_process(session, item):
+            ran.append(item.id)
+            item.status = "completed"
+            # Another sweep reclaims the not-yet-started second item.
+            session.query(SyncQueue).filter(SyncQueue.id == second.id).update(
+                {"status": "pending"}, synchronize_session=False
+            )
+            session.commit()
+
+        with patch("app.services.sync_worker.SessionLocal", return_value=db), \
+             patch.object(db, "close"), \
+             patch.object(SyncWorker, "_process_queue_item", side_effect=fake_process):
+            await SyncWorker()._process_pending_items()
+
+        assert ran == [first.id]
+
+    @pytest.mark.asyncio
+    async def test_cancellation_releases_unstarted_rows(self, db, user, queue_item):
+        import asyncio
+
+        first, second = self._two_items(db, user, queue_item)
+        first_id, second_id = first.id, second.id
+
+        async def cancelled(session, item):
+            raise asyncio.CancelledError()
+
+        with patch("app.services.sync_worker.SessionLocal", return_value=db), \
+             patch.object(db, "close"), \
+             patch.object(SyncWorker, "_process_queue_item", side_effect=cancelled):
+            with pytest.raises(asyncio.CancelledError):
+                await SyncWorker()._process_pending_items()
+
+        by_id = {r.id: r for r in db.query(SyncQueue).all()}
+        # Order is by created_at, so `first` ran (in flight) and `second` was unstarted.
+        assert by_id[first_id].status == "processing"  # left to the lease reclaim
+        assert by_id[second_id].status == "pending"
+        assert by_id[second_id].retry_count == 0
