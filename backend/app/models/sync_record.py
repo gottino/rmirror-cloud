@@ -1,5 +1,6 @@
 """Sync record models for tracking synchronization to external services."""
 
+import logging
 from datetime import datetime
 from enum import Enum
 
@@ -7,6 +8,8 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Te
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+
+logger = logging.getLogger(__name__)
 
 
 class SyncStatus(str, Enum):
@@ -218,7 +221,7 @@ class IntegrationConfig(Base):
             Decrypted configuration dictionary
 
         Raises:
-            cryptography.fernet.InvalidToken: If decryption fails
+            ConfigDecryptionError: If the stored config cannot be decrypted
 
         Example:
             >>> config = integration.get_config()
@@ -228,6 +231,26 @@ class IntegrationConfig(Base):
 
         encryption_service = get_encryption_service()
         return encryption_service.decrypt_config(self.config_encrypted, self.user_id)
+
+    def get_config_or_none(self) -> dict | None:
+        """Decrypted configuration, or None if it cannot be decrypted.
+
+        None means the integration needs reconnecting (e.g. the row was
+        encrypted under another environment's key). The failure is logged at
+        WARNING with the user id and target name, never the stored data.
+        """
+        from app.services.encryption import ConfigDecryptionError
+
+        try:
+            return self.get_config()
+        except ConfigDecryptionError:
+            logger.warning(
+                "Stored %s credentials for user %s cannot be decrypted; "
+                "the integration needs reconnecting",
+                self.target_name,
+                self.user_id,
+            )
+            return None
 
     def __repr__(self) -> str:
         return f"<IntegrationConfig(id={self.id}, user={self.user_id}, target={self.target_name})>"

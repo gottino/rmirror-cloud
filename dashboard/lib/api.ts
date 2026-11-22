@@ -56,7 +56,8 @@ export type OcrStatus =
   | 'completed'
   | 'failed'
   | 'skipped'
-  | 'pending_quota';
+  | 'pending_quota'
+  | 'pending_retry';
 
 export interface Page {
   id: number;
@@ -255,6 +256,8 @@ export interface IntegrationConfig {
   created_at: string;
   updated_at: string;
   last_synced_at: string | null;
+  /** Stored credentials cannot be read by the server: the user must reconnect. */
+  needs_reconnect?: boolean;
 }
 
 /** backend notion_oauth.py / todoist.py `OAuthUrlResponse` */
@@ -765,6 +768,7 @@ export interface TodoistProject {
 
 export interface TodoistStatus {
   connected: boolean;
+  needs_reconnect?: boolean;
   project_name: string | null;
   project_id: string | null;
   last_sync: string | null;

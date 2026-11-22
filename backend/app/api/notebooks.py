@@ -673,6 +673,8 @@ async def _export_markdown(
             lines.append("*[OCR failed]*")
         elif page.ocr_status == "pending_quota":
             lines.append("*[OCR pending - quota exceeded]*")
+        elif page.ocr_status == "pending_retry":
+            lines.append("*[OCR pending]*")
         elif page.ocr_status == "not_synced":
             lines.append("*[Page not yet synced]*")
         else:

@@ -8,9 +8,18 @@ import hashlib
 import json
 from typing import Any
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 from app.config import get_settings
+
+
+class ConfigDecryptionError(Exception):
+    """A stored integration config cannot be read with this server's key.
+
+    Typical cause: the row was encrypted under another INTEGRATION_MASTER_KEY
+    (data copied from another environment) or is corrupted. The user has to
+    reconnect the integration. The message never contains the ciphertext.
+    """
 
 
 class EncryptionService:
@@ -102,8 +111,8 @@ class EncryptionService:
             Decrypted configuration dictionary
 
         Raises:
-            cryptography.fernet.InvalidToken: If decryption fails (wrong key or corrupted data)
-            json.JSONDecodeError: If content is neither valid encrypted data nor valid JSON
+            ConfigDecryptionError: If the config cannot be decrypted (wrong key or
+                corrupted data) or does not decrypt to a JSON object
 
         Example:
             >>> encrypted = "gAAAAABh..."
@@ -120,11 +129,16 @@ class EncryptionService:
 
         user_fernet = self._get_user_key(user_id)
 
-        # Decrypt
-        decrypted_bytes = user_fernet.decrypt(encrypted_config.encode())
-
-        # Parse JSON
-        config_dict = json.loads(decrypted_bytes.decode())
+        try:
+            decrypted_bytes = user_fernet.decrypt(encrypted_config.encode())
+            config_dict = json.loads(decrypted_bytes.decode())
+        except (InvalidToken, ValueError):  # ValueError covers JSON and UTF-8 errors
+            # "from None": nothing derived from the stored data in the traceback
+            raise ConfigDecryptionError(
+                "Stored integration config could not be decrypted"
+            ) from None
+        if not isinstance(config_dict, dict):
+            raise ConfigDecryptionError("Stored integration config is not a JSON object")
 
         return config_dict
 

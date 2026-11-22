@@ -24,6 +24,7 @@ from app.core.rm_metadata import RMMetadataParser
 from app.core.upserts import get_or_create_notebook, get_or_create_page
 from app.database import get_db
 from app.dependencies import get_storage_service
+from app.jobs.process_pending_pages import record_ocr_failure
 from app.middleware.rate_limit import UPLOAD_LIMIT, limiter
 from app.models.notebook import DocumentType, Notebook
 from app.models.page import OcrStatus, Page
@@ -53,6 +54,10 @@ class ProcessRMFileResponse(BaseModel):
     metadata: dict | None = None
     notebook_id: int | None = None
     page_id: int | None = None
+    # The page's OCR state after this upload: "completed", or "pending_quota" /
+    # "pending_retry" when the page was stored and OCR will run later. Either
+    # way the upload itself succeeded.
+    ocr_status: str | None = None
 
 
 @router.post("/rm-file", response_model=ProcessRMFileResponse)
@@ -193,9 +198,9 @@ async def process_rm_file(
         with os.fdopen(fd, "wb") as tmp_file:
             tmp_file.write(rm_content)
 
-        # Initialize services
+        # Initialize services (the OCR client is created only when OCR runs,
+        # so a missing or broken provider key cannot fail the upload)
         converter = RMConverter()
-        ocr_service = OCRService()
 
         # Check if file has content
         if not await asyncio.to_thread(converter.has_content, temp_rm_path):
@@ -229,6 +234,7 @@ async def process_rm_file(
         extracted_text = ""
         pdf_bytes = None
         ocr_status = OcrStatus.PENDING
+        ocr_failed = False
 
         if needs_processing:
             # Convert .rm to PDF (always, regardless of quota)
@@ -257,17 +263,31 @@ async def process_rm_file(
                 # Quota reserved - run OCR, giving the unit back if OCR fails
                 logger.info(f"Extracting text from {rm_file.filename} via OCR")
                 try:
-                    extracted_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
-                except Exception:
+                    extracted_text = await OCRService().extract_text_from_pdf(pdf_bytes)
+                except Exception as e:
+                    # Provider errors (billing, auth, quota), timeouts and network
+                    # errors must not lose the upload: store the page and let the
+                    # sync worker retry the OCR. The provider's text stays in the
+                    # log; the client and the page get a generic message.
                     quota_service.release_quota(db, current_user.id)
-                    raise
-                if extracted_text:
-                    logger.info(f"Consumed 1 OCR quota unit for user {current_user.id}")
+                    logger.warning(
+                        f"OCR failed for page {page_uuid} of user {current_user.id} "
+                        f"({type(e).__name__}: {e}); storing it for a retry",
+                        exc_info=True,
+                    )
+                    ocr_failed = True
+                    extracted_text = ""
+                    ocr_status = OcrStatus.PENDING_RETRY
                 else:
-                    # A blank page is a legitimate result; don't charge for it.
-                    quota_service.release_quota(db, current_user.id)
-                    logger.info(f"OCR found no text in {rm_file.filename}; quota not charged")
-                ocr_status = OcrStatus.COMPLETED
+                    if extracted_text:
+                        logger.info(f"Consumed 1 OCR quota unit for user {current_user.id}")
+                    else:
+                        # A blank page is a legitimate result; don't charge for it.
+                        quota_service.release_quota(db, current_user.id)
+                        logger.info(
+                            f"OCR found no text in {rm_file.filename}; quota not charged"
+                        )
+                    ocr_status = OcrStatus.COMPLETED
             else:
                 # Quota exhausted - skip OCR but keep page
 
@@ -361,6 +381,13 @@ async def process_rm_file(
                 page.ocr_text = extracted_text
                 page.ocr_status = ocr_status
                 page.ocr_completed_at = datetime.utcnow() if ocr_status == OcrStatus.COMPLETED else None
+                # New content: earlier failures no longer count
+                page.ocr_error = None
+                page.ocr_attempts = 0
+
+        if ocr_failed:
+            # First failed attempt for this content (sets PENDING_RETRY + message)
+            record_ocr_failure(page)
 
         db.commit()
         db.refresh(page)
@@ -405,6 +432,7 @@ async def process_rm_file(
             metadata=metadata_dict,
             notebook_id=notebook.id,
             page_id=page.id,
+            ocr_status=page.ocr_status,
         )
 
     except HTTPException:
@@ -417,9 +445,9 @@ async def process_rm_file(
         # Clean up temp file on error
         if temp_rm_path and temp_rm_path.exists():
             temp_rm_path.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to process .rm file: {str(e)}"
-        )
+        # The exception text may come from a third party (storage, OCR
+        # provider): log it, never return it.
+        raise HTTPException(status_code=500, detail="Failed to process .rm file")
 
 
 class UpdateMetadataRequest(BaseModel):

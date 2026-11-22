@@ -6,7 +6,9 @@ Tests encryption/decryption round-trips, key derivation, and error handling.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet
+
+from app.services.encryption import ConfigDecryptionError
 
 
 @pytest.fixture
@@ -45,11 +47,22 @@ class TestEncryptionService:
         assert decrypted == config
 
     def test_decrypt_with_wrong_user_id(self, encryption_service):
-        """Decrypting with different user_id should raise InvalidToken."""
+        """Decrypting with different user_id should raise ConfigDecryptionError."""
         config = {"key": "value"}
         encrypted = encryption_service.encrypt_config(config, user_id=1)
-        with pytest.raises(InvalidToken):
+        with pytest.raises(ConfigDecryptionError):
             encryption_service.decrypt_config(encrypted, user_id=2)
+
+    def test_decrypt_with_other_master_key(self, encryption_service):
+        """A row encrypted under another environment's key: ConfigDecryptionError."""
+        other = Fernet(Fernet.generate_key()).encrypt(b'{"token": "x"}').decode()
+        with pytest.raises(ConfigDecryptionError) as excinfo:
+            encryption_service.decrypt_config(other, user_id=1)
+        assert other not in str(excinfo.value)
+
+    def test_decrypt_garbage(self, encryption_service):
+        with pytest.raises(ConfigDecryptionError):
+            encryption_service.decrypt_config("not-a-token", user_id=1)
 
     def test_different_users_produce_different_ciphertexts(self, encryption_service):
         """Same config encrypted for different users should differ."""

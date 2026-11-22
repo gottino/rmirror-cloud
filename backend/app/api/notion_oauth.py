@@ -224,7 +224,11 @@ async def oauth_callback(
 
         if existing:
             # Update existing config with new token
-            config_dict = existing.get_config()
+            config_dict = existing.get_config_or_none()
+            if config_dict is None:
+                # Unreadable old config: start over, enabled after database selection
+                config_dict = {}
+                existing.is_enabled = False
             config_dict["access_token"] = access_token
             config_dict["workspace_id"] = workspace_id
             config_dict["workspace_name"] = workspace_name

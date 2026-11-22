@@ -5,14 +5,20 @@ Pages uploaded while a user's OCR quota is exhausted are stored with
 an upgrade), the background sync worker calls ``process_pending_quota_pages``
 each poll; it picks a few eligible users and OCRs a bounded number of their
 pending pages, newest first.
+
+Pages whose OCR call failed (provider error, timeout, network) are stored as
+``OcrStatus.PENDING_RETRY`` and go through the same sweep once their backoff
+has passed (``retry_due``). After ``MAX_OCR_ATTEMPTS`` failed calls a page is
+marked ``FAILED``; re-uploading it (the upload endpoint re-OCRs FAILED pages)
+starts over.
 """
 
 import logging
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Iterator, Optional
 
-from sqlalchemy import or_, text
+from sqlalchemy import and_, or_, text
 from sqlalchemy.orm import Session
 
 from app.core.ocr_service import OCRService
@@ -35,12 +41,75 @@ MAX_PAGES_PER_USER = 5
 # the user id). Arbitrary constant ("RQOC"), just distinct from other locks.
 PENDING_QUOTA_LOCK_CLASS = 0x52514F43
 
+# Failed OCR calls a page may accumulate (the upload's own attempt included)
+# before it is marked FAILED. Retry n waits OCR_RETRY_BASE_DELAY * 2**(n-1)
+# after the previous failure: 15 min, 30 min, ... 16 h; about 32 h in all, so a
+# provider outage or an exhausted API key that is fixed within a day recovers
+# without the user re-uploading, and a broken key costs at most a few calls
+# per page.
+MAX_OCR_ATTEMPTS = 8
+OCR_RETRY_BASE_DELAY = timedelta(minutes=15)
+
+# What the page (and so the dashboard) shows; never the provider's own text.
+OCR_RETRY_MESSAGE = "OCR is temporarily unavailable; it will be retried automatically."
+OCR_GAVE_UP_MESSAGE = "OCR failed after several attempts. Upload the page again to retry."
+
+
+def ocr_retry_delay(attempts: int) -> timedelta:
+    """Wait before the next OCR call for a page that has failed ``attempts`` times."""
+    return OCR_RETRY_BASE_DELAY * (2 ** max(attempts - 1, 0))
+
+
+def record_ocr_failure(page: Page) -> bool:
+    """Count a failed OCR call on ``page`` and set its status (caller commits).
+
+    Returns True if the page will be retried (PENDING_RETRY), False if it has
+    used up ``MAX_OCR_ATTEMPTS`` and is now FAILED. The stored error is a
+    generic message: provider errors are logged by the caller, never stored.
+    """
+    page.ocr_attempts = (page.ocr_attempts or 0) + 1
+    page.ocr_text = None
+    page.ocr_completed_at = None
+    if page.ocr_attempts >= MAX_OCR_ATTEMPTS:
+        page.ocr_status = OcrStatus.FAILED
+        page.ocr_error = OCR_GAVE_UP_MESSAGE
+        return False
+    page.ocr_status = OcrStatus.PENDING_RETRY
+    page.ocr_error = OCR_RETRY_MESSAGE
+    return True
+
+
+def retry_due(now: datetime):
+    """SQL filter: PENDING_RETRY pages whose backoff has passed.
+
+    ``updated_at`` is the time of the last failed call (the failure is the last
+    write to the row). Written as one branch per attempt count so it is plain,
+    portable SQL.
+    """
+    return and_(
+        Page.ocr_status == OcrStatus.PENDING_RETRY,
+        or_(
+            *(
+                and_(Page.ocr_attempts == n, Page.updated_at <= now - ocr_retry_delay(n))
+                for n in range(0, MAX_OCR_ATTEMPTS)
+            )
+        ),
+    )
+
+
+def _processable(now: datetime):
+    """SQL filter: pages the sweep may OCR now (PENDING_QUOTA, or a due retry)."""
+    return and_(
+        or_(Page.ocr_status == OcrStatus.PENDING_QUOTA, retry_due(now)),
+        Page.pdf_s3_key.isnot(None),  # Must have PDF to process
+    )
+
 
 async def process_pending_pages_for_user(
     db: Session, user_id: int, limit: Optional[int] = None
 ) -> int:
     """
-    Process all PENDING_QUOTA pages for a user.
+    Process all PENDING_QUOTA pages (and PENDING_RETRY pages that are due) for a user.
 
     Called when quota resets or user upgrades to Pro tier.
 
@@ -52,6 +121,9 @@ async def process_pending_pages_for_user(
     back if OCR fails or finds no text; processing stops as soon as a
     reservation is refused. Each OCR'd page then goes through
     ``on_ocr_completed`` (Obsidian hash, integration syncs), like an upload.
+    A failed OCR call is recorded with ``record_ocr_failure`` (retry with
+    backoff, FAILED after ``MAX_OCR_ATTEMPTS``) and ends this user's batch:
+    when the provider is down, the next pages would fail the same way.
 
     Callers that can run concurrently (the sync worker in each uvicorn process)
     must hold the user's claim (``_user_claim``) while calling this.
@@ -69,14 +141,13 @@ async def process_pending_pages_for_user(
         >>> count = await process_pending_pages_for_user(db, user_id=42)
         >>> # Result: 30 newest pages processed, 20 oldest still pending
     """
-    # Get all PENDING_QUOTA pages for user, ordered newest first
+    # Get the user's processable pages, ordered newest first
     query = (
         db.query(Page)
         .join(Notebook, Notebook.id == Page.notebook_id)
         .filter(
             Notebook.user_id == user_id,
-            Page.ocr_status == OcrStatus.PENDING_QUOTA,
-            Page.pdf_s3_key.isnot(None),  # Must have PDF to process
+            _processable(datetime.utcnow()),
         )
         .order_by(Page.created_at.desc(), Page.id.desc())  # DESC = newest first!
     )
@@ -116,22 +187,28 @@ async def process_pending_pages_for_user(
             logger.debug(f"Running OCR for page {page.id}")
             ocr_text = await ocr_service.extract_text_from_pdf(pdf_bytes)
         except Exception as e:
-            logger.error(
-                f"Failed to process pending page {page.id} for user {user_id}: {e}",
+            # Provider text goes to the log only; the page gets a generic message.
+            logger.warning(
+                f"OCR failed for pending page {page.id} of user {user_id} "
+                f"({type(e).__name__}: {e})",
                 exc_info=True,
             )
             db.rollback()
-            # Give the reserved unit back; mark failed but continue with other pages
+            # Give the reserved unit back and schedule a retry (or give up)
             try:
                 quota_service.release_quota(db, user_id)
-                page.ocr_status = OcrStatus.FAILED
-                page.ocr_error = str(e)[:500]  # Limit error message length
+                if not record_ocr_failure(page):
+                    logger.warning(
+                        f"Giving up OCR for page {page.id} of user {user_id} "
+                        f"after {page.ocr_attempts} attempts"
+                    )
                 db.commit()
             except Exception as commit_error:
                 logger.error(f"Failed to record OCR failure: {commit_error}")
                 db.rollback()
             failed_count += 1
-            continue
+            # The provider is most likely down for every page: stop this batch.
+            break
 
         if not ocr_text:
             # A blank page is a legitimate result; don't charge for it.
@@ -140,6 +217,8 @@ async def process_pending_pages_for_user(
         page.ocr_text = ocr_text
         page.ocr_status = OcrStatus.COMPLETED
         page.ocr_completed_at = datetime.utcnow()
+        page.ocr_error = None
+        page.ocr_attempts = 0
         db.commit()
         processed_count += 1
 
@@ -164,7 +243,9 @@ async def process_pending_pages_for_user(
 def _users_with_processable_pages(
     db: Session, *, after_user_id: int, limit: int
 ) -> list[int]:
-    """User ids (> after_user_id, ascending) with PENDING_QUOTA pages and quota room.
+    """User ids (> after_user_id, ascending) with processable pages and quota room.
+
+    Processable: PENDING_QUOTA, or PENDING_RETRY with the backoff passed.
 
     "Room" means unlimited, ``used < limit``, or a period that has ended:
     ``reserve_quota`` resets the latter lazily, so it counts as available here.
@@ -179,8 +260,7 @@ def _users_with_processable_pages(
             & (QuotaUsage.quota_type == QuotaType.OCR),
         )
         .filter(
-            Page.ocr_status == OcrStatus.PENDING_QUOTA,
-            Page.pdf_s3_key.isnot(None),
+            _processable(now),
             Notebook.user_id > after_user_id,
             or_(
                 QuotaUsage.limit == -1,
@@ -255,8 +335,8 @@ async def process_pending_quota_pages(
 ) -> tuple[int, int]:
     """One bounded sweep of retroactive OCR, called by the sync worker each poll.
 
-    Picks up to ``max_users`` users that have ``PENDING_QUOTA`` pages and quota
-    room again, round-robin by user id starting after ``after_user_id`` (so a
+    Picks up to ``max_users`` users that have ``PENDING_QUOTA`` pages (or
+    ``PENDING_RETRY`` pages that are due) and quota room again, round-robin by user id starting after ``after_user_id`` (so a
     user with a large backlog doesn't starve the others), claims each one, and
     OCRs up to ``max_pages_per_user`` of their pending pages, newest first.
 

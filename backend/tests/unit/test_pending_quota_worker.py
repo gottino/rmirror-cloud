@@ -226,8 +226,15 @@ async def test_failed_ocr_does_not_consume_quota(db: Session, ocr):
 
     await _run_worker_step(db)
 
-    # Newest first: the newest page failed, the older one succeeded
-    assert _status(db, pages) == [OcrStatus.COMPLETED, OcrStatus.FAILED]
+    # Newest first: the newest page failed and waits for a retry; the failure
+    # ends the user's batch, so the older page is left for the next sweep.
+    assert _status(db, pages) == [OcrStatus.PENDING_QUOTA, OcrStatus.PENDING_RETRY]
+    assert _quota(db, user).used == 0
+
+    await _run_worker_step(db)
+
+    # The older page goes through; the failed one is not due yet (backoff).
+    assert _status(db, pages) == [OcrStatus.COMPLETED, OcrStatus.PENDING_RETRY]
     assert _quota(db, user).used == 1
 
 

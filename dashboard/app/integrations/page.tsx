@@ -311,12 +311,25 @@ export default function IntegrationsPage() {
                 {notionIntegration ? (
                   <>
                     <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
-                      Status: <span style={{ color: 'var(--sage-green)', fontWeight: 500 }}>Connected</span>
+                      Status: {notionIntegration.needs_reconnect ? (
+                        <span style={{ color: 'var(--destructive)', fontWeight: 500 }}>Reconnect needed</span>
+                      ) : (
+                        <span style={{ color: 'var(--sage-green)', fontWeight: 500 }}>Connected</span>
+                      )}
                       {notionIntegration.last_synced_at && (
                         <> &middot; Last synced {timeAgo(notionIntegration.last_synced_at)}</>
                       )}
                     </p>
                     <div className="flex gap-2 flex-wrap">
+                      {notionIntegration.needs_reconnect && (
+                        <button
+                          onClick={handleConnectNotion}
+                          className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                          style={{ backgroundColor: 'var(--warm-charcoal)', color: 'white' }}
+                        >
+                          Reconnect Notion
+                        </button>
+                      )}
                       <button
                         onClick={() => router.push('/integrations/notion/setup?type=notebooks')}
                         className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
@@ -573,7 +586,9 @@ export default function IntegrationsPage() {
                 ) : (
                   <>
                     <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
-                      Sync todos to Todoist for powerful task management
+                      {todoistStatus?.needs_reconnect
+                        ? 'Your Todoist connection can no longer be read. Reconnect to resume syncing todos.'
+                        : 'Sync todos to Todoist for powerful task management'}
                     </p>
                     <button
                       onClick={handleConnectTodoist}
@@ -581,7 +596,7 @@ export default function IntegrationsPage() {
                       className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
                       style={{ backgroundColor: 'var(--warm-charcoal)', color: 'white' }}
                     >
-                      {todoistLoading ? 'Connecting...' : 'Connect Todoist'}
+                      {todoistLoading ? 'Connecting...' : todoistStatus?.needs_reconnect ? 'Reconnect Todoist' : 'Connect Todoist'}
                     </button>
                   </>
                 )}

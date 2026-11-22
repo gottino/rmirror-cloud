@@ -69,6 +69,9 @@ class SetProjectRequest(BaseModel):
 
 class TodoistStatusResponse(BaseModel):
     connected: bool
+    # The stored credentials cannot be read (e.g. encrypted under another
+    # environment's key): connected is false and the user must reconnect.
+    needs_reconnect: bool = False
     project_name: Optional[str] = None
     project_id: Optional[str] = None
     last_sync: Optional[str] = None
@@ -122,7 +125,11 @@ async def oauth_callback(
         )
 
         if existing:
-            config_dict = existing.get_config()
+            config_dict = existing.get_config_or_none()
+            if config_dict is None:
+                # Unreadable old config: start over, enabled after project selection
+                config_dict = {}
+                existing.is_enabled = False
             config_dict["access_token"] = access_token
             existing.set_config(config_dict)
         else:
@@ -289,7 +296,7 @@ async def get_status(
     if not config:
         return TodoistStatusResponse(connected=False)
 
-    config_dict = config.get_config()
+    config_dict = config.get_config_or_none()
 
     # Count synced todos
     todos_synced = (
@@ -302,6 +309,14 @@ async def get_status(
         )
         .count()
     )
+
+    if config_dict is None:
+        return TodoistStatusResponse(
+            connected=False,
+            needs_reconnect=True,
+            last_sync=config.last_synced_at.isoformat() if config.last_synced_at else None,
+            todos_synced=todos_synced,
+        )
 
     return TodoistStatusResponse(
         connected=config.is_enabled,

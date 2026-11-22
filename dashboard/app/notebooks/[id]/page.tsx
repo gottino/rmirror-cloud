@@ -194,7 +194,7 @@ const PageCard = memo(function PageCard({ page, getToken, copied, setCopiedPageI
                     : 'var(--warm-gray)'
                 }}
               >
-                {page.ocr_status === 'pending_quota' ? 'Awaiting Quota' : page.ocr_status === 'not_synced' ? 'Not Synced' : page.ocr_status}
+                {page.ocr_status === 'pending_quota' ? 'Awaiting Quota' : page.ocr_status === 'pending_retry' ? 'OCR Pending' : page.ocr_status === 'not_synced' ? 'Not Synced' : page.ocr_status}
               </span>
             </div>
           </div>

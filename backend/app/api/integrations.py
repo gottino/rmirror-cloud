@@ -37,6 +37,9 @@ class IntegrationConfigResponse(BaseModel):
     created_at: str
     updated_at: str
     last_synced_at: str | None = None
+    # True when the stored credentials cannot be decrypted (e.g. encrypted
+    # under another environment's key): the user must reconnect.
+    needs_reconnect: bool = False
     # Note: config is not returned for security (contains API keys)
 
 
@@ -139,6 +142,7 @@ async def list_integrations(
                 last_synced_at=config.last_synced_at.isoformat()
                 if config.last_synced_at
                 else None,
+                needs_reconnect=config.get_config_or_none() is None,
             )
             for config in configs
         ]
@@ -181,6 +185,7 @@ async def get_integration(
             last_synced_at=config.last_synced_at.isoformat()
             if config.last_synced_at
             else None,
+            needs_reconnect=config.get_config_or_none() is None,
         )
 
     except HTTPException:

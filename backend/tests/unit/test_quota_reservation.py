@@ -330,7 +330,9 @@ def test_upload_ocr_failure_releases_reservation(db: Session, upload):
 
     resp = upload(user, text=RuntimeError("model down"))
 
-    assert resp.status_code == 500
+    # The upload still succeeds; the page waits for an OCR retry.
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ocr_status"] == OcrStatus.PENDING_RETRY
     assert _quota(db, user.id).used == 5
 
 
@@ -426,5 +428,5 @@ async def test_retroactive_ocr_failure_releases_reservation(db: Session, job_ocr
     await job.process_pending_pages_for_user(db, user.id)
 
     db.expire_all()
-    assert db.get(Page, page_id).ocr_status == OcrStatus.FAILED
+    assert db.get(Page, page_id).ocr_status == OcrStatus.PENDING_RETRY
     assert _quota(db, user.id).used == 3
