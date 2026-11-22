@@ -49,6 +49,45 @@ def require_uuid(value: str, what: str) -> str:
         )
 
 
+UPLOAD_READ_CHUNK_SIZE = 64 * 1024
+
+
+async def read_upload_limited(file: UploadFile, max_bytes: int, what: str) -> bytes:
+    """Read an uploaded file, refusing (HTTP 413) anything over ``max_bytes``.
+
+    The upload is read in 64 KiB chunks and rejected as soon as the running
+    total exceeds the limit, so at most ``max_bytes`` plus one chunk is ever
+    held in memory. A size already known from the request (``file.size``) is
+    checked before reading anything.
+    """
+    too_large = HTTPException(
+        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        detail=f"{what} is too large. Maximum size: {_format_size(max_bytes)}.",
+    )
+    if file.size is not None and file.size > max_bytes:
+        raise too_large
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(UPLOAD_READ_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise too_large
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _format_size(num_bytes: int) -> str:
+    if num_bytes >= 1024 * 1024:
+        return f"{num_bytes / (1024 * 1024):.1f} MB"
+    if num_bytes >= 1024:
+        return f"{num_bytes / 1024:.1f} KB"
+    return f"{num_bytes} bytes"
+
+
 def calculate_file_hash(file: BinaryIO) -> str:
     """
     Calculate SHA256 hash of a file.
@@ -215,16 +254,12 @@ async def validate_upload_file(
     # Validate extension
     extension = validate_file_type(file, allowed_extensions)
 
-    # Read file content
-    content = await file.read()
+    # Read file content, rejecting oversized uploads while reading
+    if max_size_bytes:
+        content = await read_upload_limited(file, max_size_bytes, "File")
+    else:
+        content = await file.read()
     await file.seek(0)  # Reset for potential re-reading
-
-    # Validate file size
-    if max_size_bytes and len(content) > max_size_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File too large. Maximum size: {max_size_bytes / (1024*1024):.1f}MB",
-        )
 
     # Validate MIME type (use first 2048 bytes for detection)
     validate_mime_type(content[:2048], allowed_extensions, file.filename)
