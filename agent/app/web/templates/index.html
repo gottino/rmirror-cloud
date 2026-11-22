@@ -1962,18 +1962,31 @@
 
                 let data = await response.json();
 
-                // The sync runs in the background: poll until it finishes
+                // The sync runs in the background: poll until it finishes,
+                // showing the live page counts on the button
                 while (data.state === 'running') {
+                    const c = data.counts;
+                    if (c) {
+                        const nb = c.notebooks_total ? ` · notebook ${Math.min(c.notebooks_done + 1, c.notebooks_total)}/${c.notebooks_total}` : '';
+                        button.textContent = `Syncing… ${c.uploaded} uploaded, ${c.failed} failed${nb}`;
+                    }
                     await new Promise(resolve => setTimeout(resolve, 2000));
                     data = await (await fetch('/api/sync/initial/status')).json();
                 }
-                if (data.state === 'done') data.success = true;
-                if (data.state === 'error') data.success = false;
 
-                if (data.success) {
-                    const stats = data.stats;
-                    const message = `Initial sync complete! Synced ${stats.notebooks} notebook(s) with ${stats.pages} page(s).`;
-                    showMessage(message, 'success');
+                if (data.state === 'done') {
+                    const c = data.counts || {uploaded: 0, failed: 0, skipped: 0, rate_limited: 0};
+                    const extra = [];
+                    if (c.skipped) extra.push(`${c.skipped} skipped (page limit)`);
+                    if (c.rate_limited) extra.push(`${c.rate_limited} rate limited`);
+                    const tail = extra.length ? `, ${extra.join(', ')}` : '';
+                    if (data.outcome === 'failed') {
+                        showMessage(`Initial sync failed: ${c.failed} page(s) could not be uploaded${tail}. Check the log and try again.`, 'error');
+                    } else if (data.outcome === 'partial') {
+                        showMessage(`Initial sync finished with problems: ${c.uploaded} page(s) uploaded, ${c.failed} failed${tail}.`, 'error');
+                    } else {
+                        showMessage(`Initial sync complete: ${c.uploaded} page(s) uploaded${tail}.`, 'success');
+                    }
 
                     // Refresh status after sync
                     await refreshStatus();
@@ -2922,6 +2935,12 @@
                 document.getElementById('agent-version').textContent = 'rMirror Agent';
             }
         })();
+
+        // Back from sign-in (/auth/callback redirects here with ?signed_in=1)
+        if (new URLSearchParams(window.location.search).get('signed_in') === '1') {
+            showMessage('Signed in to rMirror Cloud.', 'success');
+            window.history.replaceState({}, '', window.location.pathname);
+        }
 
         // Auto-open updates overlay if ?updates=1 in URL
         if (new URLSearchParams(window.location.search).get('updates') === '1') {

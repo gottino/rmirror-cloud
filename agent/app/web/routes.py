@@ -4,6 +4,7 @@ Flask routes for rMirror Agent web UI.
 
 import asyncio
 import hmac
+import ipaddress
 import logging
 import secrets
 import threading
@@ -12,7 +13,7 @@ from collections.abc import Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 import httpx
 from flask import Flask, jsonify, redirect, render_template, request
@@ -65,6 +66,7 @@ class InitialSyncJob:
         self._message: str | None = None
         self._started_at: str | None = None
         self._finished_at: str | None = None
+        self._counts: dict | None = None
 
     @staticmethod
     def _now() -> str:
@@ -77,6 +79,7 @@ class InitialSyncJob:
                 return False
             self._state = self.RUNNING
             self._stats = None
+            self._counts = None
             self._message = None
             self._started_at = self._now()
             self._finished_at = None
@@ -88,10 +91,24 @@ class InitialSyncJob:
             self._state = self.IDLE
             self._started_at = None
 
+    def update_progress(self, counts: dict) -> None:
+        """Live page counts from the running sync (called on the agent loop)."""
+        with self._lock:
+            if self._state == self.RUNNING:
+                self._counts = dict(counts)
+
     def finish(self, stats: dict) -> None:
         with self._lock:
             self._state = self.DONE
             self._stats = stats
+            # Final counts come from the returned stats, which are authoritative
+            self._counts = {
+                **(self._counts or {}),
+                "uploaded": stats.get("pages", 0),
+                "failed": stats.get("failed", 0),
+                "skipped": stats.get("skipped", 0),
+                "rate_limited": stats.get("rate_limited", 0),
+            }
             self._finished_at = self._now()
 
     def fail(self, message: str) -> None:
@@ -100,11 +117,22 @@ class InitialSyncJob:
             self._message = message
             self._finished_at = self._now()
 
+    def _outcome(self) -> str | None:
+        """For a finished run: success, partial (some pages not uploaded) or failed (none uploaded)."""
+        if self._state != self.DONE or self._counts is None:
+            return None
+        missed = self._counts["failed"] + self._counts["rate_limited"]
+        if missed == 0:
+            return "success"
+        return "failed" if self._counts["uploaded"] == 0 else "partial"
+
     def snapshot(self) -> dict:
         with self._lock:
             return {
                 "state": self._state,
                 "stats": self._stats,
+                "counts": dict(self._counts) if self._counts is not None else None,
+                "outcome": self._outcome(),
                 "message": self._message,
                 "started_at": self._started_at,
                 "finished_at": self._finished_at,
@@ -208,6 +236,19 @@ class AuthStateStore:
             return True
 
 
+def _is_loopback_url(url: str) -> bool:
+    """True if the URL's host is this machine (localhost, 127.0.0.0/8 or ::1)."""
+    host = urlparse(url).hostname
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 async def verify_agent_token(cloud_sync: CloudSync, token: str) -> bool:
     """Check a candidate token against the backend before it is stored."""
     client = cloud_sync.ensure_client()
@@ -291,7 +332,7 @@ def register_routes(app: Flask) -> None:
             {
                 "agent": {
                     "running": True,
-                    "version": "0.1.0",
+                    "version": __version__,
                 },
                 "authentication": {
                     "authenticated": cloud_sync.authenticated if cloud_sync else False,
@@ -434,7 +475,7 @@ def register_routes(app: Flask) -> None:
             if not config.sync.sync_all_notebooks:
                 selected_uuids = config.sync.selected_notebooks
 
-            initial_sync = InitialSync(config, cloud_sync)
+            initial_sync = InitialSync(config, cloud_sync, on_progress=initial_sync_job.update_progress)
 
             # Runs as a task on the agent loop; the UI polls /api/sync/initial/status
             _agent_loop().submit(_run_initial_sync(initial_sync_job, initial_sync, selected_uuids))
@@ -454,7 +495,11 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/api/sync/initial/status")
     def api_sync_initial_status():
-        """State of the initial sync: idle, running, done (with stats) or error (with message)."""
+        """State of the initial sync: idle, running, done (with stats) or error (with message).
+
+        ``counts`` has the uploaded / failed / skipped / rate_limited pages, live while
+        running and final when done; ``outcome`` (done only) is success, partial or failed.
+        """
         return jsonify(initial_sync_job.snapshot())
 
     @app.route("/api/test-connection", methods=["POST"])
@@ -511,16 +556,17 @@ def register_routes(app: Flask) -> None:
         # One-time state that /auth/callback must receive back
         state = auth_states.issue()
 
-        # Production Clerk keys only work from their registered domain,
-        # so redirect to the external bridge page hosted on that domain.
-        if clerk_key.startswith("pk_live_"):
+        # Use the dashboard's hosted /agent page (current Clerk SDK: handles new-device
+        # verification and switching account) for every backend not on this machine.
+        # The local template is only for development against a backend on loopback.
+        if not _is_loopback_url(api_base):
             callback = (
                 f"http://localhost:{config.web.port}/auth/callback?"
                 + urlencode({"state": state})
             )
             return redirect(f"{api_base}/agent?callback={quote(callback, safe='')}")
 
-        # Dev/test keys work from localhost — serve the local bridge
+        # Local development backend: serve the local bridge
         return render_template(
             "auth_bridge.html",
             clerk_publishable_key=clerk_key,
@@ -607,11 +653,9 @@ def register_routes(app: Flask) -> None:
                 except Exception as e:
                     app.logger.error(f"Failed to start file watcher: {e}")
 
-            # Redirect to dashboard - the setup wizard will detect agent connection
-            dashboard_url = config.api.url.replace("/api/v1", "").replace("/api", "")
-            if not dashboard_url or "localhost:8000" in dashboard_url:
-                dashboard_url = "https://rmirror.io"
-            return redirect(f"{dashboard_url}/dashboard")
+            # Back to the agent's own page, which shows a success message. (The
+            # dashboard's setup wizard detects the agent by polling the backend.)
+            return redirect("/?signed_in=1")
         except Exception as e:
             return render_template("auth_result.html", success=False, message=str(e))
 
