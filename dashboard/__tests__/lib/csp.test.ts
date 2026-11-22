@@ -74,7 +74,8 @@ describe('buildContentSecurityPolicy', () => {
       expect.arrayContaining(['blob:', 'https://challenges.cloudflare.com'])
     );
     expect(d['frame-ancestors']).toEqual(["'self'"]);
-    expect(d['object-src']).toEqual(["'none'"]);
+    // The built-in PDF viewer needs blob: (notebook PDF view), nothing remote.
+    expect(d['object-src']).toEqual(["'self'", 'blob:']);
     expect(d['base-uri']).toEqual(["'self'"]);
     expect(d['form-action']).toEqual(["'self'"]);
   });
