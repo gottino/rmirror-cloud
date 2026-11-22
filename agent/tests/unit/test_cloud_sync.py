@@ -530,3 +530,32 @@ class TestUploadReauthBound:
         assert posts == 2
         assert reauths == 1
         assert sync.authenticated is False
+
+
+class TestNoNoteContentInLogs:
+    """OCR text is the user's note content: it must never reach the log files."""
+
+    async def test_ocr_text_is_not_logged(self, test_config_with_token, temp_remarkable_dir, caplog):
+        secret_text = "Private handwritten note about something personal"
+        sync = CloudSync(test_config_with_token)
+        sync.authenticated = True
+        sync.client = httpx.AsyncClient(timeout=30.0)
+        rm_file = next((temp_remarkable_dir / "test-notebook-uuid-1234").glob("*.rm"))
+
+        async def mock_post(*args, **kwargs):
+            response = MagicMock()
+            response.status_code = 200
+            response.raise_for_status = MagicMock()
+            response.json.return_value = {"success": True, "extracted_text": secret_text}
+            return response
+
+        caplog.set_level("DEBUG")
+        try:
+            with patch.object(sync.client, "post", new=mock_post):
+                result = await sync.upload_file(rm_file, "test-notebook-uuid-1234", "rm")
+        finally:
+            await sync.close()
+
+        assert result["extracted_text"] == secret_text
+        assert "Private handwritten" not in caplog.text
+        assert f"{len(secret_text)} chars" in caplog.text
