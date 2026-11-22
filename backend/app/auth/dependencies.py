@@ -6,11 +6,12 @@ module only holds the Obsidian plugin's API-key dependency.
 
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.middleware.rate_limit import set_rate_limit_user
 from app.models.user import User
 
 # HTTP Bearer token scheme
@@ -18,6 +19,7 @@ security = HTTPBearer()
 
 
 async def get_obsidian_user(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
     db: Annotated[Session, Depends(get_db)],
 ) -> User:
@@ -62,4 +64,6 @@ async def get_obsidian_user(
             detail="User not found",
         )
 
+    # Key this request's rate limits by user instead of IP
+    set_rate_limit_user(request, user.id)
     return user
