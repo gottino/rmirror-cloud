@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     umami_website_id: Optional[str] = None
 
     # Agent Downloads
-    agent_latest_version: str = "1.6.0"
+    agent_latest_version: str = "1.7.0"
     agent_download_url_macos: str = ""
 
     # Beta / Admin
