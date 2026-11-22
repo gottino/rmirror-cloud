@@ -92,7 +92,11 @@ class TrayApp(rumps.App):
         launch_browser_app_mode(url, app_mode=self.config.web.app_mode)
 
     def quit_app(self, sender: rumps.MenuItem) -> None:
-        """Quit the application."""
+        """Menu item: quit the application."""
+        self.shutdown_and_quit()
+
+    def shutdown_and_quit(self) -> None:
+        """Stop the agent and quit (main thread: the Quit item and SIGTERM/SIGINT)."""
         import os
 
         # Stop the agent (watcher, HTTP client, event loop thread) if it exists
