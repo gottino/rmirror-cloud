@@ -325,11 +325,15 @@ class CloudSync:
                     response.raise_for_status()
 
                     response_data = response.json()
-                    logger.debug(f"Response data: {response_data}")
-
-                    # Log OCR'd text at INFO level for visibility
+                    # Never log the OCR text itself: it is the user's note content
+                    logger.debug(
+                        f"Response data: { {k: v for k, v in response_data.items() if k != 'extracted_text'} }"
+                    )
                     if response_data.get('extracted_text'):
-                        logger.info(f"✓ OCR extracted text: {response_data['extracted_text'][:200]}{'...' if len(response_data['extracted_text']) > 200 else ''}")
+                        logger.info(
+                            f"✓ OCR text received for page {file_path.stem}: "
+                            f"{len(response_data['extracted_text'])} chars"
+                        )
 
                 finally:
                     # Close all file handles
@@ -704,7 +708,7 @@ class CloudSync:
             # Cache user info
             self.user_email = user_data.get('email')
             self.user_id = user_data.get('id')
-            logger.debug(f"User info: {user_data}")
+            logger.debug(f"User info received for user id {self.user_id}")
             return user_data
 
         except httpx.HTTPStatusError as e:
