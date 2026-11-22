@@ -156,6 +156,23 @@ class Settings(BaseSettings):
     dashboard_url: str = "https://rmirror.io"
     beta_signup_enabled: bool = True  # Set to False when beta period ends
 
+    # Rate limiting (slowapi / limits). See app/middleware/rate_limit.py.
+    # memory:// keeps counters per uvicorn worker process, so with N workers a
+    # client can make up to N times each limit. Point this at a shared limits
+    # storage (e.g. redis://...) to make the limits exact across workers.
+    rate_limit_storage_uri: str = "memory://"
+    # Applied to every route without its own limit (keyed per client IP, since
+    # it is checked before authentication runs).
+    rate_limit_default: str = "300/minute"
+    # Stricter limits for routes reachable without a dashboard session.
+    rate_limit_unauthenticated: str = "10/minute"  # waitlist sign-up / invite check
+    rate_limit_webhook: str = "60/minute"  # Clerk webhook (senders retry on 429)
+    rate_limit_obsidian_sync: str = "60/minute"  # Obsidian pull, per user
+    # .rm uploads, per user. An initial sync uploads every page of every
+    # notebook back to back; 120/minute (2 pages a second) lets the agent
+    # work through a large library without stalling while still capping abuse.
+    rate_limit_upload: str = "120/minute"
+
 
 # Settings that must be set outside debug mode (environment variable names).
 # This is the single list used by the start-up check and scripts/check_config.py.
