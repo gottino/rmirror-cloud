@@ -52,8 +52,14 @@ class User(Base):
     # API Key
     api_key_hash: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
 
+    # Agent token revocation: agent tokens carry this value as their "ver"
+    # claim and stop working once it is incremented (POST /auth/agent-token/revoke).
+    agent_token_version: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, server_default="0"
+    )
+
     # Status
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_active:Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Onboarding
