@@ -284,6 +284,18 @@ def _is_unset(settings, name: str) -> bool:
     return value is None or not str(value).strip()
 
 
+def _is_valid_fernet_key(value) -> bool:
+    """True if value decodes to the 32 bytes a Fernet key needs (no value is logged)."""
+    import base64
+    import binascii
+
+    try:
+        raw = value.encode() if isinstance(value, str) else bytes(value)
+        return len(base64.urlsafe_b64decode(raw)) == 32
+    except (binascii.Error, ValueError, TypeError):
+        return False
+
+
 def config_problems(settings) -> tuple[list[str], list[str]]:
     """Return (missing, warnings) for the settings a non-debug run needs.
 
@@ -291,6 +303,10 @@ def config_problems(settings) -> tuple[list[str], list[str]]:
     fail outside debug; `warnings` are optional features that are not set up.
     """
     missing = [n for n in REQUIRED_OUTSIDE_DEBUG if _is_unset(settings, n)]
+    if not _is_unset(settings, "INTEGRATION_MASTER_KEY") and not _is_valid_fernet_key(
+        settings.integration_master_key
+    ):
+        missing.append("INTEGRATION_MASTER_KEY (not a valid key: 32 url-safe base64-encoded bytes)")
 
     backend = (settings.storage_backend or "").strip().lower()
     if backend not in ("", "s3", "local"):

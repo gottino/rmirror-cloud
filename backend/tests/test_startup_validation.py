@@ -13,7 +13,7 @@ FULL = {
     "clerk_secret_key": "clerk-secret-value",
     "clerk_webhook_secret": "whsec-value",
     "google_ai_api_key": "google-key-value",
-    "integration_master_key": "master-key-value",
+    "integration_master_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     "s3_endpoint_url": "https://s3.example.invalid",
     "s3_access_key": "s3-access-value",
     "s3_secret_key": "s3-secret-value",
@@ -106,3 +106,21 @@ def test_storage_local_when_explicit_or_debug(monkeypatch, tmp_path):
 def test_storage_uses_s3_when_configured(monkeypatch):
     monkeypatch.setattr(dependencies, "S3StorageService", lambda: "s3")
     assert _storage(monkeypatch) == "s3"
+
+
+@pytest.mark.parametrize("bad_key", ["master-key-value", "not base64 at all!", "AAAA"])
+def test_malformed_master_key_is_named_without_its_value(bad_key):
+    missing, _ = config_problems(make(integration_master_key=bad_key))
+    assert any(m.startswith("INTEGRATION_MASTER_KEY") for m in missing)
+    assert all(bad_key not in m for m in missing)
+    with pytest.raises(RuntimeError) as exc:
+        validate_startup(make(integration_master_key=bad_key), logging.getLogger("test"))
+    assert "INTEGRATION_MASTER_KEY" in str(exc.value)
+    assert bad_key not in str(exc.value)
+
+
+def test_valid_master_key_passes():
+    from cryptography.fernet import Fernet
+
+    missing, _ = config_problems(make(integration_master_key=Fernet.generate_key().decode()))
+    assert missing == []

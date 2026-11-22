@@ -1,200 +1,66 @@
-# Building rMirror macOS Installer
+# Building the rMirror macOS Installer
 
-This document describes how to build the macOS `.dmg` installer for the rMirror Agent.
+`build_macos.sh` builds `dist/rMirror.app` and `dist/rMirror-<version>.dmg`. The
+version comes from `app/__version__.py` (also read by `rmirror.spec`); keep
+`version` in `pyproject.toml` the same, because `release.sh` reads it from there.
 
 ## Prerequisites
 
-### Required
-- macOS 12 (Monterey) or later
-- Python 3.11 or later
-- Xcode Command Line Tools (`xcode-select --install`)
+- macOS 12 or later, Xcode Command Line Tools, Python 3.11+, Poetry
+- `create-dmg` (`brew install create-dmg`; the script tries to install it)
+- For a release build:
+  - a **Developer ID Application** certificate in your keychain
+  - notarization credentials stored once as the keychain profile `rmirror-notarization`:
 
-### Optional (for code signing)
-- Apple Developer Account
-- Developer ID Application certificate
+    ```bash
+    xcrun notarytool store-credentials "rmirror-notarization" \
+        --apple-id "<apple id>" --team-id "<team id>" --password "<app-specific password>"
+    ```
 
-## Quick Start
+## Release build (signed and notarized)
 
 ```bash
-# 1. Install dependencies
 cd agent
 poetry install
-
-# 2. Install build tools
-brew install create-dmg
-
-# 3. Build the installer
-./build_macos.sh
+CODESIGN_IDENTITY="Developer ID Application: <name> (<team id>)" ./build_macos.sh
 ```
 
-The resulting `.dmg` will be in `agent/dist/rMirror-1.0.0.dmg`
+Signing is required: without `CODESIGN_IDENTITY` the script stops with an error.
+Every signing, notarization or stapling failure exits non-zero. The steps are:
 
-## Build Steps (Manual)
+1. Convert `resources/icon.png` to `.icns` and build the app with PyInstaller (`rmirror.spec`).
+2. Strip old signatures from bundled `.so`/`.dylib` files, then sign the app with
+   hardened runtime and a timestamp.
+3. Create and sign the DMG.
+4. Notarize the DMG (`notarytool submit --keychain-profile rmirror-notarization --wait`)
+   and staple the ticket.
+5. Verify strictly: `codesign --verify --deep --strict` on the app, `codesign --verify`
+   on the DMG, `stapler validate`, and `spctl --assess --type open` on the DMG.
 
-If you want to understand what the build script does:
+The script prints the DMG's size and SHA-256 at the end. Upload it with `release.sh`.
 
-### 1. Install PyInstaller
-```bash
-poetry add --group dev pyinstaller
-```
-
-### 2. Convert Icon
-```bash
-# Create iconset
-mkdir -p build/icon.iconset
-for size in 16 32 128 256 512; do
-    sips -z $size $size resources/icon.png \
-        --out "build/icon.iconset/icon_${size}x${size}.png"
-done
-
-# Convert to .icns
-iconutil -c icns build/icon.iconset -o build/icon.icns
-```
-
-### 3. Build with PyInstaller
-```bash
-pyinstaller --clean --noconfirm rmirror.spec
-```
-
-### 4. Create DMG
-```bash
-create-dmg \
-    --volname "rMirror Installer" \
-    --volicon "build/icon.icns" \
-    --window-pos 200 120 \
-    --window-size 600 400 \
-    --icon-size 100 \
-    --icon "rMirror.app" 150 190 \
-    --app-drop-link 450 190 \
-    "dist/rMirror-1.0.0.dmg" \
-    "dist/rMirror.app"
-```
-
-## Code Signing (Optional but Recommended)
-
-To sign the app with your Apple Developer certificate:
+## Local test build (unsigned)
 
 ```bash
-# Set your Developer ID
-export CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAM_ID)"
-
-# Run build (will automatically sign)
-./build_macos.sh
+./build_macos.sh --unsigned
 ```
 
-To notarize the app for distribution (requires Apple Developer account):
+Skips signing, notarization and verification and leaves a `dist/.unsigned` marker;
+`release.sh` refuses to upload such a build. macOS warns when opening it (for local
+testing, remove the quarantine flag with `xattr -cr dist/rMirror.app`).
+
+## Testing the build
 
 ```bash
-# Submit for notarization
-xcrun notarytool submit dist/rMirror-1.0.0.dmg \
-    --apple-id "your@email.com" \
-    --password "@keychain:AC_PASSWORD" \
-    --team-id "TEAM_ID" \
-    --wait
-
-# Staple the notarization ticket
-xcrun stapler staple dist/rMirror-1.0.0.dmg
+open dist/rMirror-<version>.dmg   # drag rMirror.app to Applications, then launch it
 ```
 
-## Testing
+The menu-bar icon should appear and the web UI should open at http://localhost:5555.
 
-### Test the DMG
-```bash
-# Mount the DMG
-open dist/rMirror-1.0.0.dmg
+## Version bump
 
-# Drag rMirror.app to Applications
-# Launch from Applications folder
-```
+Change `__version__` in `app/__version__.py` and `version` in `pyproject.toml`, then rebuild.
 
-### Test the App
-```bash
-# Direct launch
-open dist/rMirror.app
+## CI
 
-# Check if it runs
-# You should see the menubar icon appear
-# Open http://localhost:5555 in your browser
-```
-
-## Troubleshooting
-
-### "App is damaged and can't be opened"
-This happens with unsigned apps. Solutions:
-1. Sign the app (recommended)
-2. Remove quarantine: `xattr -cr dist/rMirror.app`
-
-### "PyInstaller: command not found"
-Install it: `poetry add --group dev pyinstaller`
-
-### "create-dmg: command not found"
-Install it: `brew install create-dmg`
-
-### Icon doesn't appear
-Make sure `resources/icon.png` exists and is at least 512x512 pixels.
-
-### Web UI doesn't work
-Check that Flask templates are included in the spec file:
-```python
-datas=[('app/web/templates', 'app/web/templates')]
-```
-
-## Distribution
-
-### Upload to Backblaze B2
-```bash
-# Authorize
-b2 authorize-account <key_id> <application_key>
-
-# Upload
-b2 upload-file rmirror-downloads \
-    dist/rMirror-1.0.0.dmg \
-    releases/v1.0.0/rMirror-1.0.0.dmg
-
-# Make public
-b2 update-bucket --bucketType allPublic rmirror-downloads
-```
-
-### Update Download Link
-After uploading, users can download from:
-```
-https://downloads.rmirror.io/releases/v1.0.0/rMirror-1.0.0.dmg
-```
-
-## CI/CD (GitHub Actions)
-
-See `.github/workflows/build-macos-agent.yml` for automated builds on release tags.
-
-## App Bundle Structure
-
-The final app bundle structure:
-```
-rMirror.app/
-├── Contents/
-│   ├── Info.plist          # App metadata
-│   ├── MacOS/
-│   │   └── rMirror         # Executable
-│   ├── Resources/
-│   │   ├── icon.icns       # App icon
-│   │   ├── app/            # Python code
-│   │   │   └── web/
-│   │   │       └── templates/  # Flask templates
-│   │   └── resources/      # Icons, assets
-│   └── Frameworks/         # Python runtime, dependencies
-```
-
-## Version Bumping
-
-To release a new version:
-
-1. Update version in `pyproject.toml`
-2. Update version in `build_macos.sh`
-3. Update version in `rmirror.spec`
-4. Rebuild: `./build_macos.sh`
-
-## Resources
-
-- [PyInstaller Documentation](https://pyinstaller.org/)
-- [create-dmg GitHub](https://github.com/create-dmg/create-dmg)
-- [Apple Code Signing Guide](https://developer.apple.com/support/code-signing/)
-- [Apple Notarization Guide](https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution)
+`.github/workflows/build-agent.yml` and `build-agent-intel.yml` build the agent in GitHub Actions.
