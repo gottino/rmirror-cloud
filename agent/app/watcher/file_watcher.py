@@ -8,7 +8,9 @@ Based on the file watcher implementation from rm-int-src.
 import asyncio
 import logging
 import os
-from collections.abc import Callable
+import time
+from collections.abc import Awaitable, Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -34,6 +36,8 @@ class ReMarkableEventHandler(FileSystemEventHandler):
         super().__init__()
         self.sync_queue = sync_queue
         self.config = config
+        # Wall-clock time of the last event watchdog delivered (any type), for /api/status
+        self.last_event_at: datetime | None = None
 
     def _should_ignore_file(self, file_path: str) -> bool:
         """
@@ -115,6 +119,25 @@ class ReMarkableEventHandler(FileSystemEventHandler):
         ext = file_path.suffix.lstrip(".")
         return ext
 
+    def dispatch(self, event: FileSystemEvent) -> None:
+        """
+        Dispatch one event, never letting an error escape to watchdog.
+
+        watchdog calls this on its observer thread. An exception raised here ends
+        that thread (BaseObserver.run does not catch it), after which no further
+        events are delivered while everything else looks healthy. So log the error
+        for this one event and carry on with the next.
+        """
+        self.last_event_at = datetime.now()
+        try:
+            super().dispatch(event)
+        except Exception as e:
+            name = _event_file_name(event)
+            logger.error(
+                f"Error handling file event for {name} ({getattr(event, 'event_type', '?')}): {e}",
+                exc_info=True,
+            )
+
     def on_any_event(self, event: FileSystemEvent) -> None:
         """
         Handle any file system event.
@@ -156,6 +179,7 @@ class ReMarkableEventHandler(FileSystemEventHandler):
         # Get file type
         file_type = self._get_file_type(file_path)
 
+        logger.info(f"Detected change: {file_path.name} ({file_type})")
         print(f"📝 Detected change: {file_path.name} (UUID: {notebook_uuid}, type: {file_type})")
 
         # Hand the change to the sync queue. This runs on the watchdog thread;
@@ -164,8 +188,22 @@ class ReMarkableEventHandler(FileSystemEventHandler):
         self.sync_queue.note_change(file_path, notebook_uuid, file_type)
 
 
+def _event_file_name(event: object) -> str:
+    """The file name an event is about (for logs; never raises)."""
+    try:
+        path = getattr(event, "dest_path", "") or getattr(event, "src_path", "")
+        if isinstance(path, bytes):
+            path = os.fsdecode(path)
+        return Path(path).name or str(path)
+    except Exception:
+        return "<unknown>"
+
+
 def scan_for_changes(
-    source_dir: Path, handler: ReMarkableEventHandler, manifest: UploadManifest
+    source_dir: Path,
+    handler: ReMarkableEventHandler,
+    manifest: UploadManifest,
+    report_changes: bool = True,
 ) -> list[tuple[Path, str, str]]:
     """
     Walk the source folder and return the files that changed since the agent last saw them.
@@ -183,6 +221,9 @@ def scan_for_changes(
     entry yet, so selecting a notebook later does not upload its whole history either.
 
     Blocking (stats and hashes files); run it off the event loop.
+
+    ``report_changes=False`` leaves logging the changed files to the caller (the
+    periodic rescan logs its own line).
 
     Returns:
         (file_path, notebook_uuid, file_type) for each file to upload.
@@ -216,7 +257,7 @@ def scan_for_changes(
         manifest.mark_initialised()
         logger.info(f"Upload manifest initialised: {baselined} existing file(s) recorded as baseline")
         print(f"✓ Recorded {baselined} existing file(s) as already present (not uploaded)")
-    elif changed:
+    elif changed and report_changes:
         logger.info(f"Start-up scan found {len(changed)} changed file(s)")
         print(f"🔎 Found {len(changed)} file(s) changed while the agent was not watching")
 
@@ -228,8 +269,16 @@ class FileWatcher:
     File watcher for monitoring reMarkable Desktop app folder.
 
     Uses the watchdog library to monitor the folder for changes and
-    automatically sync files to the cloud.
+    automatically sync files to the cloud. While running it also checks that the
+    watchdog observer is still alive (restarting it and rescanning if not) and
+    rescans the folder every ``sync.sync_interval`` seconds as a safety net for
+    events that never arrive.
     """
+
+    # How often the keep-running loop checks the observer
+    HEALTH_CHECK_SECONDS = 1.0
+    # Lower bound for sync.sync_interval, so a 0 or tiny value cannot spin
+    MIN_RESCAN_INTERVAL_SECONDS = 30
 
     def __init__(
         self,
@@ -237,20 +286,38 @@ class FileWatcher:
         cloud_sync: CloudSync,
         on_status: Callable[[str], None] | None = None,
         manifest: UploadManifest | None = None,
+        observer_factory: Callable[[], Observer] = Observer,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ):
-        """Initialize file watcher."""
+        """Initialize file watcher.
+
+        ``observer_factory``, ``clock`` and ``sleep`` are injectable for tests.
+        """
         self.config = config
         self.cloud_sync = cloud_sync
         self.sync_queue = SyncQueue(config, cloud_sync, manifest=manifest, on_status=on_status)
         # Rescan when the queue resumes after the user signs in again
         self.sync_queue.on_reconnect = self.rescan
 
+        self._observer_factory = observer_factory
+        self._clock = clock
+        self._sleep = sleep
+
         self.observer: Optional[Observer] = None
         self.event_handler: Optional[ReMarkableEventHandler] = None
         self.running = False
 
+        # Health / visibility (reported in /api/status)
+        self.observer_restarts = 0
+        self._observer_failure_logged = False
+        self._rescan_lock = asyncio.Lock()
+        self.last_rescan_at: datetime | None = None
+        self.last_rescan_reason: str | None = None
+        self.last_rescan_result: str | None = None
+
     async def start(self) -> None:
-        """Start watching the reMarkable folder - EXACT COPY OF ISOLATION TEST PATTERN."""
+        """Start watching the reMarkable folder; returns when the watcher is stopped."""
         source_dir = Path(self.config.remarkable.source_directory)
 
         if not source_dir.exists():
@@ -261,7 +328,6 @@ class FileWatcher:
 
         print(f"👁  Watching: {source_dir}")
 
-        # EXACT PATTERN FROM ISOLATION TEST
         await self.sync_queue.start()
 
         self.event_handler = ReMarkableEventHandler(self.sync_queue, self.config)
@@ -270,44 +336,146 @@ class FileWatcher:
         # baseline cannot swallow a change made while it is being recorded.
         baseline_first = not await asyncio.to_thread(self.sync_queue.manifest.is_initialised)
         if baseline_first:
-            await self._rescan_logged()
+            await self._rescan_logged("start-up")
 
-        self.observer = Observer()
-        watch_dir = str(source_dir)
-        print(f'Scheduling observer for: {watch_dir}')
-        self.observer.schedule(self.event_handler, watch_dir, recursive=True)
-        self.observer.start()
-        print(f'Observer started, is_alive: {self.observer.is_alive()}')
+        self._start_observer()
+        print(f"Observer started, is_alive: {self.observer.is_alive()}")
 
         # Later runs: scan after the observer is up, so no change slips between the two
         if not baseline_first:
-            await self._rescan_logged()
+            await self._rescan_logged("start-up")
 
         self.running = True
         print("✓ File watcher started")
 
-        # Keep running
         try:
-            while self.running:
-                await asyncio.sleep(1)
+            await self._keep_running()
         except asyncio.CancelledError:
             pass
 
-    async def rescan(self) -> int:
-        """Queue files that changed while the agent was not watching (see scan_for_changes)."""
-        source_dir = Path(self.config.remarkable.source_directory)
-        handler = self.event_handler or ReMarkableEventHandler(self.sync_queue, self.config)
-        changed = await asyncio.to_thread(scan_for_changes, source_dir, handler, self.sync_queue.manifest)
-        for file_path, notebook_uuid, file_type in changed:
-            await self.sync_queue.add(file_path, notebook_uuid, file_type)
-        return len(changed)
+    def _start_observer(self) -> None:
+        """Create, schedule and start a watchdog observer for the source folder."""
+        watch_dir = str(self.config.remarkable.source_directory)
+        observer = self._observer_factory()
+        observer.schedule(self.event_handler, watch_dir, recursive=True)
+        observer.start()
+        self.observer = observer
+        logger.info(f"Observer watching {watch_dir}")
 
-    async def _rescan_logged(self) -> None:
-        """Rescan, but never let a scan failure stop the watcher from starting."""
+    def _rescan_interval(self) -> float:
+        return float(max(self.config.sync.sync_interval, self.MIN_RESCAN_INTERVAL_SECONDS))
+
+    async def _keep_running(self) -> None:
+        """Until stopped: check the observer every second, rescan every sync_interval."""
+        next_rescan = self._clock() + self._rescan_interval()
+        while self.running:
+            await self._sleep(self.HEALTH_CHECK_SECONDS)
+            if not self.running:
+                break
+            await self._check_observer()
+            if self.running and self._clock() >= next_rescan:
+                await self._periodic_rescan()
+                next_rescan = self._clock() + self._rescan_interval()
+
+    def observer_alive(self) -> bool:
+        """Whether the observer thread and all its emitter threads are running."""
+        observer = self.observer
+        if observer is None or not observer.is_alive():
+            return False
         try:
-            await self.rescan()
+            emitters = list(observer.emitters)
+        except RuntimeError:  # set changed while copying; check again next time
+            return True
+        return all(emitter.is_alive() for emitter in emitters)
+
+    async def _check_observer(self) -> None:
+        """Replace a dead observer and rescan, so changes made meanwhile are not lost."""
+        if not self.running or self.observer_alive():
+            return
+
+        if not self._observer_failure_logged:
+            logger.error(
+                "File watcher observer stopped unexpectedly; starting a new one and rescanning"
+            )
+            print("⚠️  File watcher stopped receiving events; restarting it")
+            self._observer_failure_logged = True
+
+        old = self.observer
+        if old is not None:
+            # stop() also stops and joins any emitter still running (without a
+            # timeout), so do it off the loop and do not wait for it indefinitely
+            try:
+                await asyncio.wait_for(asyncio.to_thread(old.stop), timeout=5)
+            except Exception as e:
+                logger.debug(f"Stopping dead observer failed: {e!r}")
+            if not self.running:
+                return
+
+        try:
+            self._start_observer()
         except Exception as e:
-            logger.error(f"Start-up scan failed (watching continues): {e}", exc_info=True)
+            # Retried on the next check; logged once until it works again
+            logger.debug(f"Restarting observer failed: {e}", exc_info=True)
+            self.observer = None
+            return
+
+        self.observer_restarts += 1
+        self._observer_failure_logged = False
+        logger.info("Observer restarted")
+        await self._rescan_logged("observer restart")
+
+    async def _periodic_rescan(self) -> None:
+        """Safety-net rescan; skipped if another rescan is still running."""
+        if not self.running or self._rescan_lock.locked():
+            return
+        try:
+            count = await self.rescan(reason="periodic")
+        except Exception as e:
+            logger.warning(f"Periodic rescan failed: {e}", exc_info=True)
+            return
+        if count:
+            logger.info(f"Periodic rescan found {count} changed file(s)")
+            print(f"🔎 Periodic rescan found {count} changed file(s)")
+
+    async def rescan(self, reason: str = "reconnect") -> int:
+        """Queue files that changed since they were last seen (see scan_for_changes).
+
+        Rescans never overlap; a second caller waits for the first.
+        """
+        async with self._rescan_lock:
+            source_dir = Path(self.config.remarkable.source_directory)
+            handler = self.event_handler or ReMarkableEventHandler(self.sync_queue, self.config)
+            try:
+                changed = await asyncio.to_thread(
+                    scan_for_changes,
+                    source_dir,
+                    handler,
+                    self.sync_queue.manifest,
+                    reason != "periodic",
+                )
+            except Exception as e:
+                self._record_rescan(reason, f"failed: {e}")
+                raise
+            if reason == "periodic" and not self.running:
+                # Stopped while scanning: leave the changes to the next start-up scan
+                self._record_rescan(reason, "stopped")
+                return 0
+            for file_path, notebook_uuid, file_type in changed:
+                await self.sync_queue.add(file_path, notebook_uuid, file_type)
+            self._record_rescan(reason, f"{len(changed)} changed")
+            return len(changed)
+
+    def _record_rescan(self, reason: str, result: str) -> None:
+        self.last_rescan_at = datetime.now()
+        self.last_rescan_reason = reason
+        self.last_rescan_result = result
+
+    async def _rescan_logged(self, reason: str) -> None:
+        """Rescan, but never let a scan failure stop the watcher."""
+        try:
+            await self.rescan(reason=reason)
+        except Exception as e:
+            logger.error(f"Rescan ({reason}) failed (watching continues): {e}", exc_info=True)
 
     async def stop(self) -> None:
         """Stop watching the reMarkable folder."""
@@ -315,6 +483,8 @@ class FileWatcher:
             return
 
         print("Stopping file watcher...")
+        # Clearing this first also ends the keep-running loop, so a deliberate stop
+        # is never mistaken for a dead observer (no restart, no further rescans)
         self.running = False
 
         # Stop observer
@@ -326,6 +496,22 @@ class FileWatcher:
         await self.sync_queue.stop()
 
         print("File watcher stopped")
+
+    def get_health(self) -> dict:
+        """Observer and rescan state, for /api/status."""
+
+        def iso(value: datetime | None) -> str | None:
+            return value.isoformat(timespec="seconds") if value else None
+
+        handler = self.event_handler
+        return {
+            "observer_alive": self.observer_alive(),
+            "observer_restarts": self.observer_restarts,
+            "last_event_at": iso(handler.last_event_at if handler else None),
+            "last_rescan_at": iso(self.last_rescan_at),
+            "last_rescan_reason": self.last_rescan_reason,
+            "last_rescan_result": self.last_rescan_result,
+        }
 
     def get_stats(self) -> dict:
         """Get watcher statistics."""
