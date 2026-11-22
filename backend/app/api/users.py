@@ -14,8 +14,9 @@ from app.schemas.user import User as UserSchema
 
 router = APIRouter()
 
-CURRENT_TOS_VERSION = "2026-02-20"
-CURRENT_PRIVACY_VERSION = "2026-02-20"
+# Bumping a version asks every existing user to accept again on their next dashboard visit.
+CURRENT_TOS_VERSION = "2026-11-22"
+CURRENT_PRIVACY_VERSION = "2026-11-22"
 
 
 class LegalStatusResponse(BaseModel):
