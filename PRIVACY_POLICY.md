@@ -1,7 +1,7 @@
 # Privacy Policy
 
 **Effective Date:** January 9, 2026
-**Last Updated:** January 9, 2026
+**Last Updated:** November 22, 2026
 
 ## 1. Introduction
 
@@ -100,13 +100,13 @@ We use the following third-party processors to deliver our service:
 - **Privacy Policy:** https://clerk.com/privacy
 
 ### 5.2 OCR Processing
-**Anthropic PBC (USA) - Claude API**
+**Google LLC (USA) - Gemini API (paid service)**
 - **Purpose:** Optical Character Recognition (handwriting transcription)
-- **Data Shared:** PDF images of notebook pages for OCR processing
-- **Data Location:** United States
-- **Retention:** Anthropic does not retain OCR input data beyond processing time (per their privacy policy)
-- **Safeguards:** Swiss-US Data Privacy Framework participant; Standard Contractual Clauses (SCCs)
-- **Privacy Policy:** https://www.anthropic.com/privacy
+- **Data Shared:** Images of notebook pages for OCR processing
+- **Data Location:** United States and other countries where Google operates facilities
+- **Retention:** Up to 55 days, solely to detect and prevent abuse and for legally required disclosures; not used to improve Google's products or train its models
+- **Safeguards:** Google's data processing terms for the paid Gemini API; Swiss-US Data Privacy Framework participant; Standard Contractual Clauses (SCCs)
+- **Privacy Policy:** https://policies.google.com/privacy
 
 ### 5.3 Email Communications
 **Resend Inc. (USA)**
@@ -157,7 +157,7 @@ We use the following third-party processors to deliver our service:
 ### 6.1 Transfers to the United States
 Your data may be transferred to and processed in the United States by:
 - Clerk (authentication)
-- Anthropic (OCR processing)
+- Google (OCR processing)
 - Resend (email)
 - Notion (if you enable integration)
 - Stripe (when payment processing launches)
@@ -185,6 +185,7 @@ We retain your personal data for the following periods:
 | Account Information | Duration of account + 30 days after deletion | Contractual necessity |
 | Notebook Content | Duration of account + 30 days after deletion | Service delivery |
 | OCR Transcriptions | Duration of account + 30 days after deletion | Service delivery |
+| OCR Processing Data (at Google) | Up to 55 days | Sub-processor abuse monitoring |
 | Usage Logs | 90 days | Service improvement, security |
 | Email Communications | 2 years | Legal compliance, support |
 | Payment Records (future) | 10 years | Swiss tax law compliance |

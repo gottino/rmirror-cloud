@@ -27,7 +27,7 @@ All services are documented with data categories, locations, and legal safeguard
 | Service | Purpose | Location | Data | Safeguards |
 |---------|---------|----------|------|------------|
 | **Clerk** | Authentication | USA | Email, name, credentials | Swiss-US DPF, SCCs |
-| **Anthropic** | OCR processing | USA | PDF images of pages | Swiss-US DPF, SCCs, No retention |
+| **Google (Gemini API)** | OCR processing | USA and other countries | Images of pages | Swiss-US DPF, SCCs, up to 55 days for abuse monitoring |
 | **Resend** | Email delivery | USA | Email, notifications | Swiss-US DPF, SCCs |
 | **Hetzner** | Infrastructure | Germany (EU) | All service data | GDPR compliant |
 | **Backblaze B2** (optional) | File storage | USA | PDFs | Swiss-US DPF, SCCs, Encrypted |

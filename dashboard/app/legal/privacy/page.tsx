@@ -16,7 +16,7 @@ export default function PrivacyPolicyPage() {
       </h1>
       <p className="mb-8" style={{ color: 'var(--warm-gray)', fontSize: '0.925rem' }}>
         <strong>Effective Date:</strong> January 9, 2026 &middot;{' '}
-        <strong>Last Updated:</strong> February 20, 2026
+        <strong>Last Updated:</strong> November 22, 2026
       </p>
 
       <div className="space-y-6" style={{ lineHeight: '1.75', fontSize: '0.95rem' }}>
@@ -176,16 +176,17 @@ export default function PrivacyPolicyPage() {
 
           <Subsection title="5.2 OCR Processing">
             <ServiceProvider
-              name="Anthropic PBC (USA) - Claude API"
+              name="Google LLC (USA) - Gemini API"
               purpose="Optical Character Recognition (handwriting transcription)"
-              dataShared="PDF images of notebook pages for OCR processing"
-              dataLocation="United States"
-              safeguards="Swiss-US Data Privacy Framework participant; Standard Contractual Clauses (SCCs)"
-              privacyUrl="https://www.anthropic.com/privacy"
+              dataShared="Images of notebook pages for OCR processing"
+              dataLocation="United States and other countries where Google operates facilities"
+              safeguards="Google's data processing terms for the paid Gemini API; Swiss-US Data Privacy Framework participant; Standard Contractual Clauses (SCCs)"
+              privacyUrl="https://policies.google.com/privacy"
             />
             <p className="text-sm mt-2" style={{ color: 'var(--warm-gray)' }}>
-              Anthropic retains API inputs and outputs for up to 7 days for operational purposes. Content flagged by
-              trust and safety classifiers may be retained for up to 2 years. API data is not used for model training.
+              We use the paid Gemini API. Google does not use the page images or the transcriptions to improve its
+              products or train its models. Google keeps API inputs and outputs for up to 55 days, solely to detect and
+              prevent abuse of its services and for legally required disclosures.
             </p>
           </Subsection>
 
@@ -244,7 +245,7 @@ export default function PrivacyPolicyPage() {
             <p>Your data may be transferred to and processed in the United States by:</p>
             <ul className="list-disc pl-6 space-y-1">
               <li>Clerk (authentication)</li>
-              <li>Anthropic (OCR processing)</li>
+              <li>Google (OCR processing)</li>
               <li>Resend (email)</li>
               <li>Backblaze (file storage)</li>
               <li>Notion (if you enable integration)</li>
@@ -298,7 +299,7 @@ export default function PrivacyPolicyPage() {
                 <RetentionRow type="Account Information" period="Duration of account + 30 days after deletion" justification="Contractual necessity" />
                 <RetentionRow type="Notebook Content" period="Duration of account + 30 days after deletion" justification="Service delivery" />
                 <RetentionRow type="OCR Transcriptions" period="Duration of account + 30 days after deletion" justification="Service delivery" />
-                <RetentionRow type="OCR Processing Data (at Anthropic)" period="Up to 7 days (up to 2 years if flagged)" justification="Sub-processor operational retention" />
+                <RetentionRow type="OCR Processing Data (at Google)" period="Up to 55 days" justification="Sub-processor abuse monitoring" />
                 <RetentionRow type="Usage Logs" period="90 days" justification="Service improvement, security" />
                 <RetentionRow type="Email Communications" period="2 years" justification="Legal compliance, support" />
                 <RetentionRow type="Integration Credentials" period="Until disconnected by user" justification="Service functionality" />

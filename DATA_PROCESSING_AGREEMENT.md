@@ -1,7 +1,7 @@
 # Data Processing Agreement (DPA)
 
 **Effective Date:** January 9, 2026
-**Last Updated:** January 9, 2026
+**Last Updated:** November 22, 2026
 
 This Data Processing Agreement ("**DPA**") forms part of the Terms of Service between rMirror Cloud ("**Processor**," "**we**," "**us**," or "**our**") and you ("**Controller**," "**you**," or "**your**") governing the processing of Personal Data in connection with the rMirror Cloud service.
 
@@ -146,7 +146,7 @@ Controller grants general authorization to Processor to engage Sub-processors to
 | Sub-processor | Service | Data Categories | Location | Safeguards |
 |---------------|---------|-----------------|----------|------------|
 | **Clerk Inc.** | Authentication & identity management | Email, name, authentication credentials | USA | Swiss-US DPF, SCCs, DPA |
-| **Anthropic PBC** | OCR processing (handwriting transcription) | PDF images of notebook pages | USA | Swiss-US DPF, SCCs, DPA, No retention beyond processing |
+| **Google LLC** (Gemini API, paid service) | OCR processing (handwriting transcription) | Images of notebook pages | USA and other countries with Google facilities | Swiss-US DPF, SCCs, Google's data processing terms; kept up to 55 days for abuse monitoring only, not used for product improvement or training |
 | **Resend Inc.** | Transactional email delivery | Email address, name, notification content | USA | Swiss-US DPF, SCCs, DPA |
 | **Hetzner Online GmbH** | Infrastructure hosting, database, storage | All service data | Germany (EU) | GDPR compliant, DPA |
 | **Backblaze B2** (if configured) | Long-term file storage | Generated PDF files | USA | Swiss-US DPF, SCCs, DPA, Encrypted |
@@ -183,7 +183,7 @@ Personal Data may be transferred to and processed in the United States by Sub-pr
 Transfers are protected by the following safeguards:
 
 #### 5.2.1 Swiss-US Data Privacy Framework
-Sub-processors Clerk, Anthropic, Resend, and Stripe participate in the Swiss-US Data Privacy Framework, recognized by the Swiss FDPIC as providing adequate protection for transfers from Switzerland to the United States.
+Sub-processors Clerk, Google, Resend, and Stripe participate in the Swiss-US Data Privacy Framework, recognized by the Swiss FDPIC as providing adequate protection for transfers from Switzerland to the United States.
 
 **Verification:** Processor maintains records of Sub-processor DPF certifications and provides upon request.
 
@@ -201,7 +201,7 @@ For transfers not covered by adequacy decisions, Processor implements:
 #### 5.2.3 Data Localization (EU Data)
 For Controllers requiring data localization within the EU:
 - Primary database and storage: Hetzner (Germany)
-- OCR processing: Anthropic (USA) - temporary processing only, no retention
+- OCR processing: Google Gemini API (USA and other countries) - kept up to 55 days for abuse monitoring only
 - Authentication: Clerk (USA) - no alternative available
 - Email: Resend (USA) - metadata only
 

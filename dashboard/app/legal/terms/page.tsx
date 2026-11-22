@@ -16,7 +16,7 @@ export default function TermsOfServicePage() {
       </h1>
       <p className="mb-8" style={{ color: 'var(--warm-gray)', fontSize: '0.925rem' }}>
         <strong>Effective Date:</strong> February 20, 2026 &middot;{' '}
-        <strong>Last Updated:</strong> February 20, 2026
+        <strong>Last Updated:</strong> November 22, 2026
       </p>
 
       <div className="space-y-6" style={{ lineHeight: '1.75', fontSize: '0.95rem' }}>
@@ -194,7 +194,7 @@ export default function TermsOfServicePage() {
             </p>
             <ul className="list-disc pl-6 space-y-1">
               <li>Storing notebook files and generated PDFs on our servers</li>
-              <li>Transmitting page images to Anthropic for OCR processing</li>
+              <li>Transmitting page images to Google (Gemini API) for OCR processing</li>
               <li>Syncing content to third-party integrations you have enabled</li>
             </ul>
             <p>This license terminates when you delete Your Content or your account.</p>
