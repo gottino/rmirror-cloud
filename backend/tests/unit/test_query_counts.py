@@ -319,4 +319,6 @@ def test_metadata_sync_repeated_entries_in_one_request(client_user, db):
         for np_, page in db.query(NotebookPage, Page).join(Page, NotebookPage.page_id == Page.id)
         .filter(NotebookPage.notebook_id == nb.id)
     }
-    assert order == {p1: 3, p2: 1}
+    # The last entry defines the order (merging both lists could give two pages
+    # the same number, which notebook_pages does not allow).
+    assert order == {p2: 1}

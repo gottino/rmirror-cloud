@@ -37,6 +37,65 @@ jobs:
           export DATABASE_URL=sqlite:///:memory:
           poetry run pytest tests/ -v --tb=short -x
 
+  # Unit tests build their SQLite schema from the models. This job builds the
+  # schema the way production does (alembic on PostgreSQL) and fails if the
+  # models and the migrated schema disagree.
+  backend-migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rmirror
+          POSTGRES_PASSWORD: rmirror
+          POSTGRES_DB: rmirror
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rmirror"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SECRET_KEY: test-secret-key
+      DATABASE_URL: postgresql://rmirror:rmirror@localhost:5432/rmirror
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: cd backend && poetry install --no-root
+
+      - name: Single migration head
+        run: |
+          cd backend
+          test "$(poetry run alembic heads | wc -l)" -eq 1
+
+      - name: Upgrade empty database to head
+        run: cd backend && poetry run alembic upgrade head
+
+      - name: Models match migrated schema
+        run: cd backend && poetry run alembic check
+
+      - name: Downgrade one step and upgrade again
+        run: |
+          cd backend
+          poetry run alembic downgrade -1
+          poetry run alembic upgrade head
+          poetry run alembic check
+
+      - name: Concurrency tests on PostgreSQL
+        run: |
+          cd backend
+          TEST_POSTGRES_URL="$DATABASE_URL" poetry run pytest tests/unit/test_concurrent_upserts_postgres.py tests/unit/test_metadata_sync_postgres.py -v
+
   dashboard-checks:
     runs-on: ubuntu-latest
     steps:

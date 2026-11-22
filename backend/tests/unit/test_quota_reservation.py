@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth.clerk import get_clerk_active_user
@@ -170,6 +170,9 @@ def test_reserve_without_subscription_raises_no_subscription_error(db: Session):
 )
 def test_concurrent_reservations_at_limit_minus_one_let_exactly_one_through():
     engine = create_engine(os.environ["TEST_POSTGRES_URL"], pool_size=20, max_overflow=0)
+    with engine.begin() as conn:
+        # The models declare trigram search indexes (as the migrations create them).
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
     Base.metadata.create_all(engine)
     Sessions = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     threads_n = 12

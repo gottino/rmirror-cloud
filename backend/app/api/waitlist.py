@@ -7,39 +7,25 @@ from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import Column, DateTime, Integer, String, func
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import signing
 from app.auth.clerk import get_clerk_session_user
 from app.config import get_settings
-from app.database import Base, get_db
+from app.database import get_db
 from app.middleware.rate_limit import UNAUTHENTICATED_LIMIT, limiter
 from app.models.user import User
+from app.models.waitlist import WaitlistEntry
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/waitlist", tags=["waitlist"])
 
 
-# ==================== Model ====================
-
-
-class WaitlistEntry(Base):
-    """Waitlist database model."""
-
-    __tablename__ = "waitlist"
-
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-    name = Column(String(255), nullable=True)
-    status = Column(String(20), default="pending", nullable=False)
-    invite_token = Column(String(512), nullable=True, unique=True)
-    approved_at = Column(DateTime, nullable=True)
-    claimed_at = Column(DateTime, nullable=True)
-    claimed_by = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+# The WaitlistEntry model lives in app.models.waitlist so that migrations and
+# the schema check see it; it is imported above for existing callers.
 
 
 # ==================== Schemas ====================

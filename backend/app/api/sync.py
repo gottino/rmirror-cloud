@@ -7,11 +7,12 @@ from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import bindparam, func, insert, select, update
+from sqlalchemy import bindparam, delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user, get_clerk_session_user
 from app.core.unified_sync_manager import UnifiedSyncManager
+from app.core.upserts import insert_ignoring_conflicts
 from app.database import get_db
 from app.integrations.registry import PAGE_TEXT, missing_config, supports
 from app.middleware.rate_limit import limiter
@@ -148,7 +149,13 @@ def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int,
     Semantics match the former row-by-row version: a notebook or page seen
     again (in the database or earlier in the same request) is updated, pages
     that already have content are left alone, and pages without content that
-    are not completed/pending/processing are reset to NOT_SYNCED.
+    are not completed/pending/processing are reset to NOT_SYNCED. A notebook's
+    page order is the page list of its last entry that has pages; pages no
+    longer listed lose their order mapping.
+
+    Inserts use ON CONFLICT DO NOTHING against the unique indexes and then
+    re-read the rows a concurrent sync created first, so two syncs of the same
+    notebook at once neither fail nor duplicate rows.
 
     Returns (notebooks_created, notebooks_updated, pages_registered, pages_already_synced).
     """
@@ -213,12 +220,33 @@ def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int,
             logger.debug(f"Created notebook: {nb_data.visible_name} ({nb_uuid})")
 
     if new_notebooks:
+        # ON CONFLICT DO NOTHING: a concurrent sync may create the same notebook
+        # first. RETURNING yields only the rows inserted here.
         result = db.execute(
-            insert(Notebook).returning(Notebook.id, Notebook.notebook_uuid),
-            list(new_notebooks.values()),
+            insert_ignoring_conflicts(db, Notebook, ["user_id", "notebook_uuid"]).returning(
+                Notebook.id, Notebook.notebook_uuid
+            ),
+            sorted(new_notebooks.values(), key=lambda row: row["notebook_uuid"]),
         )
         for nb_id, nb_uuid in result:
             notebook_ids[nb_uuid] = nb_id
+        lost = [nb_uuid for nb_uuid in new_notebooks if nb_uuid not in notebook_ids]
+        for chunk in _chunks(lost):
+            rows = db.execute(
+                select(Notebook.id, Notebook.notebook_uuid)
+                .where(Notebook.user_id == user_id, Notebook.notebook_uuid.in_(chunk))
+            ).all()
+            for nb_id, nb_uuid in rows:
+                # Created by a concurrent sync: update it like an existing one.
+                row = new_notebooks[nb_uuid]
+                notebook_ids[nb_uuid] = nb_id
+                existing_notebook_ids.append(nb_id)
+                notebook_updates[nb_id] = {
+                    key: row[key]
+                    for key in ("visible_name", "parent_uuid", "last_synced_at", *_OPTIONAL_NOTEBOOK_FIELDS)
+                }
+                notebooks_created -= 1
+                notebooks_updated += 1
 
     if notebook_updates:
         table = Notebook.__table__
@@ -237,13 +265,13 @@ def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int,
             ),
             [
                 {"b_id": nb_id, **{f"b_{key}": value for key, value in values.items()}}
-                for nb_id, values in notebook_updates.items()
+                for nb_id, values in sorted(notebook_updates.items())
             ],
         )
 
     # 3. Existing pages and page-order mappings of the existing notebooks.
     pages: dict[tuple[int, str], tuple[int, str | None, str]] = {}
-    mappings: dict[tuple[int, int], tuple[int, int]] = {}
+    mappings: dict[int, dict[int, int]] = {}  # notebook_id -> {page_id: page_number}
     for chunk in _chunks(existing_notebook_ids):
         page_rows = db.execute(
             select(Page.id, Page.notebook_id, Page.page_uuid, Page.s3_key, Page.ocr_status)
@@ -253,23 +281,24 @@ def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int,
         for page_id, nb_id, page_uuid, s3_key, ocr_status in page_rows:
             pages.setdefault((nb_id, page_uuid), (page_id, s3_key, ocr_status))
         mapping_rows = db.execute(
-            select(NotebookPage.id, NotebookPage.notebook_id, NotebookPage.page_id, NotebookPage.page_number)
+            select(NotebookPage.notebook_id, NotebookPage.page_id, NotebookPage.page_number)
             .where(NotebookPage.notebook_id.in_(chunk))
-            .order_by(NotebookPage.id)
         ).all()
-        for mapping_id, nb_id, page_id, page_number in mapping_rows:
-            mappings.setdefault((nb_id, page_id), (mapping_id, page_number))
+        for nb_id, page_id, page_number in mapping_rows:
+            mappings.setdefault(nb_id, {})[page_id] = page_number
 
-    # 4. Page stubs: which to create, which to reset, and the wanted page order
-    # (the last position wins if a page is listed twice).
+    # 4. Page stubs: which to create and which to reset. The wanted page order
+    # of a notebook is the page list of its last entry with pages (the last
+    # position wins if a page is listed twice).
     new_pages: dict[tuple[int, str], None] = {}
     reset_page_ids: set[int] = set()
-    page_numbers: dict[tuple[int, str], int] = {}
+    wanted_order: dict[int, dict[str, int]] = {}
     for nb_uuid, _, page_uuids in entries:
         nb_id = notebook_ids[nb_uuid]
-        for page_idx, page_uuid in enumerate(page_uuids):
+        if page_uuids:
+            wanted_order[nb_id] = {page_uuid: idx + 1 for idx, page_uuid in enumerate(page_uuids)}  # 1-indexed
+        for page_uuid in page_uuids:
             key = (nb_id, page_uuid)
-            page_numbers[key] = page_idx + 1  # 1-indexed
             page = pages.get(key)
             if page and page[1]:
                 # Page already has content uploaded - don't reset it
@@ -290,14 +319,26 @@ def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int,
 
     if new_pages:
         result = db.execute(
-            insert(Page).returning(Page.id, Page.notebook_id, Page.page_uuid),
+            insert_ignoring_conflicts(db, Page, ["notebook_id", "page_uuid"]).returning(
+                Page.id, Page.notebook_id, Page.page_uuid
+            ),
             [
                 {"notebook_id": nb_id, "page_uuid": page_uuid, "ocr_status": OcrStatus.NOT_SYNCED.value}
-                for nb_id, page_uuid in new_pages
+                for nb_id, page_uuid in sorted(new_pages)
             ],
         )
         for page_id, nb_id, page_uuid in result:
             pages[(nb_id, page_uuid)] = (page_id, None, OcrStatus.NOT_SYNCED.value)
+        # Stubs a concurrent sync inserted first: load their ids.
+        lost_notebooks = sorted({nb_id for nb_id, page_uuid in new_pages if (nb_id, page_uuid) not in pages})
+        for chunk in _chunks(lost_notebooks):
+            page_rows = db.execute(
+                select(Page.id, Page.notebook_id, Page.page_uuid, Page.s3_key, Page.ocr_status)
+                .where(Page.notebook_id.in_(chunk))
+                .order_by(Page.id)
+            ).all()
+            for page_id, nb_id, page_uuid, s3_key, ocr_status in page_rows:
+                pages.setdefault((nb_id, page_uuid), (page_id, s3_key, ocr_status))
 
     for chunk in _chunks(sorted(reset_page_ids)):
         db.execute(
@@ -305,20 +346,32 @@ def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int,
             execution_options={"synchronize_session": False},
         )
 
-    # 5. Create or update NotebookPage mappings.
+    # 5. Page order. notebook_pages is unique on (notebook_id, page_number) and
+    # (notebook_id, page_id), so renumbering rows one by one collides with a row
+    # that still holds the wanted number (reordered pages, a removed page). A
+    # notebook whose order changed gets its mapping rows replaced instead:
+    # delete them, then insert the wanted order, ignoring conflicts with rows a
+    # concurrent sync of the same notebook inserted meanwhile. Pages no longer
+    # listed lose their mapping.
+    replaced: list[int] = []
     new_mappings = []
-    mapping_updates = []
-    for (nb_id, page_uuid), page_number in page_numbers.items():
-        page_id = pages[(nb_id, page_uuid)][0]
-        mapping = mappings.get((nb_id, page_id))
-        if mapping is None:
-            new_mappings.append({"notebook_id": nb_id, "page_id": page_id, "page_number": page_number})
-        elif mapping[1] != page_number:
-            mapping_updates.append({"id": mapping[0], "page_number": page_number})
-    if mapping_updates:
-        db.execute(update(NotebookPage), mapping_updates)
+    for nb_id, order in sorted(wanted_order.items()):
+        wanted = {pages[(nb_id, page_uuid)][0]: number for page_uuid, number in order.items()}
+        if wanted == mappings.get(nb_id, {}):
+            continue
+        if nb_id in mappings:
+            replaced.append(nb_id)
+        new_mappings.extend(
+            {"notebook_id": nb_id, "page_id": page_id, "page_number": number}
+            for page_id, number in sorted(wanted.items(), key=lambda item: item[1])
+        )
+    for chunk in _chunks(replaced):
+        db.execute(
+            delete(NotebookPage).where(NotebookPage.notebook_id.in_(chunk)),
+            execution_options={"synchronize_session": False},
+        )
     if new_mappings:
-        db.execute(insert(NotebookPage), new_mappings)
+        db.execute(insert_ignoring_conflicts(db, NotebookPage), new_mappings)
 
     return notebooks_created, notebooks_updated, pages_registered, pages_already_synced
 

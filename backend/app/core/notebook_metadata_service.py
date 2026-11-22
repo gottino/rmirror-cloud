@@ -6,6 +6,7 @@ from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.upserts import get_or_create_notebook
 from app.models.notebook import Notebook
 
 logger = logging.getLogger(__name__)
@@ -127,31 +128,18 @@ class NotebookMetadataService:
         Returns:
             Updated or created Notebook instance
         """
-        # Find existing notebook
-        notebook = (
-            self.db.query(Notebook)
-            .filter(
-                Notebook.user_id == self.user_id,
-                Notebook.notebook_uuid == notebook_uuid,
-            )
-            .first()
+        # Find or create (insert-or-ignore, safe under concurrency), then update
+        notebook, _created = get_or_create_notebook(
+            self.db,
+            self.user_id,
+            notebook_uuid,
+            visible_name=visible_name,
+            parent_uuid=parent_uuid if parent_uuid else None,
+            document_type=document_type,
         )
-
-        if notebook:
-            # Update existing
-            notebook.visible_name = visible_name
-            notebook.parent_uuid = parent_uuid if parent_uuid else None
-            notebook.document_type = document_type
-        else:
-            # Create new
-            notebook = Notebook(
-                user_id=self.user_id,
-                notebook_uuid=notebook_uuid,
-                visible_name=visible_name,
-                parent_uuid=parent_uuid if parent_uuid else None,
-                document_type=document_type,
-            )
-            self.db.add(notebook)
+        notebook.visible_name = visible_name
+        notebook.parent_uuid = parent_uuid if parent_uuid else None
+        notebook.document_type = document_type
 
         # Update optional metadata fields if provided
         if metadata:
