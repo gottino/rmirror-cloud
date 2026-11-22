@@ -249,11 +249,13 @@ class FakeInitialSync:
 
     instances: list["FakeInitialSync"] = []
 
-    def __init__(self, config, cloud_sync):
+    def __init__(self, config, cloud_sync, on_progress=None):
         self.release = threading.Event()
         self.error: Exception | None = None
         self.ran_on: int | None = None
         self.selected = "unset"
+        self.on_progress = on_progress
+        self.result = {"notebooks": 2, "pages": 9, "failed": 0, "skipped": 0, "rate_limited": 0}
         FakeInitialSync.instances.append(self)
 
     async def run(self, selected_uuids=None):
@@ -263,7 +265,7 @@ class FakeInitialSync:
             await asyncio.sleep(0.01)
         if self.error:
             raise self.error
-        return {"notebooks": 2, "pages": 9, "failed": 0, "skipped": 0, "rate_limited": 0}
+        return self.result
 
 
 @pytest.fixture
@@ -328,6 +330,48 @@ class TestInitialSync:
         job.release.set()
         data = _wait_for_state(client, "error")
         assert data["message"] == "backend exploded"
+
+    def test_counts_are_live_while_running(self, app, fake_initial_sync):
+        client = app.test_client()
+        assert client.post("/api/sync/initial", base_url=BASE_URL).status_code == 202
+        job = fake_initial_sync.instances[0]
+        job.on_progress({"notebooks_total": 3, "notebooks_done": 1, "uploaded": 4, "failed": 1,
+                         "skipped": 2, "rate_limited": 0})
+        data = client.get("/api/sync/initial/status", base_url=BASE_URL).get_json()
+        assert data["state"] == "running"
+        assert data["counts"] == {"notebooks_total": 3, "notebooks_done": 1, "uploaded": 4,
+                                  "failed": 1, "skipped": 2, "rate_limited": 0}
+        job.release.set()
+        _wait_for_state(client, "done")
+
+    def test_all_pages_failed_is_reported_as_failure(self, app, fake_initial_sync):
+        client = app.test_client()
+        assert client.post("/api/sync/initial", base_url=BASE_URL).status_code == 202
+        job = fake_initial_sync.instances[0]
+        job.result = {"notebooks": 1, "pages": 0, "failed": 3, "skipped": 0, "rate_limited": 0}
+        job.release.set()
+        data = _wait_for_state(client, "done")
+        assert data["counts"]["uploaded"] == 0
+        assert data["counts"]["failed"] == 3
+        assert data["outcome"] == "failed"
+
+    @pytest.mark.parametrize(
+        "result,outcome",
+        [
+            ({"notebooks": 2, "pages": 9, "failed": 0, "skipped": 1, "rate_limited": 0}, "success"),
+            ({"notebooks": 2, "pages": 5, "failed": 2, "skipped": 0, "rate_limited": 0}, "partial"),
+            ({"notebooks": 2, "pages": 5, "failed": 0, "skipped": 0, "rate_limited": 1}, "partial"),
+        ],
+    )
+    def test_outcome(self, app, fake_initial_sync, result, outcome):
+        client = app.test_client()
+        assert client.post("/api/sync/initial", base_url=BASE_URL).status_code == 202
+        job = fake_initial_sync.instances[0]
+        job.result = result
+        job.release.set()
+        data = _wait_for_state(client, "done")
+        assert data["outcome"] == outcome
+        assert data["counts"]["uploaded"] == result["pages"]
 
     def test_requires_sign_in(self, app, cloud_sync, fake_initial_sync):
         cloud_sync.authenticated = False
