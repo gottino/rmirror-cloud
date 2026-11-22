@@ -27,6 +27,7 @@ DMG_PATH="dist/rMirror-${VERSION}.dmg"
 BUCKET_NAME="rmirror-downloads"
 B2_PATH="releases/v${VERSION}/rMirror-${VERSION}.dmg"
 BACKEND_CONFIG="../backend/app/config.py"
+BACKEND_ENV_EXAMPLE="../backend/.env.example"
 
 echo -e "${GREEN}================================================${NC}"
 echo -e "${GREEN}  Releasing rMirror Agent v${VERSION}${NC}"
@@ -130,6 +131,8 @@ fi
 
 # Update agent_latest_version in backend config
 sed -i '' "s|agent_latest_version: str = \"[0-9.]*\"|agent_latest_version: str = \"${VERSION}\"|" "$BACKEND_CONFIG"
+# .env.example lists the same default; a backend test fails when they differ
+sed -i '' "s|^AGENT_LATEST_VERSION=[0-9.]*$|AGENT_LATEST_VERSION=${VERSION}|" "$BACKEND_ENV_EXAMPLE"
 
 echo -e "${GREEN}✓${NC} Backend config updated to v${VERSION}"
 echo ""
@@ -137,7 +140,7 @@ echo ""
 # Step 4: Show diff and ask for confirmation
 echo -e "${YELLOW}→${NC} Changes to commit:"
 cd ..
-git diff backend/app/config.py
+git diff backend/app/config.py backend/.env.example
 echo ""
 
 read -p "Commit and push these changes? [y/N] " -n 1 -r
@@ -145,7 +148,7 @@ echo ""
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo -e "${YELLOW}→${NC} Committing changes..."
-    git add backend/app/config.py
+    git add backend/app/config.py backend/.env.example
     git commit -m "chore(backend): update agent_latest_version to v${VERSION}
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
