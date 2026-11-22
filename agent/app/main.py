@@ -10,6 +10,7 @@ import logging
 import signal
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
 
@@ -313,15 +314,29 @@ class Agent:
             except Exception as e:
                 logger.warning(f"Agent did not stop cleanly: {e}")
         self.loop.stop(timeout=timeout)
+        logger.info("rMirror Agent stopped")
 
 
-def setup_signal_handlers(agent: Agent) -> None:
-    """Set up signal handlers for graceful shutdown."""
+def setup_signal_handlers(agent: Agent, quit_app: Callable[[], None] | None = None) -> None:
+    """Set up SIGINT/SIGTERM handlers for graceful shutdown.
+
+    Args:
+        agent: The agent to shut down
+        quit_app: Tray mode: quits the menu-bar app (the same path as its Quit item).
+            Python runs signal handlers on the main thread, which in tray mode is
+            inside the AppKit run loop; sys.exit() there is swallowed and the process
+            stays alive with a menu-bar icon, so the app has to be quit instead.
+    """
 
     def signal_handler(sig: int, frame: object) -> None:
-        print(f"\nReceived signal {sig}, initiating shutdown...")
+        name = signal.Signals(sig).name
+        logger.info(f"Received {name}, shutting down")
+        print(f"\nReceived {name}, initiating shutdown...")
         agent.shutdown()
-        sys.exit(0)
+        if quit_app is not None:
+            quit_app()
+        else:
+            sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -405,11 +420,11 @@ def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> Non
     # Create and run agent
     agent = Agent(config, foreground=foreground)
     agent.remarkable_folder_missing = remarkable_folder_missing
-    setup_signal_handlers(agent)
 
     # Run the agent: all of its coroutines run on one long-lived loop thread
     if foreground or not config.tray.enabled:
         # Foreground mode: main thread waits for the agent
+        setup_signal_handlers(agent)
         agent.loop.start()
         try:
             agent.loop.submit(agent.start()).result()
@@ -427,6 +442,7 @@ def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> Non
         # Set tray app reference in agent
         agent.tray_app = app
         app.update_status("Idle")
+        setup_signal_handlers(agent, quit_app=app.shutdown_and_quit)
 
         agent.loop.start()
         agent_future = agent.loop.submit(agent.start())
