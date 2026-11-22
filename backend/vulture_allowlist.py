@@ -79,6 +79,7 @@ _.match_score
 _.max_retries
 _.modified_client
 _.name_match
+_.not_synced_pages
 _.note
 _.notebooks_processed
 _.notion_connected
@@ -88,6 +89,7 @@ _.OCR_PAGE
 _.PAST_DUE
 _.PDF
 _.pending_notebooks
+_.pending_quota_pages
 _.position_data
 _.postgres_db
 _.postgres_host
@@ -113,6 +115,7 @@ _.sync_interval_minutes
 _.SYNC_TO_SERVICE
 _.synced
 _.synced_count
+_.synced_pages
 _.todos_extracted
 _.token_type
 _.tos_accepted
