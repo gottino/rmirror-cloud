@@ -8,9 +8,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user, reject_agent_token
+from app.core.sync_engine import SyncTarget
 from app.database import get_db
-from app.integrations.notion_sync import NotionSyncTarget
-from app.integrations.notion_todos_sync import NotionTodosSyncTarget
+from app.integrations.registry import create_target, get_spec, missing_config
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord
 from app.models.user import User
 
@@ -337,40 +337,25 @@ async def test_integration(
 
         config_dict = config.get_config()  # Use encrypted config
 
-        # Create sync target based on type
-        if target_name == "notion":
-            access_token = config_dict.get("access_token")
-            database_id = config_dict.get("database_id")
-
-            if not access_token or not database_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Notion integration requires access_token and database_id. Please reconnect to Notion.",
-                )
-
-            target = NotionSyncTarget(access_token=access_token, database_id=database_id)
-
-        elif target_name == "notion-todos":
-            # Notion todos integration - syncs to separate todos database
-            access_token = config_dict.get("access_token")
-            database_id = config_dict.get("database_id")
-            use_status_property = config_dict.get("use_status_property", False)
-
-            if not access_token or not database_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Notion Todos integration requires access_token and database_id. Please reconnect to Notion.",
-                )
-
-            target = NotionTodosSyncTarget(
-                access_token=access_token,
-                database_id=database_id,
-                use_status_property=use_status_property,
-            )
-
-        else:
+        spec = get_spec(target_name)
+        if spec is None or spec.factory is None:
             raise HTTPException(
                 status_code=400, detail=f"Unknown integration type: {target_name}"
+            )
+
+        missing = missing_config(target_name, config_dict)
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Integration '{target_name}' requires {', '.join(missing)}. Please reconnect it.",
+            )
+
+        target = create_target(target_name, config_dict)
+        # The base class only echoes get_target_info(); that is no real test.
+        if type(target).validate_connection is SyncTarget.validate_connection:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Connection test is not supported for {target_name}",
             )
 
         # Test the connection

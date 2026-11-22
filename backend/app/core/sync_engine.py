@@ -256,7 +256,10 @@ class ContentFingerprint:
         last_modified_at = notebook_data.get("last_modified_at", "")
 
         # Create normalized metadata string (no content)
+        # The notebook uuid is part of the hash: identical metadata of two
+        # notebooks must not dedupe against each other in the sync queue.
         content_parts = [
+            f"notebook:{notebook_data.get('notebook_uuid', '')}",
             f"title:{title}",
             f"pages:{page_count}",
             f"path:{full_path}",

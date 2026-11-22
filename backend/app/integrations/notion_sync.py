@@ -185,9 +185,7 @@ class NotionSyncTarget(SyncTarget):
     async def sync_item(self, item: SyncItem) -> SyncResult:
         """Sync a single item to Notion."""
         try:
-            if item.item_type == SyncItemType.NOTEBOOK:
-                return await self._sync_notebook(item)
-            elif item.item_type == SyncItemType.NOTEBOOK_METADATA:
+            if item.item_type == SyncItemType.NOTEBOOK_METADATA:
                 return await self._sync_notebook_metadata(item)
             elif item.item_type == SyncItemType.PAGE_TEXT:
                 return await self._sync_page_text(item)
@@ -208,59 +206,6 @@ class NotionSyncTarget(SyncTarget):
                 )
         except Exception as e:
             self.logger.error(f"Error syncing {item.item_type} to Notion: {e}")
-            return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
-
-    async def _sync_notebook(self, item: SyncItem) -> SyncResult:
-        """Sync a notebook to Notion as a page in the database."""
-        try:
-            notebook_data = item.data
-            notebook_uuid = notebook_data.get("notebook_uuid")
-            title = notebook_data.get("title", "Untitled Notebook")
-            full_path = notebook_data.get("full_path", "")
-            pages = notebook_data.get("pages", [])
-            last_opened = notebook_data.get("last_opened_at")  # reMarkable lastOpened timestamp
-            last_modified = notebook_data.get("last_modified_at")  # reMarkable lastModified timestamp
-
-            # Check if page already exists
-            existing_page_id = await self.find_existing_page(notebook_uuid)
-
-            if existing_page_id:
-                # Update existing page
-                success = await self._update_notion_page(
-                    existing_page_id, notebook_uuid, title, pages, full_path,
-                    last_opened, last_modified
-                )
-                if success:
-                    return SyncResult(
-                        status=SyncStatus.SUCCESS,
-                        target_id=existing_page_id,
-                        metadata={"action": "updated"},
-                    )
-                else:
-                    return SyncResult(
-                        status=SyncStatus.RETRY,
-                        error_message="Failed to update existing Notion page",
-                    )
-            else:
-                # Create new page
-                page_id = await self._create_notion_page(
-                    notebook_uuid, title, pages, full_path,
-                    last_opened, last_modified
-                )
-                if page_id:
-                    return SyncResult(
-                        status=SyncStatus.SUCCESS,
-                        target_id=page_id,
-                        metadata={"action": "created"},
-                    )
-                else:
-                    return SyncResult(
-                        status=SyncStatus.RETRY,
-                        error_message="Failed to create Notion page",
-                    )
-
-        except Exception as e:
-            self.logger.error(f"Error syncing notebook to Notion: {e}")
             return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
 
     async def _sync_notebook_metadata(self, item: SyncItem) -> SyncResult:
@@ -402,7 +347,6 @@ class NotionSyncTarget(SyncTarget):
                 parent_page_id = self._create_notebook_page(
                     notebook_uuid=notebook_uuid,
                     title=notebook_name,
-                    pages=[],  # Empty pages list, will be updated later
                     full_path="",  # Don't have folder path from page data
                 )
 
@@ -800,16 +744,17 @@ class NotionSyncTarget(SyncTarget):
 
     @run_off_loop
     async def _create_notion_page(
-        self, notebook_uuid: str, title: str, pages: List[Dict], full_path: str,
+        self, notebook_uuid: str, title: str, full_path: str,
         last_opened: Optional[str] = None, last_modified: Optional[str] = None
     ) -> Optional[str]:
         """
-        Create a new page in Notion database.
+        Create a new, empty notebook page in the Notion database.
+
+        Page toggles are added later by ``_sync_page_text``.
 
         Args:
             notebook_uuid: UUID of the notebook
             title: Title of the notebook
-            pages: List of page data
             full_path: Full folder path
             last_opened: When notebook was last opened on reMarkable (ISO 8601)
             last_modified: When notebook was last modified on reMarkable (ISO 8601)
@@ -819,23 +764,27 @@ class NotionSyncTarget(SyncTarget):
         """
         try:
             return self._create_notebook_page(
-                notebook_uuid, title, pages, full_path, last_opened, last_modified
+                notebook_uuid, title, full_path, last_opened, last_modified
             )
         except Exception as e:
             self.logger.error(f"Error creating Notion page: {e}")
             return None
 
     def _create_notebook_page(
-        self, notebook_uuid: str, title: str, pages: List[Dict], full_path: str,
+        self, notebook_uuid: str, title: str, full_path: str,
         last_opened: Optional[str] = None, last_modified: Optional[str] = None
     ) -> str:
-        """Create the notebook's page in the Notion database; raises on failure."""
+        """Create the notebook's (empty) page in the Notion database; raises on failure.
+
+        The page holds only the "Notebook Content" heading; ``_sync_page_text``
+        adds one toggle per page below it.
+        """
         # Build page properties with all metadata
         properties = {
             "Name": {"title": [{"text": {"content": title}}]},
             "UUID": {"rich_text": [{"text": {"content": notebook_uuid}}]},
             "Path": {"rich_text": [{"text": {"content": full_path or ""}}]},
-            "Pages": {"number": len(pages)},
+            "Pages": {"number": 0},
         }
 
         # Add Tags from path
@@ -863,208 +812,26 @@ class NotionSyncTarget(SyncTarget):
         # Add Status
         properties["Status"] = {"select": {"name": "Synced"}}
 
-        # Build page content from pages
-        children = self._build_page_blocks(pages)
-
-        # Create the page
+        # Create the page with just the content heading
         response = self.client.pages.create(
             parent={"database_id": self.database_id},
             properties=properties,
-            children=children[:100],  # Notion limit is 100 blocks per request
+            children=[
+                {
+                    "object": "block",
+                    "type": "heading_2",
+                    "heading_2": {
+                        "rich_text": [
+                            {"type": "text", "text": {"content": "Notebook Content"}}
+                        ]
+                    },
+                }
+            ],
         )
 
         page_id = response["id"]
         self.logger.info(f"Created Notion page: {page_id} for notebook {title}")
         return page_id
-
-    async def _update_notion_page(
-        self, page_id: str, notebook_uuid: str, title: str, pages: List[Dict], full_path: str,
-        last_opened: Optional[str] = None, last_modified: Optional[str] = None
-    ) -> bool:
-        """
-        Update an existing Notion page with granular page-level deduplication.
-
-        Args:
-            page_id: Notion page ID
-            notebook_uuid: UUID of the notebook
-            title: Updated title
-            pages: Updated page data
-            full_path: Updated folder path
-            last_opened: When notebook was last opened on reMarkable (ISO 8601)
-            last_modified: When notebook was last modified on reMarkable (ISO 8601)
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            import hashlib
-            import json
-            import re
-            from datetime import datetime
-
-            # Update properties with all metadata
-            properties = {
-                "Name": {"title": [{"text": {"content": title}}]},
-                "UUID": {"rich_text": [{"text": {"content": notebook_uuid}}]},
-                "Path": {"rich_text": [{"text": {"content": full_path or ""}}]},
-                "Pages": {"number": len(pages)},
-                "Synced At": {"date": {"start": datetime.utcnow().isoformat()}},
-                "Status": {"select": {"name": "Synced"}},
-            }
-
-            # Update Tags from path
-            tags = self._extract_tags_from_path(full_path)
-            if tags:
-                properties["Tags"] = {"multi_select": [{"name": tag} for tag in tags]}
-            else:
-                # Clear tags if path is empty
-                properties["Tags"] = {"multi_select": []}
-
-            # Update Last Opened if available
-            if last_opened:
-                try:
-                    properties["Last Opened"] = {"date": {"start": last_opened}}
-                except Exception as e:
-                    self.logger.warning(f"Invalid last_opened format: {last_opened}, error: {e}")
-
-            # Update Last Modified if available
-            if last_modified:
-                try:
-                    properties["Last Modified"] = {"date": {"start": last_modified}}
-                except Exception as e:
-                    self.logger.warning(f"Invalid last_modified format: {last_modified}, error: {e}")
-
-            # Always update properties (metadata may have changed even if content didn't)
-            self.client.pages.update(page_id=page_id, properties=properties)
-
-            # Get existing blocks to compare page-by-page
-            existing_blocks = self.client.blocks.children.list(block_id=page_id)
-            existing_page_blocks = {}  # Map of page_number -> (block_id, hash)
-
-            # Parse existing page blocks to extract page numbers and hashes
-            for block in existing_blocks.get("results", []):
-                if block.get("type") == "toggle":
-                    toggle_data = block.get("toggle", {})
-                    rich_text = toggle_data.get("rich_text", [])
-                    if rich_text:
-                        content = rich_text[0].get("text", {}).get("content", "")
-                        # Parse format: "📄 Page 1 [abc12345]"
-                        match = re.match(r"📄 Page (\d+) \[([a-f0-9]+)\]", content)
-                        if match:
-                            page_num = int(match.group(1))
-                            page_hash = match.group(2)
-                            existing_page_blocks[page_num] = (block["id"], page_hash)
-
-            # Calculate hashes for current pages
-            current_page_hashes = {}  # Map of page_number -> hash
-            for page in pages[:20]:
-                page_number = page.get("page_number", 0)
-                text = page.get("text", "")
-                if not text.strip():
-                    continue
-
-                page_hash_data = json.dumps({
-                    "page_number": page_number,
-                    "text": text
-                }, sort_keys=True)
-                page_hash = hashlib.sha256(page_hash_data.encode()).hexdigest()[:8]
-                current_page_hashes[page_number] = page_hash
-
-            # Determine which pages need updating
-            pages_to_delete = []
-            pages_to_add = []
-
-            # Check which existing pages have changed or been removed
-            for page_num, (block_id, old_hash) in existing_page_blocks.items():
-                if page_num not in current_page_hashes:
-                    # Page was removed
-                    pages_to_delete.append(block_id)
-                    self.logger.info(f"Page {page_num} removed, will delete block")
-                elif current_page_hashes[page_num] != old_hash:
-                    # Page content changed
-                    pages_to_delete.append(block_id)
-                    self.logger.info(f"Page {page_num} changed (hash: {old_hash} → {current_page_hashes[page_num]})")
-
-            # Check which pages are new or need to be recreated
-            for page in pages[:20]:
-                page_number = page.get("page_number", 0)
-                text = page.get("text", "")
-                if not text.strip():
-                    continue
-
-                current_hash = current_page_hashes.get(page_number)
-                if page_number not in existing_page_blocks:
-                    # New page
-                    pages_to_add.append(page)
-                    self.logger.info(f"Page {page_number} is new, will add")
-                elif existing_page_blocks[page_number][1] != current_hash:
-                    # Changed page (already marked for deletion above)
-                    pages_to_add.append(page)
-
-            # Delete changed/removed page blocks
-            if pages_to_delete:
-                self.logger.info(f"Deleting {len(pages_to_delete)} changed/removed page blocks...")
-                for block_id in pages_to_delete:
-                    try:
-                        self.client.blocks.delete(block_id=block_id)
-                    except Exception as e:
-                        self.logger.warning(f"Failed to delete block {block_id}: {e}")
-
-            # Add new/changed page blocks
-            if pages_to_add:
-                self.logger.info(f"Adding {len(pages_to_add)} new/changed page blocks...")
-
-                # Sort pages in reverse order (highest page number first) for most recent first
-                pages_to_add_sorted = sorted(pages_to_add, key=lambda p: p.get("page_number", 0), reverse=True)
-
-                # Build blocks for the pages that need adding
-                new_blocks = []
-                for page in pages_to_add_sorted:
-                    page_number = page.get("page_number", 0)
-                    text = page.get("text", "")
-
-                    # Calculate hash
-                    page_hash_data = json.dumps({
-                        "page_number": page_number,
-                        "text": text
-                    }, sort_keys=True)
-                    page_hash = hashlib.sha256(page_hash_data.encode()).hexdigest()[:8]
-
-                    # Create toggle block with hash
-                    page_block = {
-                        "object": "block",
-                        "type": "toggle",
-                        "toggle": {
-                            "rich_text": [
-                                {
-                                    "type": "text",
-                                    "text": {"content": f"📄 Page {page_number} [{page_hash}]"},
-                                    "annotations": {"bold": True},
-                                }
-                            ],
-                            "children": self._text_to_blocks(text),
-                        },
-                    }
-                    new_blocks.append(page_block)
-
-                # Add blocks in batches of 100 (Notion limit)
-                for i in range(0, len(new_blocks), 100):
-                    batch = new_blocks[i:i+100]
-                    self.client.blocks.children.append(
-                        block_id=page_id,
-                        children=batch
-                    )
-
-            if pages_to_delete or pages_to_add:
-                self.logger.info(f"Updated Notion page: deleted {len(pages_to_delete)} blocks, added {len(pages_to_add)} pages")
-            else:
-                self.logger.info(f"No page-level changes for {title}, skipped block updates")
-
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Error updating Notion page: {e}")
-            return False
 
     async def _update_notion_page_properties(
         self, page_id: str, notebook_uuid: str, title: str, page_count: int, full_path: str,
@@ -1131,74 +898,6 @@ class NotionSyncTarget(SyncTarget):
             self.logger.error(f"Error updating Notion page properties: {e}")
             return False
 
-    def _build_page_blocks(self, pages: List[Dict]) -> List[Dict]:
-        """
-        Build Notion blocks from page data with content hashes for deduplication.
-
-        Pages are ordered in reverse (highest page number first) so the most recent
-        content appears at the top of the Notion page.
-
-        Args:
-            pages: List of page dictionaries with text content
-
-        Returns:
-            List of Notion block objects with embedded page hashes, ordered by page number descending
-        """
-        import hashlib
-        import json
-
-        blocks = []
-
-        # Add a heading for the notebook content
-        blocks.append(
-            {
-                "object": "block",
-                "type": "heading_2",
-                "heading_2": {
-                    "rich_text": [
-                        {"type": "text", "text": {"content": "Notebook Content"}}
-                    ]
-                },
-            }
-        )
-
-        # Filter pages with content and sort in reverse order (highest page number first)
-        pages_with_content = [p for p in pages[:20] if p.get("text", "").strip()]
-        pages_sorted = sorted(pages_with_content, key=lambda p: p.get("page_number", 0), reverse=True)
-
-        # Add each page as a toggle block with embedded hash
-        for page in pages_sorted:
-            page_number = page.get("page_number", 0)
-            text = page.get("text", "")
-
-            # Calculate hash for this specific page
-            page_hash_data = json.dumps({
-                "page_number": page_number,
-                "text": text
-            }, sort_keys=True)
-            page_hash = hashlib.sha256(page_hash_data.encode()).hexdigest()[:8]
-
-            # Create toggle block for the page with hash embedded in title
-            # Format: "📄 Page 1 [abc12345]" where abc12345 is the hash
-            page_block = {
-                "object": "block",
-                "type": "toggle",
-                "toggle": {
-                    "rich_text": [
-                        {
-                            "type": "text",
-                            "text": {"content": f"📄 Page {page_number} [{page_hash}]"},
-                            "annotations": {"bold": True},
-                        }
-                    ],
-                    "children": self._text_to_blocks(text),
-                },
-            }
-
-            blocks.append(page_block)
-
-        return blocks
-
     def _text_to_blocks(self, text: str, max_blocks: int = 100) -> List[Dict]:
         """
         Convert text with markdown to Notion blocks.
@@ -1221,35 +920,11 @@ class NotionSyncTarget(SyncTarget):
 
     @run_off_loop
     async def update_item(self, external_id: str, item: SyncItem) -> SyncResult:
-        """Update an existing item in Notion."""
-        try:
-            if item.item_type == SyncItemType.NOTEBOOK:
-                notebook_data = item.data
-                title = notebook_data.get("title", "Untitled")
-                pages = notebook_data.get("pages", [])
-                full_path = notebook_data.get("full_path", "")
-
-                success = await self._update_notion_page(
-                    external_id, title, pages, full_path
-                )
-                if success:
-                    return SyncResult(
-                        status=SyncStatus.SUCCESS,
-                        target_id=external_id,
-                        metadata={"action": "updated"},
-                    )
-                else:
-                    return SyncResult(
-                        status=SyncStatus.RETRY,
-                        error_message="Failed to update Notion page",
-                    )
-            else:
-                return SyncResult(
-                    status=SyncStatus.FAILED,
-                    error_message=f"Update not supported for {item.item_type}",
-                )
-        except Exception as e:
-            return SyncResult(status=SyncStatus.FAILED, error_message=str(e))
+        """Not supported: page and metadata writes go through ``sync_item``."""
+        return SyncResult(
+            status=SyncStatus.FAILED,
+            error_message=f"Update not supported for {item.item_type}",
+        )
 
     @run_off_loop
     async def delete_item(self, external_id: str) -> SyncResult:

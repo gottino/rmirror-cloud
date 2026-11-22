@@ -12,15 +12,14 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.core.sync_engine import (
+    ContentFingerprint,
     SyncErrorKind,
     SyncItem,
     SyncItemType,
     SyncResult,
 )
 from app.database import SessionLocal
-from app.integrations.notion_sync import NotionSyncTarget
-from app.integrations.notion_todos_sync import NotionTodosSyncTarget
-from app.integrations.todoist_sync import TodoistSyncTarget
+from app.integrations.registry import create_target, supports
 from app.models.notebook import Notebook
 from app.models.page import Page
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord, SyncStatus
@@ -667,9 +666,23 @@ class SyncWorker:
             db.commit()
             return
 
+        # The target registry says which item types each target accepts
+        if not supports(queue_item.target_name, queue_item.item_type):
+            logger.warning(
+                f"Target {queue_item.target_name} does not accept {queue_item.item_type} items"
+            )
+            queue_item.status = 'failed'
+            queue_item.error_message = (
+                f"Target {queue_item.target_name} does not accept {queue_item.item_type} items"
+            )
+            db.commit()
+            return
+
         # Process based on item type
         if queue_item.item_type == 'page_text':
             await self._process_page_sync(db, queue_item, config, _item_start)
+        elif queue_item.item_type == 'notebook_metadata':
+            await self._process_notebook_metadata_sync(db, queue_item, config, _item_start)
         elif queue_item.item_type == 'todo':
             await self._process_todo_sync(db, queue_item, config, _item_start)
         else:
@@ -709,18 +722,7 @@ class SyncWorker:
         # Get decrypted config
         config_dict = config.get_config()
 
-        # Create appropriate sync target
-        if queue_item.target_name == 'notion':
-            target = NotionSyncTarget(
-                access_token=config_dict.get('access_token'),
-                database_id=config_dict.get('database_id'),
-            )
-        else:
-            logger.warning(f"Unknown target: {queue_item.target_name}")
-            queue_item.status = 'failed'
-            queue_item.error_message = f"Unknown target: {queue_item.target_name}"
-            db.commit()
-            return
+        target = create_target(queue_item.target_name, config_dict)
 
         # Check if the NOTEBOOK was previously synced to get the parent Notion page ID
         # This prevents creating multiple Notion pages for the same notebook
@@ -929,6 +931,117 @@ class SyncWorker:
 
         db.commit()
 
+    async def _process_notebook_metadata_sync(
+        self,
+        db: Session,
+        queue_item: SyncQueue,
+        config: IntegrationConfig,
+        _item_start: float = 0.0,
+    ):
+        """Write a notebook's properties (title, path, page count, dates) to the target.
+
+        The payload is rebuilt from the database now, so the latest metadata is
+        written even if it changed after the row was queued. On success one
+        ``notebook_metadata`` SyncRecord per notebook and target holds the hash
+        last written; queue_sync uses it to skip unchanged metadata.
+        """
+        from app.services.sync_queue import notebook_metadata_payload
+
+        notebook_uuid = queue_item.notebook_uuid or queue_item.item_id
+        notebook = (
+            db.query(Notebook)
+            .filter(
+                Notebook.user_id == queue_item.user_id,
+                Notebook.notebook_uuid == notebook_uuid,
+            )
+            .first()
+        )
+        if not notebook:
+            logger.info(f"Notebook {notebook_uuid} no longer exists; skipping metadata sync")
+            queue_item.status = 'completed'
+            queue_item.completed_at = datetime.utcnow()
+            db.commit()
+            return
+
+        data = notebook_metadata_payload(notebook)
+        content_hash = ContentFingerprint.for_notebook_metadata(data)
+        target = create_target(queue_item.target_name, config.get_config())
+        sync_item = SyncItem(
+            item_type=SyncItemType.NOTEBOOK_METADATA,
+            item_id=notebook.notebook_uuid,
+            content_hash=content_hash,
+            data=data,
+            source_table='notebooks',
+            created_at=notebook.created_at,
+            updated_at=notebook.updated_at,
+        )
+
+        result = await target.sync_item(sync_item)
+        duration_ms = round((time.monotonic() - _item_start) * 1000, 1)
+
+        if result.success:
+            now = datetime.utcnow()
+            record = (
+                db.query(SyncRecord)
+                .filter(
+                    SyncRecord.user_id == queue_item.user_id,
+                    SyncRecord.target_name == queue_item.target_name,
+                    SyncRecord.item_type == 'notebook_metadata',
+                    SyncRecord.notebook_uuid == notebook.notebook_uuid,
+                )
+                .first()
+            )
+            if record is None:
+                record = SyncRecord(
+                    user_id=queue_item.user_id,
+                    target_name=queue_item.target_name,
+                    item_type='notebook_metadata',
+                    item_id=notebook.notebook_uuid,
+                    notebook_uuid=notebook.notebook_uuid,
+                )
+                db.add(record)
+            record.content_hash = content_hash
+            record.external_id = result.target_id or ""
+            record.status = 'success'
+            record.error_message = None
+            record.synced_at = now
+            record.updated_at = now
+
+            _set_rate_limit_deferrals(queue_item, 0)
+            queue_item.status = 'completed'
+            queue_item.completed_at = now
+            logger.info(
+                "Metadata sync completed: notebook %s -> %s",
+                notebook.notebook_uuid,
+                queue_item.target_name,
+                extra={
+                    "event": "sync.done",
+                    "queue_id": queue_item.id,
+                    "target": queue_item.target_name,
+                    "duration_ms": duration_ms,
+                    "notebook_uuid": notebook.notebook_uuid,
+                },
+            )
+        else:
+            outcome = apply_sync_result(queue_item, result)
+            logger.log(
+                logging.INFO if outcome == "skipped" else logging.ERROR,
+                "Metadata sync %s: notebook %s: %s",
+                outcome,
+                notebook.notebook_uuid,
+                result.error_message,
+                extra={
+                    "event": f"sync.{'fail' if outcome == 'failed' else outcome}",
+                    "queue_id": queue_item.id,
+                    "target": queue_item.target_name,
+                    "duration_ms": duration_ms,
+                    "error": result.error_message,
+                    "retrying": outcome == "retry",
+                },
+            )
+
+        db.commit()
+
     @staticmethod
     def _store_stale_block_ids(record: SyncRecord, result_metadata: dict) -> None:
         """Keep the target's undeleted old block ids in the record's metadata_json."""
@@ -965,24 +1078,7 @@ class SyncWorker:
         # Get decrypted config
         config_dict = config.get_config()
 
-        # Create appropriate sync target
-        if queue_item.target_name == 'todoist':
-            target = TodoistSyncTarget(
-                access_token=config_dict.get('access_token'),
-                project_id=config_dict.get('project_id'),
-            )
-        elif queue_item.target_name == 'notion-todos':
-            target = NotionTodosSyncTarget(
-                access_token=config_dict.get('access_token'),
-                database_id=config_dict.get('database_id'),
-                use_status_property=config_dict.get('use_status_property', False),
-            )
-        else:
-            logger.warning(f"Unknown todo target: {queue_item.target_name}")
-            queue_item.status = 'failed'
-            queue_item.error_message = f"Unknown todo target: {queue_item.target_name}"
-            db.commit()
-            return
+        target = create_target(queue_item.target_name, config_dict)
 
         # Build sync item
         metadata = json.loads(queue_item.metadata_json) if queue_item.metadata_json else {}

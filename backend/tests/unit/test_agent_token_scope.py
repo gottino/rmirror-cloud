@@ -172,7 +172,6 @@ AGENT_BLOCKED_ROUTES = [
     ("POST", f"{API}/waitlist/admin/{{entry_id}}/approve"),
     ("POST", f"{API}/users/accept-terms"),
     ("POST", f"{API}/sync/trigger"),
-    ("POST", f"{API}/sync/process-queue"),
     ("POST", f"{API}/processing/metadata/rebuild-paths"),
     # Read the user's notebook content; the agent never calls them.
     ("GET", f"{API}/notebooks/"),

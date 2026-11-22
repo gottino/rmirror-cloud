@@ -10,6 +10,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
+from app.integrations.registry import PAGE_TEXT, supports
 from app.models.notebook import Notebook
 from app.models.notebook_page import NotebookPage
 from app.models.page import OcrStatus, Page
@@ -46,10 +47,11 @@ def update_obsidian_content_hash(db: Session, notebook: Notebook) -> None:
 
 
 def enqueue_integration_syncs(db: Session, page: Page, notebook: Notebook) -> int:
-    """Queue the page's OCR text for every enabled push integration.
+    """Queue the page's OCR text for every enabled integration that accepts it.
 
-    Obsidian is skipped: it pulls via its own endpoints (content hash above).
-    Queueing failures are logged and never raised.
+    Which targets accept page text comes from the target registry: todo-only
+    targets (Todoist, Notion Todos) and pull-based Obsidian (content hash
+    above) get no row. Queueing failures are logged and never raised.
 
     Returns:
         Number of integrations the page was queued for.
@@ -79,7 +81,7 @@ def enqueue_integration_syncs(db: Session, page: Page, notebook: Notebook) -> in
 
     queued = 0
     for integration in active_integrations:
-        if integration.target_name == "obsidian":
+        if not supports(integration.target_name, PAGE_TEXT):
             continue
 
         try:
