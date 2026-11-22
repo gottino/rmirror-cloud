@@ -115,7 +115,8 @@ class TestBridgeState:
     def test_each_bridge_visit_gets_a_new_state(self, client):
         assert _state_from_live_bridge(client) != _state_from_live_bridge(client)
 
-    def test_local_bridge_template_carries_state(self, client, app):
+    def test_local_bridge_template_carries_state(self, client, app, config):
+        config.api.url = "http://localhost:8000/api/v1"
         resp = _start_bridge(client, key=TEST_KEY)
         assert resp.status_code == 200
         html = resp.get_data(as_text=True)
@@ -123,6 +124,31 @@ class TestBridgeState:
         store = app.config["AUTH_STATES"]
         (state,) = list(store._states)
         assert f'var AUTH_STATE = "{state}";' in html
+
+
+class TestBridgeTarget:
+    """The hosted dashboard page is used for every backend that is not on loopback."""
+
+    def test_staging_with_test_key_redirects_to_hosted_page(self, client, config):
+        config.api.url = "https://staging.example.test/api/v1"
+        resp = _start_bridge(client, key=TEST_KEY)
+        assert resp.status_code == 302
+        location = urlparse(resp.headers["Location"])
+        assert (location.scheme, location.netloc, location.path) == ("https", "staging.example.test", "/agent")
+        callback = urlparse(parse_qs(location.query)["callback"][0])
+        assert (callback.scheme, callback.netloc, callback.path) == ("http", f"localhost:{PORT}", "/auth/callback")
+        assert len(parse_qs(callback.query)["state"][0]) >= 32
+
+    @pytest.mark.parametrize(
+        "api_url",
+        ["http://localhost:8000/api/v1", "http://127.0.0.1:8000/api/v1", "http://[::1]:8000/api/v1"],
+    )
+    @pytest.mark.parametrize("key", [TEST_KEY, LIVE_KEY])
+    def test_loopback_backend_serves_local_bridge(self, client, config, api_url, key):
+        config.api.url = api_url
+        resp = _start_bridge(client, key=key)
+        assert resp.status_code == 200
+        assert "AUTH_STATE" in resp.get_data(as_text=True)
 
 
 class TestCallback:
@@ -177,7 +203,8 @@ class TestCallback:
         cloud_sync.client, seen = _backend_returning(200)
         resp = self._callback(client, state=state, token="new-token")
         assert resp.status_code == 302
-        assert resp.headers["Location"].endswith("/dashboard")
+        # Lands on the agent's own page, which shows a success message
+        assert resp.headers["Location"] == "/?signed_in=1"
         assert seen[0].url.path.endswith("/sync/stats")
         assert seen[0].headers["Authorization"] == "Bearer new-token"
         assert config.api.token == "new-token"
@@ -323,6 +350,12 @@ class TestSyncQueueStatus:
         assert data["sync"]["paused_reason"] == "sign_in_required"
         assert data["sync"]["queue"]["queue_size"] == 3
         assert data["authentication"]["sign_in_required"] is True
+
+    def test_status_reports_real_version(self, client):
+        from app.__version__ import __version__
+
+        data = client.get("/api/status", base_url=BASE_URL).get_json()
+        assert data["agent"]["version"] == __version__
 
     def test_status_without_watcher(self, client):
         data = client.get("/api/status", base_url=BASE_URL).get_json()
