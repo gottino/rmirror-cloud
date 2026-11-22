@@ -157,6 +157,18 @@ def get_clerk_client() -> ClientsApi:
     return _clients_api
 
 
+def _agent_token_version_matches(decoded: dict, user: User) -> bool:
+    """True when an agent token's ``ver`` equals the user's current version.
+
+    Tokens issued before revocation existed have no ``ver`` claim; they count
+    as version 0 and keep working until the user first revokes.
+    """
+    ver = decoded.get("ver", 0)
+    if not isinstance(ver, int) or isinstance(ver, bool):
+        return False
+    return ver == (user.agent_token_version or 0)
+
+
 async def get_clerk_user(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
@@ -194,7 +206,9 @@ async def get_clerk_user(
             raise credentials_exception
 
         if header.get("alg") == "HS256":
-            # Agent token: verify with our secret key
+            # Agent token: verify with our secret key. Agent JWTs keep using
+            # SECRET_KEY itself, not a per-purpose derived key (app.auth.signing):
+            # switching keys would sign out every installed agent.
             decoded = jwt.decode(
                 token,
                 settings.secret_key,
@@ -264,6 +278,10 @@ async def get_clerk_user(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found. Please complete registration via webhook.",
             )
+
+        if request.state.is_agent_token and not _agent_token_version_matches(decoded, user):
+            logger.warning("Rejected revoked agent token: user_id=%s", user.id)
+            raise credentials_exception
 
         # Store user_id in context for structured logging
         user_id_var.set(user.id)

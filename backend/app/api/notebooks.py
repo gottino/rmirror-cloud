@@ -132,7 +132,7 @@ async def upload_notebook(
 
 @router.get("/", response_model=list[NotebookSchema])
 async def list_notebooks(
-    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_session_user)],
     db: Annotated[Session, Depends(get_db)],
     skip: int = 0,
     limit: int = 100,
@@ -163,7 +163,7 @@ async def list_notebooks(
 
 @router.get("/tree")
 async def get_notebooks_tree(
-    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_session_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
@@ -305,7 +305,7 @@ async def get_notebooks_tree(
 @router.get("/uuid/{notebook_uuid}", response_model=NotebookSchema)
 async def get_notebook_by_uuid(
     notebook_uuid: str,
-    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_session_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
@@ -379,7 +379,7 @@ def _page_counts(db: Session, notebook_id: int) -> dict[str, int]:
 @router.get("/{notebook_id}", response_model=NotebookWithPages)
 async def get_notebook(
     notebook_id: int,
-    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_session_user)],
     db: Annotated[Session, Depends(get_db)],
     include_pages: Annotated[
         bool,
@@ -433,7 +433,7 @@ async def get_notebook(
 @router.get("/{notebook_id}/pages", response_model=NotebookPagesResponse)
 async def get_notebook_pages(
     notebook_id: int,
-    current_user: Annotated[User, Depends(get_clerk_active_user)],
+    current_user: Annotated[User, Depends(get_clerk_session_user)],
     db: Annotated[Session, Depends(get_db)],
     offset: Annotated[int, Query(ge=0, description="Number of pages to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=100, description="Pages per window (1-100)")] = 50,

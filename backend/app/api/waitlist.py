@@ -1,9 +1,5 @@
 """Waitlist API endpoints with beta invite system."""
 
-import base64
-import hashlib
-import hmac
-import json
 import logging
 import time
 from datetime import datetime
@@ -15,6 +11,7 @@ from sqlalchemy import Column, DateTime, Integer, String, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth import signing
 from app.auth.clerk import get_clerk_session_user
 from app.config import get_settings
 from app.database import Base, get_db
@@ -102,40 +99,28 @@ class InviteValidationResponse(BaseModel):
 # ==================== HMAC Invite Tokens ====================
 
 
-def _create_invite_token(email: str, waitlist_id: int, secret_key: str) -> str:
+def _create_invite_token(email: str, waitlist_id: int) -> str:
     """Create an HMAC-signed invite token encoding email and expiration."""
     settings = get_settings()
     expiry_seconds = settings.invite_token_expiry_days * 86400
-    payload = json.dumps({
+    payload = {
         "email": email,
         "wid": waitlist_id,
         "exp": int(time.time()) + expiry_seconds,
-    })
-    payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode()
-    signature = hmac.new(
-        secret_key.encode(), payload_b64.encode(), hashlib.sha256
-    ).hexdigest()
-    return f"{payload_b64}.{signature}"
+    }
+    return signing.sign(payload, signing.derive_key(signing.INVITE_TOKEN_PURPOSE))
 
 
-def _validate_invite_token(token: str, secret_key: str) -> Optional[dict]:
+def _validate_invite_token(token: str) -> Optional[dict]:
     """Validate an HMAC-signed invite token. Returns payload dict or None."""
-    try:
-        parts = token.split(".")
-        if len(parts) != 2:
-            return None
-        payload_b64, signature = parts
-        expected_sig = hmac.new(
-            secret_key.encode(), payload_b64.encode(), hashlib.sha256
-        ).hexdigest()
-        if not hmac.compare_digest(signature, expected_sig):
-            return None
-        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-        if payload.get("exp", 0) < int(time.time()):
-            return None
-        return payload
-    except Exception:
-        return None
+    keys = [
+        signing.derive_key(signing.INVITE_TOKEN_PURPOSE),
+        # Legacy: invites sent before per-purpose keys were signed with the raw
+        # SECRET_KEY and stay valid for invite_token_expiry_days. This branch
+        # can be removed after 2026-12-31.
+        get_settings().secret_key.encode(),
+    ]
+    return signing.verify(token, keys)
 
 
 # ==================== Admin Auth ====================
@@ -223,12 +208,10 @@ async def validate_invite(
     db: Session = Depends(get_db),
 ):
     """Validate an invite token (public endpoint)."""
-    settings = get_settings()
-
     if not token:
         return InviteValidationResponse(valid=False, reason="No token provided")
 
-    payload = _validate_invite_token(token, settings.secret_key)
+    payload = _validate_invite_token(token)
     if not payload:
         return InviteValidationResponse(
             valid=False, reason="Invalid or expired invite link"
@@ -333,7 +316,7 @@ async def approve_waitlist_entry(
     settings = get_settings()
 
     # Generate invite token
-    token = _create_invite_token(entry.email, entry.id, settings.secret_key)
+    token = _create_invite_token(entry.email, entry.id)
     entry.status = "approved"
     entry.invite_token = token
     entry.approved_at = datetime.utcnow()
@@ -386,7 +369,7 @@ async def approve_waitlist_bulk(
             errors.append({"id": entry_id, "error": f"Already {entry.status}"})
             continue
 
-        token = _create_invite_token(entry.email, entry.id, settings.secret_key)
+        token = _create_invite_token(entry.email, entry.id)
         entry.status = "approved"
         entry.invite_token = token
         entry.approved_at = datetime.utcnow()
