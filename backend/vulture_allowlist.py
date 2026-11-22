@@ -79,6 +79,7 @@ _.match_score
 _.max_retries
 _.modified_client
 _.name_match
+_.needs_reconnect
 _.not_synced_pages
 _.note
 _.notebooks_processed
