@@ -12,12 +12,13 @@ while content syncs in the background with proper rate limit handling.
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
 
 from app.config import Config
 from app.remarkable.metadata_scanner import MetadataScanner
-from app.sync.cloud_sync import CloudSync, QuotaExceededError, RateLimitError
+from app.sync.cloud_sync import CloudSync, CloudSyncError, QuotaExceededError, RateLimitError
 from app.sync.manifest import Fingerprint, UploadManifest, fingerprint_file
 from app.sync.metadata_sync import MetadataSync
 
@@ -33,7 +34,17 @@ class InitialSync:
     2. Content sync (slow): Uploads pages with rate limit handling
     """
 
-    def __init__(self, config: Config, cloud_sync: CloudSync, manifest: UploadManifest | None = None):
+    # Server errors (5xx) and network errors: retries per page, with backoff
+    SERVER_ERROR_RETRIES = 2
+    SERVER_ERROR_BACKOFF_SECONDS = 2
+
+    def __init__(
+        self,
+        config: Config,
+        cloud_sync: CloudSync,
+        manifest: UploadManifest | None = None,
+        on_progress: Callable[[dict], None] | None = None,
+    ):
         """
         Initialize initial sync.
 
@@ -42,12 +53,36 @@ class InitialSync:
             cloud_sync: Cloud sync client
             manifest: Upload manifest; pages uploaded here are recorded in it so the
                 watcher does not upload them again (defaults to the config directory's)
+            on_progress: Called with a copy of ``progress`` whenever a count changes
         """
         self.config = config
         self.cloud_sync = cloud_sync
         self.manifest = manifest if manifest is not None else UploadManifest.for_config(config)
         self.remarkable_folder = Path(config.remarkable.source_directory)
         self.metadata_sync = MetadataSync(config, cloud_sync)
+        self._on_progress = on_progress
+        self._sleep = asyncio.sleep  # injectable for tests
+        self.progress = {
+            "notebooks_total": 0,
+            "notebooks_done": 0,
+            "uploaded": 0,
+            "failed": 0,
+            "skipped": 0,
+            "rate_limited": 0,
+        }
+
+    def _count(self, key: str, amount: int = 1) -> None:
+        """Add to a live progress count and report it."""
+        self.progress[key] += amount
+        self._report_progress()
+
+    def _report_progress(self) -> None:
+        if self._on_progress is None:
+            return
+        try:
+            self._on_progress(dict(self.progress))
+        except Exception as e:  # Progress reporting must never break the sync
+            logger.debug(f"Progress callback failed: {e}")
 
     async def run(self, selected_notebook_uuids: Optional[list[str]] = None) -> dict:
         """
@@ -104,6 +139,8 @@ class InitialSync:
             }
 
         print(f"  Found {len(notebooks)} notebook(s) for content sync")
+        self.progress["notebooks_total"] = len(notebooks)
+        self._report_progress()
         print()
 
         stats = {
@@ -134,6 +171,7 @@ class InitialSync:
                 if nb_stats.get("rate_limited", 0) > 0:
                     rate_limit_hit = True
 
+                self._count("notebooks_done")
                 print()
 
             except QuotaExceededError:
@@ -146,6 +184,8 @@ class InitialSync:
                 print(f"   ❌ Failed: {e}")
                 print()
                 stats["failed"] += 1
+                self._count("failed")
+                self._count("notebooks_done")
 
         # ================================================================
         # Summary
@@ -271,6 +311,7 @@ class InitialSync:
             skipped_count = len(ordered_page_files) - max_pages
             page_files_to_upload = ordered_page_files[:max_pages]  # Take first N (newest)
             stats["skipped"] = skipped_count
+            self._count("skipped", skipped_count)
             print(f"   ⚡ Limiting to {max_pages} most recent pages (skipping {skipped_count} older pages)")
             logger.info(f"Limited notebook {notebook_uuid} to {max_pages} newest pages")
         else:
@@ -286,6 +327,7 @@ class InitialSync:
                     result = await self._upload_with_retry(page_file, notebook_uuid)
                     if result.get("rate_limited"):
                         stats["rate_limited"] += 1
+                        self._count("rate_limited")
                         # Don't continue trying if we're rate limited
                         remaining = len(page_files_to_upload) - stats["uploaded"] - stats["rate_limited"]
                         if remaining > 0:
@@ -293,6 +335,7 @@ class InitialSync:
                         break
                     self._record_upload(page_file, fingerprint)
                     stats["uploaded"] += 1
+                    self._count("uploaded")
                 except QuotaExceededError:
                     # Re-raise to stop the entire sync
                     raise
@@ -300,6 +343,9 @@ class InitialSync:
                     logger.error(f"Failed to upload {page_file.name}: {e}")
                     stats["failed"] += 1
                     stats["failed_pages"].append(page_file.stem)
+                    self._count("failed")
+                    if isinstance(e, CloudSyncError) and e.transient:
+                        self._leave_for_rescan(page_file)
 
         # Note: .content file upload is no longer needed here.
         # Phase 1 (metadata sync) establishes page mappings via /sync/metadata endpoint.
@@ -322,11 +368,24 @@ class InitialSync:
         except Exception as e:
             logger.warning(f"Could not record {page_file.name} in upload manifest: {e}")
 
+    def _leave_for_rescan(self, page_file: Path) -> None:
+        """Drop a page's baseline entry so the next start-up scan uploads it.
+
+        The page is never recorded as uploaded on failure; but a page that was only
+        baselined (present when the manifest was first set up) would otherwise look
+        unchanged to the scan and never be retried.
+        """
+        try:
+            self.manifest.forget_baseline(page_file)
+        except Exception as e:
+            logger.warning(f"Could not mark {page_file.name} for retry: {e}")
+
     async def _upload_with_retry(
         self, page_file: Path, notebook_uuid: str, max_retries: int = 2
     ) -> dict:
         """
-        Upload a page file with exponential backoff on rate limit.
+        Upload a page file with exponential backoff on rate limits, server errors
+        (5xx) and network errors (``SERVER_ERROR_RETRIES`` retries for those).
 
         Args:
             page_file: Path to the .rm file
@@ -339,9 +398,12 @@ class InitialSync:
 
         Raises:
             QuotaExceededError: If quota is exceeded
-            CloudSyncError: If upload fails for other reasons
+            CloudSyncError: If upload fails for other reasons, or a server or
+                network error persists after the retries
         """
-        for attempt in range(max_retries + 1):
+        attempt = 0
+        server_errors = 0
+        while True:
             try:
                 result = await self.cloud_sync.upload_file(page_file, notebook_uuid, "rm")
                 return result
@@ -350,16 +412,26 @@ class InitialSync:
                 # Rate limited - retry with exponential backoff
                 if attempt < max_retries:
                     delay = e.retry_after * (2 ** attempt)
-                    logger.info(f"Rate limited. Waiting {delay}s before retry (attempt {attempt + 1}/{max_retries})...")
+                    attempt += 1
+                    logger.info(f"Rate limited. Waiting {delay}s before retry (attempt {attempt}/{max_retries})...")
                     print(f"   ⏳ Rate limited. Waiting {delay}s...")
-                    await asyncio.sleep(delay)
+                    await self._sleep(delay)
                 else:
                     # All retries exhausted
                     logger.warning(f"Rate limit exceeded after {max_retries} retries for {page_file.name}")
                     return {"rate_limited": True}
 
-        # Should not reach here, but just in case
-        return {"rate_limited": True}
+            except CloudSyncError as e:
+                if not e.transient or server_errors >= self.SERVER_ERROR_RETRIES:
+                    raise
+                delay = self.SERVER_ERROR_BACKOFF_SECONDS * (2 ** server_errors)
+                server_errors += 1
+                logger.warning(
+                    f"Upload of {page_file.name} failed ({e}); retrying in {delay}s "
+                    f"(attempt {server_errors}/{self.SERVER_ERROR_RETRIES})"
+                )
+                print(f"   ⚠️  Upload failed, retrying in {delay}s...")
+                await self._sleep(delay)
 
 
 async def perform_initial_sync_if_needed(config: Config, cloud_sync: CloudSync) -> bool:
