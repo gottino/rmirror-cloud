@@ -146,3 +146,6 @@ _.rebuild_combined_pdf  # notebook PDF rebuild, used by tests
 _.send_admin_alert  # email helpers with escaping/golden tests
 _.send_sync_notification
 _.update_quota_limit  # tier change helper for Stripe phase 2
+_.has_agent_connected  # AgentStatusResponse fields (GET /agents/status), read by the dashboard
+_.first_connected_at
+_.last_activity_at
