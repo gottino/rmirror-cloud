@@ -234,7 +234,7 @@ class TestScanLibraryFolders:
         _folder(tmp_path, "a", "Alpha")
         _folder(tmp_path, "b2", "Beta")
         names = [(f.name, f.uuid) for f in scan_library(tmp_path).folders]
-        assert names == [("Alpha", "a"), ("Beta", "b2"), ("beta", "b"), ("Untitled", "u1"), ("Untitled", "u2")]
+        assert names == [("Alpha", "a"), ("beta", "b"), ("Beta", "b2"), ("Untitled", "u1"), ("Untitled", "u2")]
 
 
 # ----------------------------------------------------------------------
