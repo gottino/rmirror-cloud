@@ -18,6 +18,7 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from app.config import Config
+from app.remarkable.library import FOLDER_UNREADABLE, folder_state
 from app.sync.cloud_sync import CloudSync
 from app.sync.manifest import UploadManifest, fingerprint_file
 from app.sync.queue import SyncQueue
@@ -325,6 +326,9 @@ class FileWatcher:
                 f"reMarkable folder not found: {source_dir}\n"
                 "Please ensure the reMarkable Desktop app is installed and has synced at least once."
             )
+        if folder_state(source_dir) == FOLDER_UNREADABLE:
+            # A scan would see an empty folder (and baseline nothing); wait for access
+            raise PermissionError(f"reMarkable folder cannot be read: {source_dir}")
 
         print(f"👁  Watching: {source_dir}")
 

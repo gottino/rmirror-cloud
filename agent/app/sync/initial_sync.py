@@ -18,7 +18,13 @@ from typing import Optional
 
 from app.config import Config
 from app.remarkable.metadata_scanner import MetadataScanner
-from app.sync.cloud_sync import CloudSync, CloudSyncError, QuotaExceededError, RateLimitError
+from app.sync.cloud_sync import (
+    AuthenticationRequiredError,
+    CloudSync,
+    CloudSyncError,
+    QuotaExceededError,
+    RateLimitError,
+)
 from app.sync.manifest import Fingerprint, UploadManifest, fingerprint_file
 from app.sync.metadata_sync import MetadataSync
 
@@ -70,6 +76,10 @@ class InitialSync:
             "skipped": 0,
             "rate_limited": 0,
         }
+        # Set when the content sync ran into a condition that affects every page
+        # left: "quota" (stopped) or "sign_in" (the sign-in was rejected). Reported
+        # as "stopped_reason" in the returned stats; it does not change the flow.
+        self.stopped_reason: str | None = None
 
     def _count(self, key: str, amount: int = 1) -> None:
         """Add to a live progress count and report it."""
@@ -175,6 +185,7 @@ class InitialSync:
                 print()
 
             except QuotaExceededError:
+                self.stopped_reason = "quota"
                 logger.warning(f"Quota exceeded during sync of {notebook.uuid}")
                 print("   ⚠️  Quota exceeded - stopping content sync")
                 break
@@ -208,6 +219,7 @@ class InitialSync:
         return {
             **stats,
             "phase1": metadata_result,
+            "stopped_reason": self.stopped_reason,
         }
 
     async def _sync_notebook_content(self, notebook_uuid: str) -> dict:
@@ -341,6 +353,8 @@ class InitialSync:
                     raise
                 except Exception as e:
                     logger.error(f"Failed to upload {page_file.name}: {e}")
+                    if isinstance(e, AuthenticationRequiredError) and self.stopped_reason is None:
+                        self.stopped_reason = "sign_in"
                     stats["failed"] += 1
                     stats["failed_pages"].append(page_file.stem)
                     self._count("failed")
