@@ -289,6 +289,8 @@ ditto "$SWIFT_BIN/RMirrorApp" "$APP/Contents/MacOS/RMirrorApp"
 ditto "$CORE_SRC" "$APP/Contents/Resources/core"
 ditto "$SWIFT_BIN/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 ditto "$ICON_DIR/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+# The rM logo for the menu bar item (StatusItemController loads it by this name).
+ditto "$AGENT_DIR/resources/menubar_icon.png" "$APP/Contents/Resources/MenuBarIcon.png"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 sed -e "s/__VERSION__/$VERSION/" \

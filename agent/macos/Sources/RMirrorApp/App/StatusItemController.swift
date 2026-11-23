@@ -21,7 +21,7 @@ final class StatusItemController: NSObject {
         self.openMain = openMain
         self.openSettings = openSettings
         self.checkForUpdates = checkForUpdates
-        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
         if let button = item.button {
@@ -83,30 +83,57 @@ final class StatusItemController: NSObject {
         item.button?.image = StatusItemController.icon(attention: needsAttention || updateAvailable)
     }
 
-    /// A template image so it follows the menu bar's light or dark appearance.
+    /// The rM logo, as a template image so it follows the menu bar's light or dark appearance.
+    /// With `attention`, a small dot sits on its top-right corner.
     static func icon(attention: Bool = false) -> NSImage {
-        let size = NSSize(width: 18, height: 18)
+        guard let logo = logoImage else { return drawnIcon(attention: attention) }
+        // The artwork is 48 x 44 px; shown at 22 x 20 pt it stays sharp on Retina displays.
+        let size = NSSize(width: 22, height: 20)
         let image = NSImage(size: size, flipped: false) { rect in
+            logo.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+            if attention {
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn: NSRect(x: rect.maxX - 6, y: rect.maxY - 6, width: 6, height: 6)).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    /// `MenuBarIcon.png` from the app bundle (the build script copies `agent/resources/menubar_icon.png`
+    /// there). When running from the build folder during development, the file is read from the repo.
+    private static let logoImage: NSImage? = {
+        if let url = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+        #if DEBUG
+        var folder = URL(fileURLWithPath: #filePath)
+        for _ in 0..<6 { folder.deleteLastPathComponent() }   // …/agent
+        let source = folder.appendingPathComponent("resources/menubar_icon.png")
+        if let image = NSImage(contentsOf: source) { return image }
+        #endif
+        return nil
+    }()
+
+    /// Fallback when the logo file is missing: a small page with written lines.
+    private static func drawnIcon(attention: Bool) -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size, flipped: false) { _ in
             NSColor.black.setStroke()
             NSColor.black.setFill()
-            // A page with two written lines, mirrored: the reMarkable page going to the cloud.
             let page = NSBezierPath(roundedRect: NSRect(x: 3.5, y: 2, width: 11, height: 14), xRadius: 2, yRadius: 2)
             page.lineWidth = 1.4
             page.stroke()
-            for y in [11.5, 8.5] as [CGFloat] {
+            for (y, end) in [(11.5, 12.0), (8.5, 12.0), (5.5, 9.5)] as [(CGFloat, CGFloat)] {
                 let line = NSBezierPath()
                 line.move(to: NSPoint(x: 6, y: y))
-                line.line(to: NSPoint(x: 12, y: y))
+                line.line(to: NSPoint(x: end, y: y))
                 line.lineWidth = 1.3
                 line.lineCapStyle = .round
                 line.stroke()
             }
-            let short = NSBezierPath()
-            short.move(to: NSPoint(x: 6, y: 5.5))
-            short.line(to: NSPoint(x: 9.5, y: 5.5))
-            short.lineWidth = 1.3
-            short.lineCapStyle = .round
-            short.stroke()
             if attention {
                 NSBezierPath(ovalIn: NSRect(x: 12, y: 12, width: 6, height: 6)).fill()
             }
