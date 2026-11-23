@@ -927,14 +927,38 @@ class NotionSyncTarget(SyncTarget):
         )
 
     @run_off_loop
-    async def remove_page_block(self, block_id: str) -> SyncResult:
+    async def remove_page_block(self, block_id: str, parent_page_id: str) -> SyncResult:
         """Delete (archive) one page toggle block of a notebook page.
 
-        Used when the page was deleted on the tablet. A block Notion reports
-        as missing or already archived counts as removed. Other failures come
-        back typed like page syncs (rate limit, auth, transient, permanent).
+        Used when the page was deleted on the tablet. The block is looked up
+        first and deleted only if it is a toggle directly on the notebook page
+        ``parent_page_id``; anything else (a page, a block elsewhere) is left
+        alone and reported as success with action ``not_a_page_toggle``, so a
+        stale stored id can never archive something else. A block Notion
+        reports as missing or already archived counts as removed. Other
+        failures come back typed like page syncs (rate limit, auth, transient,
+        permanent).
         """
         try:
+            block = self.client.blocks.retrieve(block_id=block_id)
+            parent = block.get("parent") if isinstance(block, dict) else None
+            is_page_toggle = (
+                isinstance(block, dict)
+                and block.get("type") == "toggle"
+                and isinstance(parent, dict)
+                and parent.get("type") == "page_id"
+                and bool(_norm_id(parent_page_id))
+                and _norm_id(parent.get("page_id")) == _norm_id(parent_page_id)
+            )
+            if not is_page_toggle:
+                self.logger.warning(
+                    f"Not deleting {block_id}: not a toggle on notebook page {parent_page_id}"
+                )
+                return SyncResult(
+                    status=SyncStatus.SUCCESS,
+                    target_id=block_id,
+                    metadata={"action": "not_a_page_toggle"},
+                )
             self.client.blocks.delete(block_id=block_id)
             return SyncResult(
                 status=SyncStatus.SUCCESS,

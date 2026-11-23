@@ -119,8 +119,9 @@ class PageListOutcome:
         return set(self.removed) | set(self.restored)
 
 
-# (notebook id, page uuid) -> (page id, removed_at)
-PageIndex = dict[tuple[int, str], tuple[int, Optional[datetime]]]
+# (notebook id, page uuid) -> (page id, removed_at, has_content). has_content:
+# the page's file was uploaded (not a stub registered from a page list).
+PageIndex = dict[tuple[int, str], tuple[int, Optional[datetime], bool]]
 
 
 def load_page_index(db: Session, user_id: int, notebook_ids: list[int]) -> PageIndex:
@@ -128,7 +129,7 @@ def load_page_index(db: Session, user_id: int, notebook_ids: list[int]) -> PageI
     index: PageIndex = {}
     for chunk in _chunks(sorted(set(notebook_ids))):
         rows = db.execute(
-            select(Page.id, Page.notebook_id, Page.page_uuid, Page.removed_at)
+            select(Page.id, Page.notebook_id, Page.page_uuid, Page.removed_at, Page.s3_key)
             .join(Notebook, Notebook.id == Page.notebook_id)
             .where(
                 Notebook.user_id == user_id,
@@ -137,8 +138,8 @@ def load_page_index(db: Session, user_id: int, notebook_ids: list[int]) -> PageI
             )
             .order_by(Page.id)
         ).all()
-        for page_id, nb_id, page_uuid, removed_at in rows:
-            index.setdefault((nb_id, page_uuid), (page_id, removed_at))
+        for page_id, nb_id, page_uuid, removed_at, s3_key in rows:
+            index.setdefault((nb_id, page_uuid), (page_id, removed_at, bool(s3_key)))
     return index
 
 
@@ -163,8 +164,10 @@ def apply_page_lists(
     - a live page the list does not name is removed;
     - a removed page the list names is restored;
     - if the list would remove every live page of a notebook that has one,
-      nothing is removed or restored and a warning is logged (skipped): a
-      half-synced file must not wipe a notebook.
+      or every live page whose file was uploaded (stubs registered from page
+      lists do not count as kept), nothing is removed or restored and a
+      warning is logged (skipped): a wrong or half-synced list must not wipe
+      a notebook, however often it is sent.
 
     Writes to the session without committing. After the caller has rebuilt
     the page order and committed, it calls ``finish_page_lists``.
@@ -173,7 +176,7 @@ def apply_page_lists(
     if pages is None:
         pages = load_page_index(db, user_id, list(page_lists))
 
-    by_notebook: dict[int, dict[str, tuple[int, Optional[datetime]]]] = {}
+    by_notebook: dict[int, dict[str, tuple[int, Optional[datetime], bool]]] = {}
     for (nb_id, page_uuid), value in pages.items():
         if nb_id in page_lists and page_uuid:
             by_notebook.setdefault(nb_id, {})[page_uuid] = value
@@ -185,20 +188,23 @@ def apply_page_lists(
             continue
         listed_set = set(listed)
         nb_pages = by_notebook.get(nb_id, {})
-        live = {u: pid for u, (pid, removed_at) in nb_pages.items() if removed_at is None}
+        live = {u: pid for u, (pid, removed_at, _) in nb_pages.items() if removed_at is None}
         to_remove = sorted(pid for u, pid in live.items() if u not in listed_set)
-        if live and len(to_remove) == len(live):
+        # Uploaded pages only: stubs registered from an earlier (refused) list
+        # must not make a list look like it keeps some of the notebook.
+        uploaded = {u for u, (_, removed_at, has_content) in nb_pages.items() if removed_at is None and has_content}
+        if (uploaded and not uploaded & listed_set) or (live and len(to_remove) == len(live)):
             logger.warning(
                 "Page list of notebook %s would remove all %d of its pages; ignoring it",
                 nb_id,
-                len(live),
+                len(uploaded) or len(live),
                 extra={"event": "pages.remove_all_refused", "notebook_id": nb_id},
             )
             outcome.skipped.add(nb_id)
             continue
         to_restore = sorted(
             pid
-            for u, (pid, removed_at) in nb_pages.items()
+            for u, (pid, removed_at, _) in nb_pages.items()
             if removed_at is not None and u in listed_set
         )
         if to_remove:
@@ -389,8 +395,9 @@ async def purge_removed_pages(
 ) -> int:
     """Delete pages removed longer than ``older_than`` ago, at most ``limit`` per call.
 
-    For each page: its stored files (``.rm`` and PDF) are deleted first; if
-    one cannot be deleted the page is left for the next run. Then its todos,
+    For each page: the row is locked and re-checked, then its stored files
+    (``.rm`` and PDF) are deleted; if one cannot be deleted the page is left
+    for the next run. Then its todos,
     todos' sync records and queue rows, the page's sync records and queue
     rows, and the page row itself (``notebook_pages`` rows cascade) are
     deleted and committed together. Remote tasks and blocks are not touched. A page
@@ -418,6 +425,23 @@ async def purge_removed_pages(
     purged = 0
     for page_id, page_uuid, s3_key, pdf_key, user_id, notebook_uuid in candidates:
         try:
+            # Lock the row first (PostgreSQL; SQLite has one writer anyway) and
+            # keep the lock until the page row is deleted: a restore of this
+            # page waits, then finds no page, instead of reviving a page whose
+            # files were just deleted. Not removed any more: leave it alone.
+            still_removed = db.execute(
+                select(Page.id)
+                .where(
+                    Page.id == page_id,
+                    Page.removed_at.isnot(None),
+                    Page.removed_at < cutoff,
+                )
+                .with_for_update()
+            ).first()
+            if still_removed is None:
+                db.rollback()
+                continue
+
             keys = [key for key in (s3_key, pdf_key) if key]
             gone = True
             for key in keys:
@@ -428,6 +452,7 @@ async def purge_removed_pages(
                     logger.warning("Could not delete stored file of removed page %s", page_id, exc_info=True)
                     gone = False
             if not gone:
+                db.rollback()  # release the row lock
                 continue  # retried on the next run
 
             todo_ids = [

@@ -1236,12 +1236,21 @@ class SyncWorker:
             and (not notebook_page_id or b.replace("-", "") != notebook_page_id.replace("-", ""))
         ]
 
-        target = create_target(queue_item.target_name, config.get_config())
         result = None
-        for block_id in block_ids:
-            result = await target.remove_page_block(block_id)
-            if not result.success:
-                break
+        if not notebook_page_id:
+            # Without the notebook's Notion page the stored ids cannot be
+            # checked, so nothing is deleted in Notion; the record is forgotten.
+            logger.warning(
+                "No notebook record for removed page %s; leaving %s untouched",
+                queue_item.page_uuid,
+                queue_item.target_name,
+            )
+        else:
+            target = create_target(queue_item.target_name, config.get_config())
+            for block_id in block_ids:
+                result = await target.remove_page_block(block_id, notebook_page_id)
+                if not result.success:
+                    break
 
         duration_ms = round((time.monotonic() - _item_start) * 1000, 1)
         if result is None or result.success:
@@ -1260,6 +1269,18 @@ class SyncWorker:
                 },
             )
             complete()
+            # The page may have been restored while Notion was being called.
+            # That restore saw the record still in place and queued nothing,
+            # so queue the page's sync here: it recreates the toggle.
+            if page is not None:
+                db.refresh(page)
+                if page.removed_at is None and page.ocr_text:
+                    from app.services.page_events import enqueue_integration_syncs
+
+                    notebook = db.query(Notebook).filter(Notebook.id == page.notebook_id).first()
+                    if notebook is not None:
+                        logger.info(f"Page {page.id} was restored during its removal; re-syncing it")
+                        enqueue_integration_syncs(db, page, notebook)
             return
 
         outcome = apply_sync_result(queue_item, result)

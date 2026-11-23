@@ -279,7 +279,7 @@ def _apply_metadata_sync(
 
     # 3. Existing pages and page-order mappings of the existing notebooks.
     pages: dict[tuple[int, str], tuple[int, str | None, str]] = {}
-    page_index: dict[tuple[int, str], tuple[int, datetime | None]] = {}  # for apply_page_lists
+    page_index: dict[tuple[int, str], tuple[int, datetime | None, bool]] = {}  # for apply_page_lists
     mappings: dict[int, dict[int, int]] = {}  # notebook_id -> {page_id: page_number}
     for chunk in _chunks(existing_notebook_ids):
         page_rows = db.execute(
@@ -292,7 +292,7 @@ def _apply_metadata_sync(
         for page_id, nb_id, page_uuid, s3_key, ocr_status, removed_at in page_rows:
             pages.setdefault((nb_id, page_uuid), (page_id, s3_key, ocr_status))
             if page_uuid:
-                page_index.setdefault((nb_id, page_uuid), (page_id, removed_at))
+                page_index.setdefault((nb_id, page_uuid), (page_id, removed_at, bool(s3_key)))
         mapping_rows = db.execute(
             select(NotebookPage.notebook_id, NotebookPage.page_id, NotebookPage.page_number)
             .where(NotebookPage.notebook_id.in_(chunk))
