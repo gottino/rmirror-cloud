@@ -115,6 +115,8 @@ public enum OnboardingCopy {
     }
 
     public static let loadingSuggestion = "Finding your recent notebooks…"
+    /// The suggestion could not be fetched at all; the app keeps asking by itself.
+    public static let suggestionUnreachable = "rMirror cannot reach rMirror Cloud right now. It keeps trying."
     public static let preparing = "Getting things ready…"
 
     public static let noNotebooksTitle = "Your reMarkable app has no notebooks yet"
@@ -169,7 +171,7 @@ public enum OnboardingCopy {
             notebookRow(name: "Meeting Notes", folder: "Work", pages: 12),
             notebookRow(name: "Book Club", folder: nil, pages: 1),
             noneFitTitle, noneFitMessage(remaining: 1), noneFitMessage(remaining: 12),
-            loadingSuggestion, preparing,
+            loadingSuggestion, suggestionUnreachable, preparing,
             noNotebooksTitle, noNotebooksMessage, waitingForNotebooks,
             noPagesLeftTitle, noPagesLeftMessage, noPagesLeftNothingToUpload,
             uploadNowButton(notebooks: 1, pages: 1), uploadNowButton(notebooks: 3, pages: 23),

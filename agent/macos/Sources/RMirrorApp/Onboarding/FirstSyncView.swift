@@ -13,7 +13,7 @@ struct FirstSyncView: View {
     @State private var choosing = false
     @State private var query = ""
 
-    // While the suggestion is not `.ok`, the store looks again on every poll (`AppStore.refresh()`),
+    // While the suggestion is not `.ok`, the store looks again every few seconds (`AppStore.refresh()`),
     // so this view needs no polling of its own.
     var body: some View {
         content
@@ -45,6 +45,8 @@ struct FirstSyncView: View {
             case .notSignedIn, .folderUnavailable, .unknown:
                 OnboardingCentredWaiting(text: OnboardingCopy.preparing)
             }
+        } else if store.suggestionUnreachable {
+            OnboardingCentredNote(text: OnboardingCopy.suggestionUnreachable)
         } else {
             OnboardingCentredWaiting(text: OnboardingCopy.loadingSuggestion)
         }
@@ -216,6 +218,22 @@ struct FirstSyncView: View {
     private func startSync() {
         let uuids = selection.sorted()
         Task { await store.startGuidedSync(notebookUUIDs: uuids) }
+    }
+}
+
+/// A centred line without a spinner, for a wait that may last (rMirror keeps trying by itself).
+struct OnboardingCentredNote: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(Theme.Font.body)
+            .foregroundStyle(Theme.textSecondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: OnboardingLayout.columnWidth)
+            .padding(Theme.Space.xl)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

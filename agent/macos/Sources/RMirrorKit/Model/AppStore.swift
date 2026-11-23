@@ -43,8 +43,13 @@ public final class AppStore: ObservableObject {
     @Published public private(set) var isWaitingForSignIn = false
     /// True while a start-sync request is in flight.
     @Published public private(set) var isStartingSync = false
-    /// The most recent failed action, until `dismissProblem()` or the next successful action.
+    /// The most recent failed action in the main window, until `dismissProblem()` or the next successful action there.
     @Published public private(set) var problem: ActionProblem?
+    /// The same for the settings window, kept apart so each window shows only its own problems.
+    @Published public private(set) var settingsProblem: ActionProblem?
+    /// The first-run suggestion could not be fetched the last time it was asked for. With no
+    /// suggestion yet, the first-sync screen says so calmly instead of spinning forever.
+    @Published public private(set) var suggestionUnreachable = false
 
     // MARK: Dependencies
 
@@ -53,14 +58,18 @@ public final class AppStore: ObservableObject {
         public var makeAPI: @MainActor (CoreConnection) -> LocalAPI
         public var openURL: @MainActor (URL) -> Void
         public var restartCore: @MainActor () -> Void
+        /// The clock, replaceable in tests.
+        public var now: @MainActor () -> Date
         public init(
             makeAPI: @escaping @MainActor (CoreConnection) -> LocalAPI,
             openURL: @escaping @MainActor (URL) -> Void,
-            restartCore: @escaping @MainActor () -> Void
+            restartCore: @escaping @MainActor () -> Void,
+            now: @escaping @MainActor () -> Date = { Date() }
         ) {
             self.makeAPI = makeAPI
             self.openURL = openURL
             self.restartCore = restartCore
+            self.now = now
         }
     }
 
@@ -70,9 +79,17 @@ public final class AppStore: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var guidedSyncActive = false
     private var windowVisible = false
+    /// Every state request is numbered. An answer older than one already applied is dropped, and so
+    /// is any answer to a request sent before the last action changed the core (`discardBefore`).
+    private var lastRequestedRefresh = 0
+    private var lastAppliedRefresh = 0
+    private var discardRefreshesBefore = 0
+    private var lastSuggestionFetch: Date?
 
     public static let fastPollInterval: TimeInterval = 2
     public static let slowPollInterval: TimeInterval = 15
+    /// While the suggestion is not usable yet, ask for it again at most this often.
+    public static let suggestionRetryInterval: TimeInterval = 10
 
     public init(dependencies: Dependencies) {
         self.dependencies = dependencies
@@ -88,7 +105,8 @@ public final class AppStore: ObservableObject {
         settings: AppSettings? = nil,
         guidedSyncActive: Bool = false,
         problem: ActionProblem? = nil,
-        isWaitingForSignIn: Bool = false
+        isWaitingForSignIn: Bool = false,
+        suggestionUnreachable: Bool = false
     ) -> AppStore {
         let store = AppStore(dependencies: Dependencies(makeAPI: { _ in api }, openURL: { _ in }, restartCore: {}))
         store.coreStatus = core
@@ -101,6 +119,7 @@ public final class AppStore: ObservableObject {
         store.guidedSyncActive = guidedSyncActive
         store.problem = problem
         store.isWaitingForSignIn = isWaitingForSignIn
+        store.suggestionUnreachable = suggestionUnreachable
         store.recomputeStage()
         return store
     }
@@ -122,6 +141,8 @@ public final class AppStore: ObservableObject {
             pollTask?.cancel()
             pollTask = nil
             state = nil
+            // The guided first sync belongs to the core that ran it; never let its screens come back later.
+            guidedSyncActive = false
         }
         recomputeStage()
     }
@@ -130,6 +151,8 @@ public final class AppStore: ObservableObject {
     public func setWindowVisible(_ visible: Bool) {
         guard visible != windowVisible else { return }
         windowVisible = visible
+        // A sign-in abandoned with every window closed must not keep the fast polling going.
+        if !visible { isWaitingForSignIn = false }
         if api != nil { startPolling() }
     }
 
@@ -155,22 +178,39 @@ public final class AppStore: ObservableObject {
     /// Fetches the core's state once and whatever the current screen needs alongside it.
     public func refresh() async {
         guard let api else { return }
+        lastRequestedRefresh += 1
+        let number = lastRequestedRefresh
         do {
             let newState = try await api.state()
+            // Answers can arrive out of order (a slow poll sent before an action): never go back.
+            guard number > lastAppliedRefresh, number >= discardRefreshesBefore else { return }
+            lastAppliedRefresh = number
             let previousStage = stage
             state = newState
             if newState.auth.signedIn { isWaitingForSignIn = false }
+            // No sync running or finished in this core: a guided first sync is over.
+            if newState.sync.state == .idle { guidedSyncActive = false }
             recomputeStage()
             if stage != previousStage {
                 await loadForStage()
-            } else if stage == .firstSync, suggestion?.reason != .ok {
-                // Still waiting for notebooks or for the allowance to be known: look again.
+            } else if stage == .firstSync, suggestion?.reason != .ok, suggestionDue {
+                // Still waiting for notebooks or for the allowance to be known: look again now and then.
                 await loadSuggestion()
                 if suggestion?.reason == .ok { await reloadNotebooks() }
             }
         } catch {
             // A missed poll is not worth showing; the supervisor reports a dead core.
         }
+    }
+
+    private var suggestionDue: Bool {
+        guard let last = lastSuggestionFetch else { return true }
+        return dependencies.now().timeIntervalSince(last) >= Self.suggestionRetryInterval
+    }
+
+    /// Call after an action changed the core: answers to state requests already in flight are stale.
+    private func discardRefreshesInFlight() {
+        discardRefreshesBefore = lastRequestedRefresh + 1
     }
 
     private func recomputeStage() {
@@ -214,14 +254,22 @@ public final class AppStore: ObservableObject {
     public func cancelSignIn() { isWaitingForSignIn = false }
 
     public func signOut() async {
-        await perform { try await $0.signOut() }
+        await perform(from: .settings) { try await $0.signOut() }
         guidedSyncActive = false
+        discardRefreshesInFlight()
         await refresh()
     }
 
+    /// Keeps the last good suggestion when a fetch fails; never resets it to nil on an error.
     public func loadSuggestion() async {
         guard let api else { return }
-        suggestion = try? await api.firstRunSuggestion(max: 3)
+        lastSuggestionFetch = dependencies.now()
+        do {
+            suggestion = try await api.firstRunSuggestion(max: 3)
+            suggestionUnreachable = false
+        } catch {
+            suggestionUnreachable = true
+        }
     }
 
     public func reloadNotebooks() async {
@@ -243,13 +291,15 @@ public final class AppStore: ObservableObject {
     }
 
     /// The guided first sync: saves the choice and starts syncing in one step.
+    /// Does nothing while another start is in flight.
     public func startGuidedSync(notebookUUIDs: [String]) async {
-        guard !notebookUUIDs.isEmpty else { return }
+        guard !notebookUUIDs.isEmpty, !isStartingSync else { return }
         isStartingSync = true
         defer { isStartingSync = false }
         let started = await perform { try await $0.startSync(notebookUUIDs: notebookUUIDs, pageLimit: nil) }
         if started {
             guidedSyncActive = true
+            discardRefreshesInFlight()
             await refresh()
         }
     }
@@ -263,42 +313,55 @@ public final class AppStore: ObservableObject {
     }
 
     /// Main window: saves the selection and syncs it. Selecting and syncing is one action.
-    public func syncSelection(notebookUUIDs: [String]) async {
+    /// Does nothing while another start is in flight.
+    /// - Returns: true if the core accepted the sync.
+    @discardableResult
+    public func syncSelection(notebookUUIDs: [String]) async -> Bool {
+        guard !isStartingSync else { return false }
         isStartingSync = true
         defer { isStartingSync = false }
         let started = await perform { try await $0.startSync(notebookUUIDs: notebookUUIDs, pageLimit: nil) }
         if started {
+            discardRefreshesInFlight()
             await refresh()
             await reloadNotebooks()
         }
+        return started
     }
 
     /// Saves the selection without starting a sync (new pages in selected notebooks sync on their own).
-    public func saveSelection(notebookUUIDs: [String]) async {
+    /// - Returns: true if the core saved it.
+    @discardableResult
+    public func saveSelection(notebookUUIDs: [String]) async -> Bool {
         let saved = await perform { try await $0.setSelection(syncAll: false, selectedNotebooks: notebookUUIDs) }
         if saved { await reloadNotebooks() }
+        return saved
     }
 
     public func resumeSync() async {
-        await perform { try await $0.resumeSync() }
+        if await perform(action: { try await $0.resumeSync() }) { discardRefreshesInFlight() }
         await refresh()
     }
 
+    /// Settings window. Problems go to `settingsProblem`.
     /// - Returns: true if the change means the user has to sign in again.
     @discardableResult
     public func updateSettings(_ update: SettingsUpdate) async -> Bool {
-        guard let api else { problem = .coreUnreachable; return false }
+        guard let api else { settingsProblem = .coreUnreachable; return false }
         do {
             let result = try await api.updateSettings(update)
-            problem = nil
+            settingsProblem = nil
+            discardRefreshesInFlight()
             await loadSettings()
             await refresh()
             return result.needsSignIn
         } catch {
-            problem = ActionProblem(error)
+            settingsProblem = ActionProblem(error)
             return false
         }
     }
+
+    public func dismissSettingsProblem() { settingsProblem = nil }
 
     public func resolveDeletedNotebook(uuid: String, action: DeletedNotebookAction) async {
         await perform { try await $0.resolveDeletedNotebook(uuid: uuid, action: action) }
@@ -310,16 +373,26 @@ public final class AppStore: ObservableObject {
         return try? await api.updateCheck()
     }
 
+    /// Which window an action came from, so its problem shows only there.
+    private enum ProblemOrigin { case main, settings }
+
     @discardableResult
-    private func perform(_ action: (LocalAPI) async throws -> Void) async -> Bool {
-        guard let api else { problem = .coreUnreachable; return false }
+    private func perform(from origin: ProblemOrigin = .main, action: (LocalAPI) async throws -> Void) async -> Bool {
+        guard let api else { report(.coreUnreachable, from: origin); return false }
         do {
             try await action(api)
-            problem = nil
+            report(nil, from: origin)
             return true
         } catch {
-            problem = ActionProblem(error)
+            report(ActionProblem(error), from: origin)
             return false
+        }
+    }
+
+    private func report(_ newProblem: ActionProblem?, from origin: ProblemOrigin) {
+        switch origin {
+        case .main: problem = newProblem
+        case .settings: settingsProblem = newProblem
         }
     }
 }

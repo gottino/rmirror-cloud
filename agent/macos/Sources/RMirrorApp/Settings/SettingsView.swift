@@ -28,7 +28,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
-                if let problem = store.problem {
+                if let problem = store.settingsProblem {
                     Text(SharedCopy.problem(problem))
                         .font(Theme.Font.caption)
                         .foregroundStyle(Theme.danger)

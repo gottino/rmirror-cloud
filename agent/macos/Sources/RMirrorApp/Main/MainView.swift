@@ -107,13 +107,14 @@ struct MainView: View {
         isSaving = true
         defer { isSaving = false }
         let selection = browser.selectionToSave
+        let saved: Bool
         if browser.diff.onlyRemoves {
-            await store.saveSelection(notebookUUIDs: selection)
+            saved = await store.saveSelection(notebookUUIDs: selection)
         } else {
             finishedSync = nil
-            await store.syncSelection(notebookUUIDs: selection)
+            saved = await store.syncSelection(notebookUUIDs: selection)
         }
-        if store.problem == nil { browser.markSaved() }
+        if saved { browser.markSaved() }
     }
 
     /// "Try again" after a sync with failed pages: sync the saved choice again.
