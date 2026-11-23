@@ -40,7 +40,8 @@ Package.swift
 Sources/RMirrorKit/        library, no UI, unit-tested
   API/                     LocalAPIClient, request/response models, errors
   Core/                    CoreSupervisor, CoreLocator, launch token
-  Model/                   AppStore (ObservableObject), Stage (which screen), NotebookList (search, grouping, selection maths)
+  Model/                   AppStore (ObservableObject), Stage (which screen), NotebookList (selection maths),
+                           NotebookTree (folder tree, visible rows, keys), RecentList (date order, synced-only filter)
   Copy/                    every user-facing string, as functions of codes and counts
 Sources/RMirrorApp/        executable
   App/                     main, AppDelegate, StatusItemController, WindowCoordinator, LoginItem, Updater
