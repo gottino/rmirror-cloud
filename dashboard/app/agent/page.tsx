@@ -7,6 +7,8 @@ import Image from 'next/image';
 import { validateCallbackUrl, buildAgentRedirectUrl } from '@/lib/agent-callback';
 import { ApiError, exchangeAgentToken } from '@/lib/api';
 
+const SIGN_IN_AGAIN = 'Open rMirror from your menu bar and choose Sign In again.';
+
 type BridgeState =
   | { phase: 'confirm' }
   | { phase: 'exchanging'; message: string }
@@ -26,20 +28,18 @@ function AgentAuthBridgeInner() {
 
   const exchangeAndRedirect = useCallback(async () => {
     if (!validateCallbackUrl(callbackUrl)) {
-      setState({ phase: 'error', message: 'Invalid callback URL: must be a local agent address' });
+      setState({ phase: 'error', message: `This sign-in link didn't come from rMirror on your Mac. ${SIGN_IN_AGAIN}` });
       return;
     }
 
     try {
-      setState({ phase: 'exchanging', message: 'Getting authentication token...' });
+      setState({ phase: 'exchanging', message: 'Connecting your Mac…' });
 
       const clerkToken = await getToken();
       if (!clerkToken) {
-        setState({ phase: 'error', message: 'Failed to get session token. Please try again.' });
+        setState({ phase: 'error', message: "We couldn't confirm your sign-in. Please try again." });
         return;
       }
-
-      setState({ phase: 'exchanging', message: 'Exchanging for agent token...' });
 
       let access_token: string;
       try {
@@ -47,20 +47,21 @@ function AgentAuthBridgeInner() {
       } catch (err) {
         if (!(err instanceof ApiError)) throw err;
         const detail = typeof err.detail === 'string' && err.detail ? err.detail : err.statusText;
-        setState({ phase: 'error', message: `Failed to get agent token: ${detail}` });
+        console.error('Agent token exchange failed:', detail);
+        setState({ phase: 'error', message: `Your Mac couldn't be connected. ${SIGN_IN_AGAIN}` });
         return;
       }
 
-      setState({ phase: 'exchanging', message: 'Redirecting to your local agent...' });
+      setState({ phase: 'exchanging', message: 'Returning to rMirror on your Mac…' });
       const redirectUrl = buildAgentRedirectUrl(callbackUrl, access_token);
       if (!redirectUrl) {
-        setState({ phase: 'error', message: 'Invalid callback URL' });
+        setState({ phase: 'error', message: `This sign-in link didn't come from rMirror on your Mac. ${SIGN_IN_AGAIN}` });
         return;
       }
       window.location.assign(redirectUrl);
     } catch (error) {
       console.error('Agent auth bridge error:', error);
-      setState({ phase: 'error', message: 'Failed to complete authentication. Please try again.' });
+      setState({ phase: 'error', message: `Something went wrong while connecting your Mac. ${SIGN_IN_AGAIN}` });
     }
   }, [callbackUrl, getToken]);
 
@@ -79,10 +80,10 @@ function AgentAuthBridgeInner() {
       <div className="min-h-screen flex items-center justify-center bg-[var(--background)] p-5">
         <div className="bg-[var(--card)] rounded-2xl p-10 max-w-md w-full shadow-lg border border-[var(--border)] text-center">
           <Image src="/rm-icon.png" alt="rMirror" width={56} height={56} className="mx-auto mb-4" />
-          <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-3">rMirror Agent</h1>
+          <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-3">rMirror for Mac</h1>
           <p className="text-[var(--muted-foreground)]">
-            This page is used by the rMirror Agent for authentication.
-            Please open it from your agent application.
+            This page connects rMirror on your Mac to your account.
+            Open rMirror from your menu bar and choose Sign In.
           </p>
         </div>
       </div>
@@ -95,10 +96,10 @@ function AgentAuthBridgeInner() {
       <div className="min-h-screen flex items-center justify-center bg-[var(--background)] p-5">
         <div className="bg-[var(--card)] rounded-2xl p-10 max-w-md w-full shadow-lg border border-[var(--border)] text-center">
           <div className="text-5xl mb-4">⚠️</div>
-          <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-3">Invalid Request</h1>
+          <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-3">This link can&apos;t be used</h1>
           <p className="text-[var(--muted-foreground)]">
-            The callback URL must point to localhost. This page can only authenticate
-            with a locally running rMirror Agent.
+            This page only works with a sign-in link from rMirror on your Mac.
+            Open rMirror from your menu bar and choose Sign In again.
           </p>
         </div>
       </div>
@@ -112,8 +113,8 @@ function AgentAuthBridgeInner() {
       <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--background)] p-5 gap-6">
         <div className="text-center">
           <Image src="/rm-icon.png" alt="rMirror" width={56} height={56} className="mx-auto mb-3" />
-          <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-1">rMirror Agent</h1>
-          <p className="text-[var(--muted-foreground)]">Sign in to connect your agent</p>
+          <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-1">rMirror for Mac</h1>
+          <p className="text-[var(--muted-foreground)]">Sign in to connect your Mac</p>
         </div>
         <SignIn
           forceRedirectUrl={signInUrl}
@@ -130,8 +131,8 @@ function AgentAuthBridgeInner() {
       <div className="bg-[var(--card)] rounded-2xl p-10 max-w-md w-full shadow-lg border border-[var(--border)]">
         <div className="text-center mb-8">
           <Image src="/rm-icon.png" alt="rMirror" width={56} height={56} className="mx-auto mb-3" />
-          <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-1">rMirror Agent</h1>
-          <p className="text-[var(--muted-foreground)]">Connect your agent to rMirror Cloud</p>
+          <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-1">rMirror for Mac</h1>
+          <p className="text-[var(--muted-foreground)]">Connect rMirror on your Mac to your account</p>
         </div>
 
         {state.phase === 'confirm' && (
