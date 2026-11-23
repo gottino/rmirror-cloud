@@ -177,11 +177,20 @@ def start_initial_sync(app: Flask, selected_uuids: list[str] | None) -> InitialS
     Raises SyncAlreadyRunningError, AgentLoopNotRunningError (job reset to idle) or
     any error from setting it up (job marked failed). The caller checks sign-in.
     """
-    from app.sync.initial_sync import InitialSync
-
     job: InitialSyncJob = app.config["INITIAL_SYNC_JOB"]
     if not job.try_begin():
         raise SyncAlreadyRunningError()
+    return launch_initial_sync(app, job, selected_uuids)
+
+
+def launch_initial_sync(app: Flask, job: InitialSyncJob, selected_uuids: list[str] | None) -> InitialSyncJob:
+    """Hand an already begun job (``job.try_begin()`` returned True) to the agent loop.
+
+    On AgentLoopNotRunningError the job goes back to idle; on any other setup error
+    it is marked failed. Both are re-raised.
+    """
+    from app.sync.initial_sync import InitialSync
+
     try:
         initial_sync = InitialSync(
             app.config["AGENT_CONFIG"], app.config["CLOUD_SYNC"], on_progress=job.update_progress

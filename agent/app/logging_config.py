@@ -102,3 +102,26 @@ def install_werkzeug_redaction() -> None:
     werkzeug_logger = logging.getLogger("werkzeug")
     if not any(isinstance(f, RedactQuerySecretsFilter) for f in werkzeug_logger.filters):
         werkzeug_logger.addFilter(RedactQuerySecretsFilter())
+
+
+class DropPollingAccessLogFilter(logging.Filter):
+    """Drop werkzeug access lines for the endpoints the native app polls (headless mode).
+
+    GET /api/v2/state every 2 s and /health would otherwise fill agent.log.
+    """
+
+    _QUIET = ('"GET /api/v2/state ', '"GET /health ')
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        return not any(marker in message for marker in self._QUIET)
+
+
+def install_polling_log_filter() -> None:
+    """Attach DropPollingAccessLogFilter to werkzeug's request logger (idempotent)."""
+    werkzeug_logger = logging.getLogger("werkzeug")
+    if not any(isinstance(f, DropPollingAccessLogFilter) for f in werkzeug_logger.filters):
+        werkzeug_logger.addFilter(DropPollingAccessLogFilter())

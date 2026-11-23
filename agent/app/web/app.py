@@ -10,7 +10,7 @@ from flask import Flask, request
 
 from app.agent_loop import AgentLoop
 from app.config import Config
-from app.logging_config import install_werkzeug_redaction
+from app.logging_config import install_polling_log_filter, install_werkzeug_redaction
 from app.sync.cloud_sync import CloudSync
 
 if TYPE_CHECKING:
@@ -42,9 +42,15 @@ def _get_flask_secret_key() -> str:
     return _flask_secret_key
 
 
-def _allowed_hosts(port: int) -> set[str]:
-    """Host header values the local web UI answers to."""
+def _allowed_hosts(port: int, headless: bool = False) -> set[str]:
+    """Host header values the local web UI answers to.
+
+    Headless mode also listens on [::1] (see Agent.bind_web_server), so it also
+    answers to that address.
+    """
     hosts = {f"localhost:{port}", f"127.0.0.1:{port}"}
+    if headless:
+        hosts.add(f"[::1]:{port}")
     if port == 80:
         hosts |= {"localhost", "127.0.0.1"}
     return hosts
@@ -73,7 +79,8 @@ def create_app(
     Returns:
         Configured Flask app
     """
-    app = Flask(__name__)
+    # Headless mode serves no static files (no legacy page)
+    app = Flask(__name__, static_folder=None) if headless else Flask(__name__)
     app.config["SECRET_KEY"] = _get_flask_secret_key()
 
     # Store references
@@ -86,7 +93,7 @@ def create_app(
 
     # Only serve requests addressed to this agent on the loopback names, and
     # refuse state-changing requests that come from another site.
-    allowed_hosts = _allowed_hosts(config.web.port)
+    allowed_hosts = _allowed_hosts(config.web.port, headless)
     allowed_origins = {f"http://{host}" for host in allowed_hosts}
 
     @app.before_request
@@ -108,7 +115,14 @@ def create_app(
             return "Forbidden", 403
         return None
 
+    # /api/v2: the app token is checked for every path under the prefix, before
+    # routing, so unknown paths and wrong methods are refused the same way
+    from app.web.routes_v2 import check_app_token
+    app.before_request(check_app_token)
+
     install_werkzeug_redaction()
+    if headless:
+        install_polling_log_filter()
 
     # Register routes
     from app.web.routes import register_routes

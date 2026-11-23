@@ -1,5 +1,6 @@
 """Configuration management for rMirror Agent."""
 
+import ipaddress
 import logging
 import os
 import tempfile
@@ -15,6 +16,36 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.auth.keychain import get_keychain_manager
 
 logger = logging.getLogger(__name__)
+
+
+def is_loopback_host(host: str | None) -> bool:
+    """localhost, 127.0.0.0/8 or ::1."""
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def keychain_account_for_url(url: str) -> str:
+    """See APIConfig._keychain_user_id."""
+    parts = urlparse(url)
+    host = parts.hostname or "default"
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    scheme = (parts.scheme or "").lower()
+    if scheme == "https" and port in (None, 443):
+        return host
+    if scheme == "http" and is_loopback_host(parts.hostname):
+        return host
+    default_port = 443 if scheme == "https" else 80
+    shown_host = f"[{host}]" if ":" in host else host
+    return f"{shown_host}:{port or default_port}"
 
 
 class APIConfig(BaseSettings):
@@ -35,13 +66,19 @@ class APIConfig(BaseSettings):
 
     @property
     def _keychain_user_id(self) -> str:
-        """Derive a unique keychain identifier from the API URL domain.
+        """Keychain account (and upload-manifest namespace) for the API URL.
 
-        This ensures tokens from different environments (production, staging)
-        are stored separately and don't overwrite each other.
+        Separate per server, so tokens of different environments (production,
+        staging, a custom server) never overwrite or leak into each other:
+
+        - https on the default port: the bare hostname (the key existing
+          sign-ins are stored under, e.g. ``rmirror.io``)
+        - http on a loopback host (local development): the bare hostname, as before
+        - anything else (another port, or plain http to a remote host):
+          ``host:port``, so e.g. ``http://rmirror.io`` or ``https://rmirror.io:8443``
+          never reuse (or send) the production token
         """
-        hostname = urlparse(self.url).hostname or "default"
-        return hostname
+        return keychain_account_for_url(self.url)
 
     @property
     def token(self) -> Optional[str]:

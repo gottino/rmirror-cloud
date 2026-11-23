@@ -12,6 +12,7 @@ threads and hand coroutines to the agent loop through ``shared.run_on_loop``.
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from flask import Blueprint, Flask, current_app, jsonify, request
@@ -19,7 +20,7 @@ from werkzeug.exceptions import HTTPException
 
 from app.__version__ import __version__
 from app.agent_loop import AgentLoopNotRunningError, AgentLoopTimeoutError
-from app.config import Config
+from app.config import Config, is_loopback_host
 from app.remarkable.library import (
     FOLDER_OK,
     count_page_files,
@@ -37,7 +38,6 @@ from app.web.shared import (
     ENVIRONMENT_PRESETS,
     QUICK_TIMEOUT_SECONDS,
     InitialSyncJob,
-    SyncAlreadyRunningError,
     api_base_url,
     app_token_matches,
     environment_name,
@@ -274,7 +274,12 @@ def _scan_notebooks(source: str) -> list:
 
 
 def _pages_to_sync(config: Config, selected_uuids: list[str] | None) -> int | None:
-    """Pages the initial sync will try to upload (same notebooks and limit it uses)."""
+    """All pages (.rm files) of the notebooks the initial sync will go through.
+
+    Same notebooks as the sync (selection, minus notebooks deleted on the server).
+    Not capped by the page limit: uploaded + failed + left_out_by_page_limit +
+    will_retry add up to this number once a sync has finished.
+    """
     from app.remarkable.metadata_scanner import MetadataScanner
 
     try:
@@ -283,15 +288,42 @@ def _pages_to_sync(config: Config, selected_uuids: list[str] | None) -> int | No
         if selected_uuids is not None:
             wanted = set(selected_uuids)
             notebooks = [nb for nb in notebooks if nb.uuid in wanted]
-        limit = config.sync.max_pages_per_notebook
-        total = 0
-        for nb in notebooks:
-            count = count_page_files(source, nb.uuid)
-            total += min(count, limit) if limit and limit > 0 else count
-        return total
+        excluded = set(config.sync.excluded_notebooks)
+        return sum(count_page_files(source, nb.uuid) for nb in notebooks if nb.uuid not in excluded)
     except Exception as e:
         logger.warning(f"Could not count pages to sync: {type(e).__name__}")
         return None
+
+
+def _upload_page_count(config: Config, uuid: str) -> int:
+    """Pages a sync of this notebook would upload: its .rm files, within the saved page limit."""
+    count = count_page_files(config.remarkable.source_directory, uuid)
+    limit = config.sync.max_pages_per_notebook
+    return min(count, limit) if limit and limit > 0 else count
+
+
+def _syncable_documents(config: Config) -> list:
+    """Notebooks in the folder, minus those deleted on the server, with upload page counts."""
+    excluded = set(config.sync.excluded_notebooks)
+    documents = [doc for doc in _scan_notebooks(config.remarkable.source_directory) if doc.uuid not in excluded]
+    for doc in documents:
+        doc.page_count = _upload_page_count(config, doc.uuid)
+    return documents
+
+
+def _host() -> str:
+    return _config().api._keychain_user_id
+
+
+def _auth_state(signed_in: bool) -> str:
+    """checking | signed_in | signed_out | offline (see docs/local-api.md)."""
+    if signed_in:
+        return "signed_in"
+    agent = _agent()
+    state = getattr(agent, "auth_state", None) if agent is not None else None
+    if state in ("checking", "offline"):
+        return state
+    return "signed_out"
 
 
 def _apply_selection(config: Config, sync_all: bool | None, selected: list[str] | None) -> None:
@@ -300,6 +332,22 @@ def _apply_selection(config: Config, sync_all: bool | None, selected: list[str] 
         config.sync.sync_all_notebooks = sync_all
     if selected is not None:
         config.sync.selected_notebooks = selected
+
+
+def is_v2_path(path: str) -> bool:
+    return path == V2_PREFIX or path.startswith(V2_PREFIX + "/")
+
+
+def check_app_token():
+    """App-level before_request: every /api/v2 path needs the app token, if one is set."""
+    if not is_v2_path(request.path):
+        return None
+    expected = current_app.config.get("APP_TOKEN")
+    if not expected:
+        return None
+    if not app_token_matches(expected, request.headers.get(APP_TOKEN_HEADER)):
+        return _error_response("bad_app_token", 401, "missing or wrong app token")
+    return None
 
 
 # ----------------------------------------------------------------------
@@ -311,14 +359,12 @@ def register_v2_routes(app: Flask) -> None:
     """Register /api/v2/* on the app (token check, JSON errors, endpoints)."""
     bp = Blueprint("api_v2", __name__, url_prefix=V2_PREFIX)
 
-    @bp.before_request
-    def _check_app_token():
-        expected = current_app.config.get("APP_TOKEN")
-        if not expected:
-            return None
-        if not app_token_matches(expected, request.headers.get(APP_TOKEN_HEADER)):
-            return _error_response("bad_app_token", 401, "missing or wrong app token")
-        return None
+    # first_sync.completed for users upgrading from the menu-bar app: they saved a
+    # notebook selection there. Read once at start-up, before the app changes it.
+    sync_config = app.config["AGENT_CONFIG"].sync
+    app.config["V2_LEGACY_SELECTION_SAVED"] = (
+        not sync_config.sync_all_notebooks and bool(sync_config.selected_notebooks)
+    )
 
     @bp.errorhandler(ApiError)
     def _api_error(error: ApiError):
@@ -354,6 +400,7 @@ def register_v2_routes(app: Flask) -> None:
             "api_version": API_VERSION,
             "core_version": __version__,
             "auth": {
+                "state": _auth_state(signed_in),
                 "signed_in": signed_in,
                 "email": cloud_sync.user_email if (cloud_sync and signed_in) else None,
                 "sign_in_required": sign_in_required,
@@ -370,8 +417,11 @@ def register_v2_routes(app: Flask) -> None:
                 "last_rescan_at": iso_utc(health["last_rescan_at"]),
             },
             "queue": queue,
-            "quota": _quota_cache().snapshot() if signed_in else None,
-            "first_sync": {"completed": last_upload is not None},
+            "quota": _quota_cache().snapshot(_host()) if signed_in else None,
+            "first_sync": {
+                "completed": last_upload is not None
+                or bool(current_app.config.get("V2_LEGACY_SELECTION_SAVED")),
+            },
             "sync": _current_progress(),
             "last_upload_at": iso_utc(last_upload, naive_is_utc=True),
         })
@@ -392,8 +442,8 @@ def register_v2_routes(app: Flask) -> None:
                 synced = {}
             sync_all = config.sync.sync_all_notebooks
             selected = set(config.sync.selected_notebooks)
-            excluded = set(config.sync.excluded_notebooks)
-            for doc in _scan_notebooks(source):
+            # Notebooks deleted on the server are left out (deleted-notebooks -> resync)
+            for doc in _syncable_documents(config):
                 result.append({
                     "uuid": doc.uuid,
                     "name": doc.name,
@@ -402,7 +452,7 @@ def register_v2_routes(app: Flask) -> None:
                     "page_count": doc.page_count,
                     "last_opened_at": iso_utc(doc.last_opened_at),
                     "last_modified_at": iso_utc(doc.last_modified_at),
-                    "selected": doc.uuid not in excluded and (sync_all or doc.uuid in selected),
+                    "selected": sync_all or doc.uuid in selected,
                     "synced_pages": synced.get(doc.uuid, 0),
                 })
         return jsonify({
@@ -447,14 +497,15 @@ def register_v2_routes(app: Flask) -> None:
         quota = None
         if signed_in:
             cache = _quota_cache()
-            quota = cache.snapshot()
+            host = _host()
+            quota = cache.snapshot(host)
             if quota is None:
                 # Not fetched yet (this endpoint is not polled, so it may ask the cloud)
-                cache.store(_on_loop(_require_signed_in().get_quota_status(), QUICK_TIMEOUT_SECONDS))
+                cache.store(_on_loop(_require_signed_in().get_quota_status(), QUICK_TIMEOUT_SECONDS), host=host)
                 cache.note_attempt()
-                quota = cache.snapshot()
+                quota = cache.snapshot(host)
 
-        documents = _scan_notebooks(source) if (signed_in and folder_ok) else []
+        documents = _syncable_documents(config) if (signed_in and folder_ok) else []
         suggestion = suggest_first_sync(
             signed_in=signed_in,
             folder_ok=folder_ok,
@@ -483,28 +534,38 @@ def register_v2_routes(app: Flask) -> None:
         page_limit = _page_limit_value(body.get("page_limit"))
 
         _require_signed_in()
-        job: InitialSyncJob = current_app.config["INITIAL_SYNC_JOB"]
-        if job.snapshot()["state"] == InitialSyncJob.RUNNING:
-            raise ApiError("sync_already_running", 409)
-
         config = _config()
-        if notebook_uuids is not None or page_limit is not None:
-            if notebook_uuids is not None:
-                _apply_selection(config, False, notebook_uuids)
-            if page_limit is not None:
-                # Omitted or null keeps the saved limit (clear it with PUT /settings)
-                config.sync.max_pages_per_notebook = page_limit
-            config.save()
+        if notebook_uuids is not None:
+            known = {doc.uuid for doc in _scan_notebooks(config.remarkable.source_directory)}
+            if not known.intersection(notebook_uuids):
+                raise ApiError("invalid_request", 400, "none of notebook_uuids is in the folder")
 
-        selected_uuids = None if config.sync.sync_all_notebooks else list(config.sync.selected_notebooks)
-        pages_total = _pages_to_sync(config, selected_uuids)
+        # Take the job first: concurrent requests (the server is threaded) must not
+        # leave a saved selection that differs from the running sync
+        job: InitialSyncJob = current_app.config["INITIAL_SYNC_JOB"]
+        if not job.try_begin():
+            raise ApiError("sync_already_running", 409)
         try:
-            shared.start_initial_sync(current_app, selected_uuids)
-        except SyncAlreadyRunningError:
-            raise ApiError("sync_already_running", 409) from None
+            if notebook_uuids is not None or page_limit is not None:
+                if notebook_uuids is not None:
+                    _apply_selection(config, False, notebook_uuids)
+                if page_limit is not None:
+                    # Omitted or null keeps the saved limit (clear it with PUT /settings)
+                    config.sync.max_pages_per_notebook = page_limit
+                config.save()
+
+            selected_uuids = None if config.sync.sync_all_notebooks else list(config.sync.selected_notebooks)
+            current_app.config["V2_PAGES_TOTAL"] = (
+                job.snapshot()["started_at"],
+                _pages_to_sync(config, selected_uuids),
+            )
+            shared.launch_initial_sync(current_app, job, selected_uuids)
         except AgentLoopNotRunningError as e:
             raise ApiError("core_not_ready", 503, str(e)) from None
-        current_app.config["V2_PAGES_TOTAL"] = (job.snapshot()["started_at"], pages_total)
+        except BaseException:
+            if job.snapshot()["state"] == InitialSyncJob.RUNNING:
+                job.reset()
+            raise
         return _ok(202)
 
     @bp.get("/sync/progress")
@@ -555,20 +616,34 @@ def register_v2_routes(app: Flask) -> None:
                 new_url = ENVIRONMENT_PRESETS[name]
             elif name == "custom":
                 new_url = env.get("api_url")
-                if not isinstance(new_url, str) or not new_url.startswith(("https://", "http://")):
-                    raise ApiError("invalid_request", 400, "custom environment needs an http(s) api_url")
-                new_url = new_url.rstrip("/")
+                if not isinstance(new_url, str):
+                    raise ApiError("invalid_request", 400, "custom environment needs an api_url")
+                new_url = new_url.strip().rstrip("/")
+                parts = urlparse(new_url)
+                # Plain http only to this machine: the sign-in token must not travel in clear
+                if not parts.hostname or not (
+                    parts.scheme == "https" or (parts.scheme == "http" and is_loopback_host(parts.hostname))
+                ):
+                    raise ApiError("invalid_request", 400, "api_url must be https (or http to loopback)")
             else:
                 raise ApiError("invalid_request", 400, "unknown environment")
             changes["api_url"] = new_url
 
+        environment_changed = "api_url" in changes and changes["api_url"] != config.api.url
+        job: InitialSyncJob = current_app.config["INITIAL_SYNC_JOB"]
+        if environment_changed and job.snapshot()["state"] == InitialSyncJob.RUNNING:
+            raise ApiError("sync_already_running", 409, "environment cannot change during a sync")
+
         if "page_limit" in changes:
             config.sync.max_pages_per_notebook = changes["page_limit"]
 
-        if "source_directory" in changes:
+        folder_changed = (
+            "source_directory" in changes
+            and changes["source_directory"] != config.remarkable.source_directory
+        )
+        if folder_changed and not hasattr(agent, "change_source_directory"):
             config.remarkable.source_directory = changes["source_directory"]
 
-        environment_changed = "api_url" in changes and changes["api_url"] != config.api.url
         if environment_changed:
             # Same as the legacy environment switch: per-host sign-in and manifest
             config.api.url = changes["api_url"]
@@ -582,17 +657,10 @@ def register_v2_routes(app: Flask) -> None:
 
         config.save()
 
-        if agent is not None and "source_directory" in changes:
-            # Same as the legacy config route: start the watcher if it can now
-            state_value = agent.update_folder_flags()
-            if (
-                state_value == FOLDER_OK
-                and not agent.file_watcher
-                and config.remarkable.watch_enabled
-                and cloud_sync
-                and cloud_sync.authenticated
-            ):
-                agent.start_file_watcher_sync()
+        if folder_changed and hasattr(agent, "change_source_directory"):
+            # Stops the watcher, records the files already in the new folder as
+            # baseline (never uploaded wholesale) and watches the new folder
+            _on_loop(agent.change_source_directory(changes["source_directory"]), BACKEND_TIMEOUT_SECONDS)
 
         has_token = bool(config.api.token)
         if environment_changed and has_token and agent is not None:
@@ -613,6 +681,8 @@ def register_v2_routes(app: Flask) -> None:
             cloud_sync.logout()
         _quota_cache().clear()
         agent = _agent()
+        if agent is not None and hasattr(agent, "auth_state"):
+            agent.auth_state = "signed_out"
         if agent is not None and hasattr(agent, "stop_file_watcher"):
             _on_loop(agent.stop_file_watcher(), BACKEND_TIMEOUT_SECONDS)
         return _ok()
@@ -672,7 +742,7 @@ def register_v2_routes(app: Flask) -> None:
 
     # Unknown /api/v2 paths and wrong methods answer in JSON too (other paths unchanged)
     def _v2_http_error(error: HTTPException):
-        if not request.path.startswith(V2_PREFIX + "/") and request.path != V2_PREFIX:
+        if not is_v2_path(request.path):
             return error
         code = {400: "invalid_request", 404: "invalid_request", 405: "invalid_request"}.get(
             error.code or 500, "internal"

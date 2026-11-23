@@ -141,6 +141,13 @@ class FakeAgent:
         self.stopped_watcher = False
         self.started_watcher = 0
         self.reauthenticated = 0
+        self.auth_state = "signed_in"
+        self.folder_changes: list[str] = []
+
+    async def change_source_directory(self, new_directory):
+        self.folder_changes.append(new_directory)
+        self.config.remarkable.source_directory = new_directory
+        return "ok"
 
     async def stop_file_watcher(self):
         self.stopped_watcher = True
@@ -229,9 +236,52 @@ class TestAppToken:
     def test_right_token_is_accepted(self, client):
         assert get(client, "/api/v2/state").status_code == 200
 
-    def test_health_and_legacy_routes_need_no_token(self, client):
+    def test_health_needs_no_token(self, client):
         assert client.get("/health", base_url=BASE_URL).status_code == 200
-        assert client.get("/api/status", base_url=BASE_URL).status_code == 200
+
+    @pytest.mark.parametrize(
+        "method, path",
+        [
+            ("GET", "/"),
+            ("GET", "/api/status"),
+            ("POST", "/api/config"),
+            ("GET", "/api/config"),
+            ("POST", "/api/sync/initial"),
+            ("POST", "/api/notebooks/selection"),
+            ("POST", "/api/auth/environment"),
+            ("POST", "/api/auth/logout"),
+            ("GET", "/updates"),
+            ("GET", "/static/rm-icon.png"),
+        ],
+    )
+    def test_legacy_routes_do_not_exist_in_headless_mode(self, client, config, save_mock, method, path):
+        url_before = config.api.url
+        resp = client.open(path, method=method, base_url=BASE_URL, json={"api": {"url": "http://evil"}})
+        assert resp.status_code == 404
+        assert config.api.url == url_before
+        save_mock.assert_not_called()
+
+    def test_legacy_routes_still_exist_in_legacy_mode(self, config, cloud_sync, agent_loop):
+        app = create_app(config, cloud_sync, agent=None, agent_loop=agent_loop)
+        legacy = app.test_client()
+        assert legacy.get("/api/status", base_url=BASE_URL).status_code == 200
+        assert legacy.get("/", base_url=BASE_URL).status_code == 200
+        assert legacy.get("/auth/done", base_url=BASE_URL).status_code == 404
+
+    @pytest.mark.parametrize("method", ["GET", "POST", "DELETE"])
+    def test_unknown_v2_path_without_token_is_401(self, client, method):
+        resp = client.open("/api/v2/does-not-exist", method=method, base_url=BASE_URL)
+        assert resp.status_code == 401 and error_code(resp) == "bad_app_token"
+
+    def test_wrong_method_without_token_is_401(self, client):
+        resp = client.delete("/api/v2/state", base_url=BASE_URL)
+        assert resp.status_code == 401 and error_code(resp) == "bad_app_token"
+
+    def test_ipv6_loopback_host_is_allowed_in_headless_mode(self, client, config, cloud_sync, agent_loop):
+        resp = client.get("/health", base_url=f"http://[::1]:{PORT}")
+        assert resp.status_code == 200
+        legacy = create_app(config, cloud_sync, agent=None, agent_loop=agent_loop).test_client()
+        assert legacy.get("/health", base_url=f"http://[::1]:{PORT}").status_code == 403
 
     def test_no_token_configured_leaves_v2_open(self, config, cloud_sync, agent_loop):
         app = create_app(config, cloud_sync, agent=None, agent_loop=agent_loop)
@@ -270,7 +320,7 @@ class TestState:
             "quota", "first_sync", "sync", "last_upload_at",
         }
         assert data["api_version"] == 2
-        assert data["auth"] == {"signed_in": True, "email": None, "sign_in_required": False}
+        assert data["auth"] == {"state": "signed_in", "signed_in": True, "email": None, "sign_in_required": False}
         assert data["environment"] == {
             "name": "custom",
             "api_url": config.api.url,
@@ -413,12 +463,22 @@ class TestNotebooks:
         assert by_uuid["diary"]["synced_pages"] == 2
         assert by_uuid["big"]["selected"] is False
 
-    def test_sync_all_selects_everything_but_excluded(self, client, config):
+    def test_sync_all_selects_everything_and_excluded_are_left_out(self, client, config):
         config.sync.sync_all_notebooks = True
         config.sync.excluded_notebooks = ["big"]
         by_uuid = {nb["uuid"]: nb for nb in get(client, "/api/v2/notebooks").get_json()["notebooks"]}
         assert by_uuid["diary"]["selected"] is True
-        assert by_uuid["big"]["selected"] is False
+        assert "big" not in by_uuid
+
+    def test_page_count_is_what_a_sync_uploads(self, client, config, library):
+        # An orphan .rm file (not in .content) is uploaded too, so it counts
+        (library / "diary" / "orphan.rm").write_bytes(b"x")
+        by_uuid = {nb["uuid"]: nb for nb in get(client, "/api/v2/notebooks").get_json()["notebooks"]}
+        assert by_uuid["diary"]["page_count"] == 6
+        config.sync.max_pages_per_notebook = 4
+        by_uuid = {nb["uuid"]: nb for nb in get(client, "/api/v2/notebooks").get_json()["notebooks"]}
+        assert by_uuid["diary"]["page_count"] == 4
+        assert by_uuid["meeting"]["page_count"] == 3
 
     def test_missing_folder(self, client, config, tmp_path):
         config.remarkable.source_directory = str(tmp_path / "nowhere")
@@ -548,8 +608,8 @@ class TestSyncStart:
         assert config.sync.max_pages_per_notebook == 2
         save_mock.assert_called()
         progress = _wait_progress(client, "running")
-        # 2 + 2 pages (limit 2 each)
-        assert progress["counts"]["pages_total"] == 4
+        # All pages of the two notebooks (3 + 5); the limit shows as left_out_by_page_limit
+        assert progress["counts"]["pages_total"] == 8
         (job,) = fake_initial_sync.instances
         deadline = time.monotonic() + 5
         while job.selected == "unset" and time.monotonic() < deadline:
@@ -709,15 +769,36 @@ class TestSettings:
         assert config.sync.max_pages_per_notebook is None
         assert save_mock.call_count == 2
 
-    def test_source_directory_starts_watcher(self, client, config, agent, tmp_path):
+    def test_source_directory_goes_through_the_agent(self, client, config, agent, tmp_path):
         new_dir = tmp_path / "other"
         new_dir.mkdir()
         assert put(client, "/api/v2/settings", {"source_directory": str(new_dir)}).status_code == 200
+        assert agent.folder_changes == [str(new_dir.resolve())]
         assert config.remarkable.source_directory == str(new_dir.resolve())
-        assert agent.started_watcher == 0  # watch_enabled is False in the test config
-        config.remarkable.watch_enabled = True
+        # Same folder again: nothing to do
         put(client, "/api/v2/settings", {"source_directory": str(new_dir)})
-        assert agent.started_watcher == 1
+        assert agent.folder_changes == [str(new_dir.resolve())]
+
+    @pytest.mark.parametrize(
+        "api_url", ["http://rmirror.io/api/v1", "http://192.168.1.10:8000/api/v1", "ftp://x/api", "https:///x"]
+    )
+    def test_custom_environment_must_be_https_unless_loopback(self, client, config, api_url):
+        resp = put(client, "/api/v2/settings", {"environment": {"name": "custom", "api_url": api_url}})
+        assert resp.status_code == 400 and error_code(resp) == "invalid_request"
+        assert config.api.url == "http://test-api.rmirror.io/api/v1"
+
+    @pytest.mark.parametrize("api_url", ["http://localhost:8000/api/v1", "http://127.0.0.1:8000/v1", "https://my.example:8443/api/v1"])
+    def test_custom_environment_allowed(self, client, config, mock_keychain, api_url):
+        mock_keychain.get_token.side_effect = lambda host: None
+        assert put(client, "/api/v2/settings", {"environment": {"name": "custom", "api_url": api_url}}).status_code == 200
+        assert config.api.url == api_url
+
+    def test_environment_change_refused_during_sync(self, client, config, fake_initial_sync):
+        assert post(client, "/api/v2/sync/start").status_code == 202
+        resp = put(client, "/api/v2/settings", {"environment": {"name": "staging"}})
+        assert resp.status_code == 409 and error_code(resp) == "sync_already_running"
+        assert config.api.url == "http://test-api.rmirror.io/api/v1"
+        fake_initial_sync.instances[0].release.set()
 
     def test_switch_environment_without_stored_sign_in(self, client, config, cloud_sync, agent, mock_keychain):
         agent.quota_cache.store({"used": 1, "limit": 30})
@@ -853,13 +934,22 @@ class TestHeadlessSignIn:
         with patch.object(routes, "verify_agent_token", new=AsyncMock(return_value=True)), \
                 patch.object(routes, "register_agent_with_backend", new=AsyncMock()):
             resp = client.get("/auth/callback", query_string={"state": state, "token": "new"}, base_url=BASE_URL)
-        assert resp.status_code == 200
-        html = resp.get_data(as_text=True)
-        assert "You're signed in." in html
-        assert "rmirror://signed-in" in html
-        assert "Location" not in resp.headers
+        # Leaves the URL that carries the token at once
+        assert resp.status_code == 303
+        assert resp.headers["Location"] == "/auth/done"
         assert config.api.token == "new"
         save_mock.assert_called_once()
+        done = client.get("/auth/done", base_url=BASE_URL)
+        assert done.status_code == 200
+        html = done.get_data(as_text=True)
+        assert "You're signed in." in html
+        assert "rmirror://signed-in" in html
+        assert "new" not in html.split("<body>")[1]
+
+    def test_done_page_takes_no_input(self, client):
+        resp = client.get("/auth/done", query_string={"message": "<script>x</script>", "token": "t"}, base_url=BASE_URL)
+        html = resp.get_data(as_text=True)
+        assert "<script>x" not in html and "You're signed in." in html
 
     @pytest.mark.parametrize("case", ["no_state", "no_token", "rejected"])
     def test_failure_pages_use_plain_wording(self, client, config, case):
@@ -883,3 +973,127 @@ class TestHeadlessSignIn:
         assert resp.status_code == 502
         body = resp.get_data(as_text=True).lower()
         assert "clerk" not in body[body.index("<body>"):]
+
+
+# ----------------------------------------------------------------------
+# Review fixes at the route level
+# ----------------------------------------------------------------------
+
+
+class TestAuthState:
+    @pytest.mark.parametrize("agent_state, expected", [
+        ("checking", "checking"), ("offline", "offline"), ("signed_out", "signed_out"), ("signed_in", "signed_out"),
+    ])
+    def test_not_authenticated(self, client, cloud_sync, agent, agent_state, expected):
+        cloud_sync.authenticated = False
+        agent.auth_state = agent_state
+        auth = get(client, "/api/v2/state").get_json()["auth"]
+        assert auth["state"] == expected
+        assert auth["signed_in"] is False
+
+    def test_signed_in_wins(self, client, agent):
+        agent.auth_state = "offline"
+        assert get(client, "/api/v2/state").get_json()["auth"]["state"] == "signed_in"
+
+    def test_sign_out_sets_signed_out(self, client, agent, mock_keychain):
+        post(client, "/api/v2/auth/sign-out")
+        assert agent.auth_state == "signed_out"
+        assert get(client, "/api/v2/state").get_json()["auth"]["state"] == "signed_out"
+
+
+class TestFirstSyncRule:
+    def _app(self, config, cloud_sync, agent_loop):
+        app = create_app(config, cloud_sync, agent=None, agent_loop=agent_loop, app_token=TOKEN, headless=True)
+        return app.test_client()
+
+    def test_fresh_install_is_not_completed(self, config, cloud_sync, agent_loop):
+        config.sync.sync_all_notebooks = True  # the default
+        config.sync.selected_notebooks = []
+        client = self._app(config, cloud_sync, agent_loop)
+        assert get(client, "/api/v2/state").get_json()["first_sync"]["completed"] is False
+
+    def test_legacy_selection_counts_as_completed(self, config, cloud_sync, agent_loop):
+        config.sync.sync_all_notebooks = False
+        config.sync.selected_notebooks = ["diary"]
+        client = self._app(config, cloud_sync, agent_loop)
+        assert get(client, "/api/v2/state").get_json()["first_sync"]["completed"] is True
+
+    def test_selection_saved_by_the_app_does_not_count(self, client, config, save_mock):
+        put(client, "/api/v2/selection", {"sync_all": False, "selected_notebooks": ["diary"]})
+        assert get(client, "/api/v2/state").get_json()["first_sync"]["completed"] is False
+
+
+class TestSyncStartChecks:
+    def test_unknown_notebooks_are_refused(self, client, config, save_mock, fake_initial_sync):
+        resp = post(client, "/api/v2/sync/start", {"notebook_uuids": ["nope", "also-nope"]})
+        assert resp.status_code == 400 and error_code(resp) == "invalid_request"
+        save_mock.assert_not_called()
+        assert fake_initial_sync.instances == []
+
+    def test_selection_unchanged_when_already_running(self, client, config, fake_initial_sync):
+        assert post(client, "/api/v2/sync/start", {"notebook_uuids": ["diary"]}).status_code == 202
+        resp = post(client, "/api/v2/sync/start", {"notebook_uuids": ["big"], "page_limit": 9})
+        assert resp.status_code == 409
+        assert config.sync.selected_notebooks == ["diary"]
+        assert config.sync.max_pages_per_notebook is None
+        fake_initial_sync.instances[0].release.set()
+
+    def test_concurrent_starts_run_one_job_with_its_selection(self, client, config, fake_initial_sync):
+        results = []
+
+        def start(uuid):
+            results.append((uuid, post(client.application.test_client(), "/api/v2/sync/start",
+                                       {"notebook_uuids": [uuid]}).status_code))
+
+        threads = [threading.Thread(target=start, args=(u,)) for u in ("diary", "meeting", "big")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        winners = [u for u, code in results if code == 202]
+        assert len(winners) == 1 and sorted(code for _, code in results) == [202, 409, 409]
+        assert config.sync.selected_notebooks == winners
+        fake_initial_sync.instances[0].release.set()
+
+    def test_job_released_when_loop_is_gone(self, config, cloud_sync, fake_initial_sync, save_mock):
+        app = create_app(config, cloud_sync, agent=None, agent_loop=None, app_token=TOKEN, headless=True)
+        c = app.test_client()
+        assert post(c, "/api/v2/sync/start").status_code == 503
+        assert app.config["INITIAL_SYNC_JOB"].snapshot()["state"] == "idle"
+
+
+class TestSuggestionCounts:
+    def test_orphan_pages_count(self, client, agent, library):
+        agent.quota_cache.store({"used": 0, "limit": 8}, host="test-api.rmirror.io:80")
+        # meeting: 3 pages in .content + 2 orphans = 5; diary 5 -> only one fits in 8
+        for i in range(2):
+            (library / "meeting" / f"orphan-{i}.rm").write_bytes(b"x")
+        data = get(client, "/api/v2/first-run/suggestion").get_json()
+        assert data["total_pages"] <= 8
+        assert [nb["uuid"] for nb in data["notebooks"]] == ["meeting"]
+        assert data["notebooks"][0]["page_count"] == 5
+
+    def test_page_limit_caps_counts(self, client, config, agent):
+        agent.quota_cache.store({"used": 0, "limit": 12}, host="test-api.rmirror.io:80")
+        config.sync.max_pages_per_notebook = 4
+        data = get(client, "/api/v2/first-run/suggestion").get_json()
+        assert [nb["page_count"] for nb in data["notebooks"]] == [4, 3, 4]
+        assert data["total_pages"] == 11
+
+    def test_excluded_are_never_suggested(self, client, config, agent):
+        agent.quota_cache.store({"used": 0, "limit": -1}, host="test-api.rmirror.io:80")
+        config.sync.excluded_notebooks = ["big"]
+        uuids = [nb["uuid"] for nb in get(client, "/api/v2/first-run/suggestion").get_json()["notebooks"]]
+        assert "big" not in uuids
+
+    def test_none_fit(self, client, agent):
+        agent.quota_cache.store({"used": 198, "limit": 200}, host="test-api.rmirror.io:80")
+        data = get(client, "/api/v2/first-run/suggestion").get_json()
+        assert data["reason"] == "none_fit" and data["notebooks"] == []
+        assert data["quota"] == {"limit": 200, "remaining": 2}
+
+    def test_quota_of_previous_host_is_not_used(self, client, agent, backend):
+        agent.quota_cache.store({"used": 0, "limit": 5}, host="rmirror.io")
+        data = get(client, "/api/v2/first-run/suggestion").get_json()
+        assert data["quota"] == {"limit": 200, "remaining": 196}
+        assert any(call.endswith("/quota/status") for call in backend.calls)

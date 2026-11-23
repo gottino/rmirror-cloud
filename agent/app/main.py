@@ -9,6 +9,7 @@ import concurrent.futures
 import errno
 import logging
 import os
+import select
 import signal
 import socket
 import sys
@@ -38,7 +39,17 @@ EXIT_ERROR = 1
 EXIT_PORT_IN_USE = 3
 EXIT_BAD_APP_TOKEN = 4
 # How long each shutdown step may take in headless mode (the app waits 8 s after SIGTERM)
-HEADLESS_SHUTDOWN_STEP_SECONDS = 3.0
+HEADLESS_SHUTDOWN_STEP_SECONDS = 1.5
+HEADLESS_HOST_V6 = "::1"
+
+# Sign-in state reported as auth.state by GET /api/v2/state (headless mode)
+AUTH_CHECKING = "checking"
+AUTH_SIGNED_IN = "signed_in"
+AUTH_SIGNED_OUT = "signed_out"
+AUTH_OFFLINE = "offline"
+# Retry of the stored sign-in check while the cloud cannot be reached
+AUTH_RETRY_FIRST_SECONDS = 5.0
+AUTH_RETRY_MAX_SECONDS = 60.0
 
 
 class Agent:
@@ -89,6 +100,15 @@ class Agent:
         self.remarkable_folder_unreadable = False
         self.quota_cache = QuotaCache()
         self._account_refresh_task: asyncio.Task | None = None
+        # Headless: state of the stored sign-in (see AUTH_*), and its retry task
+        self.auth_state = AUTH_SIGNED_OUT
+        self._auth_retry_task: asyncio.Task | None = None
+        self._auth_retry_sleep = asyncio.sleep  # injectable for tests
+        # Folder whose existing files must be baselined before the next watcher
+        # starts on it (set when the user switches folders through the local API)
+        self._baseline_pending: str | None = None
+        # Headless: the [::1] server next to the 127.0.0.1 one
+        self._extra_web_servers: list = []
 
         self._watcher_lock = threading.Lock()
         self._watcher_state = self.WATCHER_IDLE
@@ -130,12 +150,19 @@ class Agent:
                 print(f"Opened web UI in browser: {url}")
 
         # Try to authenticate
+        if self.headless:
+            # Never blocks start-up: offline -> retried in the background
+            await self._initial_sign_in_check()
+        else:
+            await self._legacy_sign_in_check()
+
+        # Keep running until stopped
+        await self._run_until_stopped()
+
+    async def _legacy_sign_in_check(self) -> None:
+        """Tray / foreground mode: check the stored sign-in once at start-up (unchanged)."""
         try:
             await self.cloud_sync.authenticate()
-
-            if self.headless:
-                # The first loop tick also fetches the account email
-                self.quota_cache.mark_stale()
 
             # Update tray status if authentication succeeded
             if self.tray_app:
@@ -144,7 +171,7 @@ class Agent:
             # Display quota status after successful authentication
             try:
                 quota_status = await self.cloud_sync.get_quota_status()
-                self.quota_cache.store(quota_status)
+                self.quota_cache.store(quota_status, host=self.config.api._keychain_user_id)
                 self.quota_cache.note_attempt()
                 quota_display = self.cloud_sync.format_quota_display(quota_status)
                 print(f"\n{quota_display}\n")
@@ -161,7 +188,63 @@ class Agent:
             if self.tray_app:
                 self.tray_app.update_status("Not authenticated")
 
-        # Keep running until stopped
+    async def _initial_sign_in_check(self) -> None:
+        """Headless: checking -> signed_in / signed_out / offline (then retried)."""
+        has_token = await asyncio.to_thread(lambda: bool(self.config.api.token))
+        if not has_token:
+            self.auth_state = AUTH_SIGNED_OUT
+            return
+        self.auth_state = AUTH_CHECKING
+        await self._check_sign_in()
+
+    async def _check_sign_in(self) -> bool:
+        """Verify the stored sign-in with the cloud and update auth_state. Never raises."""
+        from app.sync.cloud_sync import AuthenticationRequiredError
+
+        try:
+            await self.cloud_sync.authenticate()
+        except AuthenticationRequiredError:
+            self.auth_state = AUTH_SIGNED_OUT
+            return False
+        except Exception as e:
+            if self.auth_state != AUTH_OFFLINE:
+                logger.warning(
+                    f"Could not reach rMirror Cloud to check the sign-in ({type(e).__name__}); "
+                    "retrying in the background"
+                )
+            self.auth_state = AUTH_OFFLINE
+            self._schedule_auth_retry()
+            return False
+        if self.auth_state == AUTH_OFFLINE:
+            logger.info("rMirror Cloud reachable again; sign-in confirmed")
+        self.auth_state = AUTH_SIGNED_IN
+        self.quota_cache.mark_stale()  # quota and account email on the next tick
+        self._maybe_refresh_account()
+        if self._can_watch():
+            self._request_watcher_start()
+        return True
+
+    def _schedule_auth_retry(self) -> None:
+        if self._auth_retry_task is not None and not self._auth_retry_task.done():
+            return
+        self._auth_retry_task = asyncio.get_running_loop().create_task(self._auth_retry_loop())
+
+    async def _auth_retry_loop(self) -> None:
+        """Retry the sign-in check with backoff (5 s doubling up to 60 s) while offline."""
+        delay = AUTH_RETRY_FIRST_SECONDS
+        while self.running and self.auth_state == AUTH_OFFLINE:
+            await self._auth_retry_sleep(delay)
+            if not self.running or self.auth_state != AUTH_OFFLINE:
+                return
+            if self.cloud_sync and self.cloud_sync.authenticated:
+                self.auth_state = AUTH_SIGNED_IN  # signed in through the browser meanwhile
+                return
+            if await self._check_sign_in():
+                return
+            delay = min(delay * 2, AUTH_RETRY_MAX_SECONDS)
+
+    async def _run_until_stopped(self) -> None:
+        """After the sign-in check: start watching and poll until shutdown."""
         if self.foreground and not self.headless:
             print("\nrMirror Agent running in foreground mode. Press Ctrl+C to stop.")
             print(f"Web UI: http://{self.config.web.host}:{self.config.web.port}")
@@ -239,6 +322,12 @@ class Agent:
         with self._watcher_lock:
             self._watcher_state = self.WATCHER_RUNNING
         self.file_watcher = FileWatcher(self.config, self.cloud_sync, on_status=self._set_tray_status)
+        pending = self._baseline_pending
+        if pending is not None and pending == self.config.remarkable.source_directory:
+            # A folder chosen through the local API: its existing files are a
+            # baseline, not changes to upload (first-sync rule)
+            await self._baseline_current_folder(self.file_watcher)
+            self._baseline_pending = None
         if self.headless:
             self.file_watcher.sync_queue.on_batch_complete = self._on_upload_batch
         await self.file_watcher.start()
@@ -328,6 +417,33 @@ class Agent:
         self.remarkable_folder_unreadable = state == FOLDER_UNREADABLE
         return state
 
+    async def _baseline_current_folder(self, file_watcher) -> None:
+        from app.watcher.file_watcher import ReMarkableEventHandler, baseline_folder
+
+        handler = ReMarkableEventHandler(file_watcher.sync_queue, self.config)
+        await asyncio.to_thread(
+            baseline_folder,
+            Path(self.config.remarkable.source_directory),
+            handler,
+            file_watcher.sync_queue.manifest,
+        )
+
+    async def change_source_directory(self, new_directory: str) -> str:
+        """Switch to another reMarkable folder (agent loop). Returns the new folder state.
+
+        Stops the watcher, saves the folder, and makes sure the files already in the
+        new folder are recorded as baseline (not uploaded) before a watcher runs on
+        it: the next watcher start does that first. Starts the watcher again if it can.
+        """
+        await self.stop_file_watcher()
+        self.config.remarkable.source_directory = new_directory
+        await asyncio.to_thread(self.config.save)
+        self._baseline_pending = new_directory
+        state = self.update_folder_flags()
+        if self._can_watch():
+            self._request_watcher_start()
+        return state
+
     async def stop_file_watcher(self) -> None:
         """Stop the running file watcher, if any (runs on the agent loop)."""
         file_watcher = self.file_watcher
@@ -375,8 +491,9 @@ class Agent:
         cloud_sync = self.cloud_sync
         if not (cloud_sync and cloud_sync.authenticated):
             return
+        host = self.config.api._keychain_user_id
         try:
-            self.quota_cache.store(await cloud_sync.get_quota_status())
+            self.quota_cache.store(await cloud_sync.get_quota_status(), host=host)
         except Exception as e:
             logger.warning(f"Could not refresh quota: {type(e).__name__}")
         if cloud_sync.authenticated and not cloud_sync.user_email:
@@ -389,16 +506,8 @@ class Agent:
         """Check the stored sign-in again (e.g. after switching environment). Never raises."""
         if not self.cloud_sync:
             return False
-        try:
-            await self.cloud_sync.authenticate()
-        except Exception as e:
-            logger.info(f"Not signed in for this environment ({type(e).__name__})")
-            return False
-        self.quota_cache.mark_stale()
-        self._maybe_refresh_account()
-        if self._can_watch():
-            self._request_watcher_start()
-        return True
+        self.auth_state = AUTH_CHECKING
+        return await self._check_sign_in()
 
     # ------------------------------------------------------------------
     # Web server
@@ -418,7 +527,18 @@ class Agent:
             self.cloud_sync = CloudSync(self.config)
 
         port = self.config.web.port
+        # 127.0.0.1 and [::1]: the dashboard returns the sign-in to "localhost",
+        # which a browser may resolve to either, so nothing else may hold the other
         listener = bind_listen_socket(HEADLESS_HOST, port)
+        try:
+            listener_v6 = bind_listen_socket(HEADLESS_HOST_V6, port, socket.AF_INET6)
+        except OSError as e:
+            if e.errno == errno.EADDRINUSE:
+                listener.close()
+                raise
+            # No IPv6 loopback on this Mac: nobody else can listen there either
+            logger.warning(f"Not listening on [::1] ({e.strerror})")
+            listener_v6 = None
         try:
             app = create_app(
                 self.config,
@@ -428,12 +548,18 @@ class Agent:
                 app_token=self.app_token,
                 headless=True,
             )
-            # werkzeug takes over a duplicate of the bound, listening socket
+            # werkzeug takes over duplicates of the bound, listening sockets
             self._web_server = make_server(
                 HEADLESS_HOST, port, app, threaded=True, fd=listener.fileno()
             )
+            if listener_v6 is not None:
+                self._extra_web_servers.append(
+                    make_server(HEADLESS_HOST_V6, port, app, threaded=True, fd=listener_v6.fileno())
+                )
         finally:
             listener.close()
+            if listener_v6 is not None:
+                listener_v6.close()
         return port
 
     def serve_web_server_in_background(self) -> None:
@@ -441,7 +567,8 @@ class Agent:
         server = self._web_server
         if server is None:
             raise RuntimeError("bind_web_server() first")
-        threading.Thread(target=server.serve_forever, name="rmirror-web", daemon=True).start()
+        for index, srv in enumerate([server, *self._extra_web_servers]):
+            threading.Thread(target=srv.serve_forever, name=f"rmirror-web-{index}", daemon=True).start()
 
     def _run_web_server_thread(self) -> None:
         """Run the web server in a background thread."""
@@ -499,9 +626,11 @@ class Agent:
 
         self.running = False
 
-        if self._web_server:
+        for server in [self._web_server, *self._extra_web_servers]:
+            if not server:
+                continue
             try:
-                self._web_server.shutdown()
+                server.shutdown()
             except Exception as e:
                 logger.warning(f"Web server shutdown failed: {e}")
 
@@ -539,12 +668,14 @@ def setup_signal_handlers(agent: Agent, quit_app: Callable[[], None] | None = No
     signal.signal(signal.SIGTERM, signal_handler)
 
 
-def bind_listen_socket(host: str, port: int) -> socket.socket:
+def bind_listen_socket(host: str, port: int, family: int = socket.AF_INET) -> socket.socket:
     """A TCP socket bound to host:port and listening. Raises OSError (EADDRINUSE if taken)."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock = socket.socket(family, socket.SOCK_STREAM)
     try:
         # Same as werkzeug/http.server: allows a restart while old connections linger
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if family == socket.AF_INET6:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
         sock.bind((host, port))
         sock.listen(128)
     except BaseException:
@@ -559,6 +690,36 @@ def read_app_token(environ: "os._Environ[str] | dict[str, str]") -> str | None:
     if len(token) < MIN_APP_TOKEN_LENGTH:
         return None
     return token
+
+
+def parent_already_gone(stream) -> bool:
+    """True if stdin is missing, closed, or already at end of file (the app is gone)."""
+    if stream is None or getattr(stream, "closed", False):
+        return True
+    try:
+        fd = stream.fileno()
+        os.fstat(fd)
+        readable, _, _ = select.select([fd], [], [], 0)
+        # The app never writes to the pipe: readable means end of file
+        return bool(readable) and os.read(fd, 1) == b""
+    except (OSError, ValueError):
+        return True
+
+
+def quiet_stdout_after_ready() -> None:
+    """Headless: after the ready line, stdout stays quiet (logs still go to agent.log).
+
+    The app must keep draining stdout anyway (docs/local-api.md).
+    """
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        if isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) in (
+            sys.stdout,
+            sys.__stdout__,
+        ):
+            root.removeHandler(handler)
+    sys.stdout.flush()
+    sys.stdout = open(os.devnull, "w")  # noqa: SIM115 (lives as long as the process)
 
 
 def watch_parent_stdin(on_eof: Callable[[], None], stream=None) -> threading.Thread:
@@ -704,9 +865,16 @@ def run_headless(config_path: Optional[Path], debug: bool, stdin=None) -> int:
     SIGINT or when stdin closes.
     """
     app_token = read_app_token(os.environ)
+    # Keep the token out of anything this process starts later
+    os.environ.pop(APP_TOKEN_ENV, None)
     if app_token is None:
         print(f"{APP_TOKEN_ENV} is missing or shorter than {MIN_APP_TOKEN_LENGTH} characters", file=sys.stderr)
         return EXIT_BAD_APP_TOKEN
+
+    stdin = sys.stdin if stdin is None else stdin
+    if parent_already_gone(stdin):
+        # Started without a parent holding stdin open: nothing to serve
+        return EXIT_OK
 
     try:
         setup_logging("DEBUG" if debug else "INFO")
@@ -750,6 +918,7 @@ def _serve_headless(agent: Agent, port: int, stdin=None) -> int:
         agent.loop.start()
         agent.serve_web_server_in_background()
         print(READY_LINE.format(port=port), flush=True)
+        quiet_stdout_after_ready()
         watch_parent_stdin(request_stop, stream=stdin)
 
         future = agent.loop.submit(agent.start())

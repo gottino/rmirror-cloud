@@ -208,6 +208,17 @@ def register_routes(app: Flask) -> None:
     # and never send the user to this agent's legacy page
     headless = bool(app.config.get("HEADLESS"))
 
+    def legacy_route(rule: str, **options: Any):
+        """app.route for the legacy page and /api/* routes; not registered in headless mode.
+
+        Headless mode serves only /health, the sign-in routes and the token-guarded
+        /api/v2: the legacy routes take no app token and could re-point the core
+        at another server or start a sync of the whole library.
+        """
+        if headless:
+            return lambda view: view
+        return app.route(rule, **options)
+
     def _sign_in_failed(legacy_message: str, plain_key: str, status: int):
         if headless:
             return _headless_auth_page(False, PLAIN_SIGN_IN_ERRORS[plain_key], status)
@@ -224,7 +235,7 @@ def register_routes(app: Flask) -> None:
         body, status = _loop_error_body(error)
         return jsonify({**body, **extra}), status
 
-    @app.route("/")
+    @legacy_route("/")
     def index():
         """Main dashboard page."""
         config: Config = app.config["AGENT_CONFIG"]
@@ -243,7 +254,7 @@ def register_routes(app: Flask) -> None:
             dev_mode=config.dev.dev_mode,
         )
 
-    @app.route("/api/status")
+    @legacy_route("/api/status")
     def api_status():
         """Get agent status."""
         config: Config = app.config["AGENT_CONFIG"]
@@ -279,7 +290,7 @@ def register_routes(app: Flask) -> None:
             }
         )
 
-    @app.route("/api/config", methods=["GET", "POST"])
+    @legacy_route("/api/config", methods=["GET", "POST"])
     def api_config():
         """Get or update configuration."""
         config: Config = app.config["AGENT_CONFIG"]
@@ -343,7 +354,7 @@ def register_routes(app: Flask) -> None:
 
         return jsonify({"success": True, "message": "Configuration updated"})
 
-    @app.route("/api/sync/status")
+    @legacy_route("/api/sync/status")
     def api_sync_status():
         """Get sync status from backend."""
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
@@ -356,7 +367,7 @@ def register_routes(app: Flask) -> None:
         except CloudSyncError as e:
             return jsonify({"error": str(e)}), 500
 
-    @app.route("/api/sync/trigger", methods=["POST"])
+    @legacy_route("/api/sync/trigger", methods=["POST"])
     def api_sync_trigger():
         """Trigger immediate sync."""
         # TODO: Implement manual sync trigger
@@ -366,7 +377,7 @@ def register_routes(app: Flask) -> None:
             sync_queue.request_resume()
         return jsonify({"success": True, "message": "Manual sync triggered"})
 
-    @app.route("/api/sync/initial", methods=["POST"])
+    @legacy_route("/api/sync/initial", methods=["POST"])
     def api_sync_initial():
         """
         Trigger initial sync of all notebooks.
@@ -405,7 +416,7 @@ def register_routes(app: Flask) -> None:
             **initial_sync_job.snapshot(),
         }), 202
 
-    @app.route("/api/sync/initial/status")
+    @legacy_route("/api/sync/initial/status")
     def api_sync_initial_status():
         """State of the initial sync: idle, running, done (with stats) or error (with message).
 
@@ -414,7 +425,7 @@ def register_routes(app: Flask) -> None:
         """
         return jsonify(initial_sync_job.snapshot())
 
-    @app.route("/api/test-connection", methods=["POST"])
+    @legacy_route("/api/test-connection", methods=["POST"])
     def api_test_connection():
         """Test connection to backend API."""
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
@@ -568,11 +579,11 @@ def register_routes(app: Flask) -> None:
                     app.logger.error(f"Failed to start file watcher: {e}")
 
             if headless:
-                # The native app notices the sign-in on its next state poll; this
-                # page only tells the user to go back (and tries to bring it up)
+                # The native app notices the sign-in on its next state poll. Leave
+                # the URL that carries the token at once: /auth/done says "signed in"
                 if agent is not None and hasattr(agent, "request_account_refresh"):
                     agent.request_account_refresh()
-                return _headless_auth_page(True, None, 200)
+                return redirect("/auth/done", code=303)
 
             # Back to the agent's own page, which shows a success message. (The
             # dashboard's setup wizard detects the agent by polling the backend.)
@@ -582,7 +593,7 @@ def register_routes(app: Flask) -> None:
                 app.logger.error(f"Sign-in failed: {type(e).__name__}")
             return _sign_in_failed(str(e), "unexpected", 200)
 
-    @app.route("/api/auth/status")
+    @legacy_route("/api/auth/status")
     def api_auth_status():
         """Get current authentication status."""
         config: Config = app.config["AGENT_CONFIG"]
@@ -596,7 +607,7 @@ def register_routes(app: Flask) -> None:
             "email": cloud_sync.user_email if cloud_sync else None,
         })
 
-    @app.route("/api/auth/me")
+    @legacy_route("/api/auth/me")
     def api_auth_me():
         """Get current user info from backend."""
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
@@ -612,7 +623,7 @@ def register_routes(app: Flask) -> None:
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
-    @app.route("/api/auth/logout", methods=["POST"])
+    @legacy_route("/api/auth/logout", methods=["POST"])
     def api_auth_logout():
         """Sign out and clear stored token."""
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
@@ -624,7 +635,7 @@ def register_routes(app: Flask) -> None:
 
     environment_presets = ENVIRONMENT_PRESETS
 
-    @app.route("/api/auth/environment", methods=["GET", "POST"])
+    @legacy_route("/api/auth/environment", methods=["GET", "POST"])
     def api_auth_environment():
         """Get or switch the backend environment."""
         config: Config = app.config["AGENT_CONFIG"]
@@ -674,7 +685,7 @@ def register_routes(app: Flask) -> None:
             "needs_auth": not has_token,
         })
 
-    @app.route("/api/notebooks/tree")
+    @legacy_route("/api/notebooks/tree")
     def api_notebooks_tree():
         """Get folder tree structure from reMarkable metadata."""
         from app.remarkable.metadata_scanner import MetadataScanner
@@ -709,7 +720,7 @@ def register_routes(app: Flask) -> None:
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
-    @app.route("/api/notebooks/selection", methods=["GET", "POST"])
+    @legacy_route("/api/notebooks/selection", methods=["GET", "POST"])
     def api_notebooks_selection():
         """Get or update notebook selection."""
         config: Config = app.config["AGENT_CONFIG"]
@@ -734,7 +745,7 @@ def register_routes(app: Flask) -> None:
 
         return jsonify({"success": True, "message": "Notebook selection updated"})
 
-    @app.route("/api/deleted-notebooks")
+    @legacy_route("/api/deleted-notebooks")
     def api_deleted_notebooks():
         """Get notebooks that were deleted on the server."""
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
@@ -752,7 +763,7 @@ def register_routes(app: Flask) -> None:
             print(f"Deleted notebooks request error: {e}")
             return jsonify({"deleted_notebooks": []})
 
-    @app.route("/api/deleted-notebooks/<uuid>/action", methods=["POST"])
+    @legacy_route("/api/deleted-notebooks/<uuid>/action", methods=["POST"])
     def api_deleted_notebook_action(uuid):
         """Handle re-sync or dismiss for a deleted notebook."""
         config: Config = app.config["AGENT_CONFIG"]
@@ -783,7 +794,7 @@ def register_routes(app: Flask) -> None:
             print(f"Deleted notebook action error: {e}")
             return jsonify({"error": str(e)}), 500
 
-    @app.route("/api/quota")
+    @legacy_route("/api/quota")
     def api_quota():
         """Get quota status from backend."""
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
@@ -800,17 +811,24 @@ def register_routes(app: Flask) -> None:
             print(f"Quota status request error: {e}")
             return jsonify({"error": str(e)}), 500
 
+    if headless:
+
+        @app.route("/auth/done")
+        def auth_done():
+            """Token-free landing page after a headless sign-in (takes no input)."""
+            return _headless_auth_page(True, None, 200)
+
     @app.route("/health")
     def health():
         """Health check endpoint."""
         return jsonify({"status": "healthy"})
 
-    @app.route("/updates")
+    @legacy_route("/updates")
     def updates_page():
         """Updates page - check for agent updates."""
         return render_template("updates.html")
 
-    @app.route("/api/updates/check", methods=["POST"])
+    @legacy_route("/api/updates/check", methods=["POST"])
     def api_check_updates():
         """Check for available agent updates."""
         from app.updater import check_for_updates
