@@ -116,7 +116,11 @@ class InitialSync:
         # PHASE 1: Metadata Sync (Fast)
         # ================================================================
         try:
-            metadata_result = await self.metadata_sync.run(selected_notebook_uuids)
+            metadata_uuids = selected_notebook_uuids
+            if metadata_uuids is not None:
+                excluded_uuids = set(self.config.sync.excluded_notebooks)
+                metadata_uuids = [u for u in metadata_uuids if u not in excluded_uuids]
+            metadata_result = await self.metadata_sync.run(metadata_uuids)
             phase1_success = metadata_result.get("success", False)
         except Exception as e:
             logger.error(f"Phase 1 (metadata sync) failed: {e}", exc_info=True)
@@ -134,9 +138,11 @@ class InitialSync:
         scanner = MetadataScanner(self.remarkable_folder)
         notebooks = scanner.scan()
 
-        # Filter by selection
+        # Filter by selection; notebooks deleted on the server are never re-uploaded here
         if selected_notebook_uuids is not None:
             notebooks = [nb for nb in notebooks if nb.uuid in selected_notebook_uuids]
+        excluded = set(self.config.sync.excluded_notebooks)
+        notebooks = [nb for nb in notebooks if nb.uuid not in excluded]
 
         if not notebooks:
             print("  ⚠️  No notebooks to sync")
@@ -183,6 +189,19 @@ class InitialSync:
 
                 self._count("notebooks_done")
                 print()
+
+                if nb_stats.get("stopped") == "sign_in":
+                    self.stopped_reason = "sign_in"
+                    logger.warning("Sign-in required during initial sync; stopping")
+                    print("   ⚠️  Sign-in required - stopping content sync")
+                    # The notebooks not reached: leave their pages for the rescan too
+                    for later in notebooks[i:]:
+                        pages, skipped = self._plan_pages(later.uuid)
+                        stats["rate_limited"] += self._defer(pages)
+                        if skipped:
+                            stats["skipped"] += skipped
+                            self._count("skipped", skipped)
+                    break
 
             except QuotaExceededError:
                 self.stopped_reason = "quota"
@@ -236,13 +255,6 @@ class InitialSync:
         Returns:
             Statistics dictionary with uploaded, failed, skipped, rate_limited counts
         """
-        notebook_dir = self.remarkable_folder / notebook_uuid
-
-        # Check if notebook directory exists
-        if not notebook_dir.exists() or not notebook_dir.is_dir():
-            logger.warning(f"Notebook directory not found: {notebook_dir}")
-            return {"uploaded": 0, "failed": 0, "skipped": 0, "rate_limited": 0}
-
         stats = {
             "uploaded": 0,
             "failed": 0,
@@ -251,12 +263,79 @@ class InitialSync:
             "failed_pages": [],  # Track which pages failed
         }
 
+        page_files_to_upload, skipped_count = self._plan_pages(notebook_uuid)
+        if skipped_count:
+            max_pages = self.config.sync.max_pages_per_notebook
+            stats["skipped"] = skipped_count
+            self._count("skipped", skipped_count)
+            print(f"   ⚡ Limiting to {max_pages} most recent pages (skipping {skipped_count} older pages)")
+            logger.info(f"Limited notebook {notebook_uuid} to {max_pages} newest pages")
+
+        # 6. Upload pages in order (newest first) with rate limit handling
+        if page_files_to_upload:
+            print(f"   📤 Uploading {len(page_files_to_upload)} page(s) (newest first)...")
+
+            for index, page_file in enumerate(page_files_to_upload):
+                try:
+                    fingerprint = fingerprint_file(page_file)
+                    result = await self._upload_with_retry(page_file, notebook_uuid)
+                    if result.get("rate_limited"):
+                        # This page and the rest of the notebook: left for the
+                        # next rescan, counted as will-retry
+                        deferred = self._defer(page_files_to_upload[index:])
+                        stats["rate_limited"] += deferred
+                        print(f"   ⏸️  Rate limited. {deferred} page(s) will sync later.")
+                        break
+                    self._record_upload(page_file, fingerprint)
+                    stats["uploaded"] += 1
+                    self._count("uploaded")
+                except QuotaExceededError:
+                    # Re-raise to stop the entire sync
+                    raise
+                except AuthenticationRequiredError:
+                    # Signed out: every page left would fail the same way. Leave them
+                    # for the rescan that runs after the next sign-in, and stop.
+                    stats["rate_limited"] += self._defer(page_files_to_upload[index:])
+                    stats["stopped"] = "sign_in"
+                    break
+                except Exception as e:
+                    logger.error(f"Failed to upload {page_file.name}: {e}")
+                    stats["failed"] += 1
+                    stats["failed_pages"].append(page_file.stem)
+                    self._count("failed")
+                    if isinstance(e, CloudSyncError) and e.transient:
+                        self._leave_for_rescan(page_file)
+
+        # Note: .content file upload is no longer needed here.
+        # Phase 1 (metadata sync) establishes page mappings via /sync/metadata endpoint.
+
+        # 7. Report results
+        if stats["failed"] > 0:
+            print(f"   ⚠️  {stats['failed']} page(s) failed to upload")
+            if stats["failed_pages"]:
+                logger.warning(f"Failed pages: {stats['failed_pages'][:5]}{'...' if len(stats['failed_pages']) > 5 else ''}")
+
+        if stats["uploaded"] > 0:
+            print(f"   ✓ Uploaded {stats['uploaded']} page(s)")
+
+        return stats
+
+    def _plan_pages(self, notebook_uuid: str) -> tuple[list[Path], int]:
+        """The notebook's page files to upload, newest first and within the page
+        limit, and how many older pages the limit leaves out."""
+        notebook_dir = self.remarkable_folder / notebook_uuid
+
+        # Check if notebook directory exists
+        if not notebook_dir.exists() or not notebook_dir.is_dir():
+            logger.warning(f"Notebook directory not found: {notebook_dir}")
+            return [], 0
+
         # 1. Get all page files
         all_page_files = list(notebook_dir.glob("*.rm"))
 
         if not all_page_files:
             logger.info(f"No pages found in notebook {notebook_uuid}")
-            return {"uploaded": 0, "failed": 0, "skipped": 0, "rate_limited": 0}
+            return [], 0
 
         # 2. Read .content file to get authoritative page order
         # In reMarkable's .content file, pages array is ordered oldest to newest
@@ -317,63 +396,18 @@ class InitialSync:
                 reverse=True  # Newest first
             )
 
-        # 5. Apply page limit (take from front = newest pages)
         max_pages = self.config.sync.max_pages_per_notebook
         if max_pages is not None and max_pages > 0 and len(ordered_page_files) > max_pages:
-            skipped_count = len(ordered_page_files) - max_pages
-            page_files_to_upload = ordered_page_files[:max_pages]  # Take first N (newest)
-            stats["skipped"] = skipped_count
-            self._count("skipped", skipped_count)
-            print(f"   ⚡ Limiting to {max_pages} most recent pages (skipping {skipped_count} older pages)")
-            logger.info(f"Limited notebook {notebook_uuid} to {max_pages} newest pages")
-        else:
-            page_files_to_upload = ordered_page_files
+            return ordered_page_files[:max_pages], len(ordered_page_files) - max_pages
+        return ordered_page_files, 0
 
-        # 6. Upload pages in order (newest first) with rate limit handling
-        if page_files_to_upload:
-            print(f"   📤 Uploading {len(page_files_to_upload)} page(s) (newest first)...")
-
-            for page_file in page_files_to_upload:
-                try:
-                    fingerprint = fingerprint_file(page_file)
-                    result = await self._upload_with_retry(page_file, notebook_uuid)
-                    if result.get("rate_limited"):
-                        stats["rate_limited"] += 1
-                        self._count("rate_limited")
-                        # Don't continue trying if we're rate limited
-                        remaining = len(page_files_to_upload) - stats["uploaded"] - stats["rate_limited"]
-                        if remaining > 0:
-                            print(f"   ⏸️  Rate limited. {remaining} page(s) will sync later.")
-                        break
-                    self._record_upload(page_file, fingerprint)
-                    stats["uploaded"] += 1
-                    self._count("uploaded")
-                except QuotaExceededError:
-                    # Re-raise to stop the entire sync
-                    raise
-                except Exception as e:
-                    logger.error(f"Failed to upload {page_file.name}: {e}")
-                    if isinstance(e, AuthenticationRequiredError) and self.stopped_reason is None:
-                        self.stopped_reason = "sign_in"
-                    stats["failed"] += 1
-                    stats["failed_pages"].append(page_file.stem)
-                    self._count("failed")
-                    if isinstance(e, CloudSyncError) and e.transient:
-                        self._leave_for_rescan(page_file)
-
-        # Note: .content file upload is no longer needed here.
-        # Phase 1 (metadata sync) establishes page mappings via /sync/metadata endpoint.
-
-        # 7. Report results
-        if stats["failed"] > 0:
-            print(f"   ⚠️  {stats['failed']} page(s) failed to upload")
-            if stats["failed_pages"]:
-                logger.warning(f"Failed pages: {stats['failed_pages'][:5]}{'...' if len(stats['failed_pages']) > 5 else ''}")
-
-        if stats["uploaded"] > 0:
-            print(f"   ✓ Uploaded {stats['uploaded']} page(s)")
-
-        return stats
+    def _defer(self, page_files: list[Path]) -> int:
+        """Leave pages for the next rescan (not uploaded, not baselined); count them as will-retry."""
+        for page_file in page_files:
+            self._leave_for_rescan(page_file)
+        if page_files:
+            self._count("rate_limited", len(page_files))
+        return len(page_files)
 
     def _record_upload(self, page_file: Path, fingerprint: Fingerprint) -> None:
         """Record an uploaded page in the manifest; a failure here must not fail the sync."""

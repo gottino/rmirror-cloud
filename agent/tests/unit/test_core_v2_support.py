@@ -328,4 +328,8 @@ class TestInitialSyncStopReason:
         initial_sync.cloud_sync.upload_file.side_effect = AuthenticationRequiredError("again", status_code=401)
         stats = await initial_sync.run()
         assert stats["stopped_reason"] == "sign_in"
-        assert stats["failed"] == 2  # every page still counted, as before
+        # Not failed: left for the rescan after the next sign-in (will_retry)
+        assert stats["failed"] == 0
+        assert stats["rate_limited"] == 2
+        # One attempt, then it stops instead of failing every page
+        assert initial_sync.cloud_sync.upload_file.await_count == 1

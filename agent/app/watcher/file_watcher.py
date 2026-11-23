@@ -265,6 +265,33 @@ def scan_for_changes(
     return changed
 
 
+def baseline_folder(source_dir: Path, handler: ReMarkableEventHandler, manifest: UploadManifest) -> int:
+    """Record every existing file under source_dir as baseline (not uploaded) unless it has an entry.
+
+    Used when the user points the agent at another folder: like the first run for
+    an API host, the files already there must not be uploaded wholesale (that is
+    what the initial sync with its page limit is for). Blocking; run off the loop.
+    Returns the number of new baseline entries.
+    """
+    baselined = 0
+    for root, _dirs, files in os.walk(source_dir):
+        for name in files:
+            file_path = Path(root) / name
+            if handler._should_ignore_file(str(file_path)):
+                continue
+            if not handler._extract_notebook_uuid(file_path):
+                continue
+            try:
+                if manifest.get(file_path) is None and manifest.record_baseline(
+                    file_path, fingerprint_file(file_path)
+                ):
+                    baselined += 1
+            except OSError as e:
+                logger.debug(f"Skipping unreadable file during baseline: {file_path}: {e}")
+    logger.info(f"Recorded {baselined} existing file(s) of {source_dir} as baseline")
+    return baselined
+
+
 class FileWatcher:
     """
     File watcher for monitoring reMarkable Desktop app folder.

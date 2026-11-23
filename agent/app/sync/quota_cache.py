@@ -20,14 +20,20 @@ class QuotaCache:
         self._clock = clock
         self._lock = threading.Lock()
         self._data: dict | None = None
+        self._host: str | None = None
         self._fetched_at: datetime | None = None
         self._last_attempt: float | None = None
         self._stale = True
 
-    def store(self, quota_status: dict) -> None:
-        """Remember a fresh /quota/status answer."""
+    def store(self, quota_status: dict, host: str | None = None) -> None:
+        """Remember a fresh /quota/status answer, fetched from ``host``.
+
+        A snapshot for another host is None, so a refresh that finishes after the
+        user switched environment cannot show the old server's numbers.
+        """
         with self._lock:
             self._data = dict(quota_status)
+            self._host = host
             self._fetched_at = datetime.now(UTC)
             self._stale = False
 
@@ -35,6 +41,7 @@ class QuotaCache:
         """Forget everything (signed out, other environment)."""
         with self._lock:
             self._data = None
+            self._host = None
             self._fetched_at = None
             self._last_attempt = None
             self._stale = True
@@ -57,14 +64,17 @@ class QuotaCache:
                 return True
             return self._clock() - self._last_attempt >= self.REFRESH_SECONDS
 
-    def snapshot(self) -> dict | None:
-        """``{used, limit, remaining, reset_at, fetched_at}`` or None if never fetched.
+    def snapshot(self, host: str | None = None) -> dict | None:
+        """``{used, limit, remaining, reset_at, fetched_at}`` or None if never fetched
+        (or, with ``host``, fetched from another host).
 
         ``limit`` -1 means unlimited; ``remaining`` is then None.
         """
         with self._lock:
-            data, fetched_at = self._data, self._fetched_at
+            data, fetched_at, stored_host = self._data, self._fetched_at, self._host
         if data is None or fetched_at is None:
+            return None
+        if host is not None and stored_host is not None and stored_host != host:
             return None
         used = _as_int(data.get("used"), 0)
         limit = _as_int(data.get("limit"), 0)

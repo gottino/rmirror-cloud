@@ -14,6 +14,7 @@ REASON_NO_NOTEBOOKS = "no_notebooks"
 REASON_QUOTA_EXHAUSTED = "quota_exhausted"
 REASON_NOT_SIGNED_IN = "not_signed_in"
 REASON_FOLDER_UNAVAILABLE = "folder_unavailable"
+REASON_NONE_FIT = "none_fit"
 
 
 @dataclass
@@ -73,4 +74,8 @@ def suggest_first_sync(
         return Suggestion(REASON_NO_NOTEBOOKS)
     if remaining is not None and remaining <= 0:
         return Suggestion(REASON_QUOTA_EXHAUSTED)
-    return Suggestion(REASON_OK, choose_notebooks(documents, remaining, max_count))
+    chosen = choose_notebooks(documents, remaining, max_count)
+    if not chosen:
+        # Some quota left, but every notebook with pages is bigger than that
+        return Suggestion(REASON_NONE_FIT)
+    return Suggestion(REASON_OK, chosen)
