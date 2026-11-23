@@ -1227,3 +1227,55 @@ class TestBridgeTicket:
             with self._clerk():
                 client.get(path, base_url=BASE_URL)
         assert path.split("ticket=")[1] not in caplog.text
+
+
+class TestResyncForgetsUploads:
+    def _upload_all(self, config, library, uuid):
+        manifest = UploadManifest.for_config(config)
+        files = [*(library / uuid).glob("*.rm"), library / f"{uuid}.metadata", library / f"{uuid}.content"]
+        for f in files:
+            manifest.record_upload(f, fingerprint_file(f))
+        return manifest, files
+
+    def test_resync_clears_manifest_and_synced_pages(self, client, config, library, agent, backend):
+        manifest, files = self._upload_all(config, library, "diary")
+        other, _ = self._upload_all(config, library, "meeting")
+        config.sync.excluded_notebooks = ["diary"]
+        config.sync.selected_notebooks = ["meeting"]
+        watcher = MagicMock(running=True)
+        watcher.rescan = AsyncMock(return_value=0)
+        agent.file_watcher = watcher
+
+        assert post(client, "/api/v2/deleted-notebooks/diary", {"action": "resync"}).get_json() == {"ok": True}
+
+        assert all(manifest.get(f) is None for f in files)
+        assert manifest.get(next((library / "meeting").glob("*.rm"))) is not None  # others untouched
+        assert config.sync.excluded_notebooks == []
+        assert "diary" in config.sync.selected_notebooks
+        by_uuid = {nb["uuid"]: nb for nb in get(client, "/api/v2/notebooks").get_json()["notebooks"]}
+        assert by_uuid["diary"]["synced_pages"] == 0
+        assert by_uuid["meeting"]["synced_pages"] == 3
+        # Uploaded now, not at the next periodic rescan
+        deadline = time.monotonic() + 5
+        while not watcher.rescan.await_count and time.monotonic() < deadline:
+            time.sleep(0.01)
+        watcher.rescan.assert_awaited_once_with(reason="resync")
+
+    def test_dismiss_leaves_manifest_alone(self, client, config, library, agent):
+        manifest, files = self._upload_all(config, library, "diary")
+        config.sync.excluded_notebooks = ["diary"]
+        watcher = MagicMock(running=True)
+        watcher.rescan = AsyncMock(return_value=0)
+        agent.file_watcher = watcher
+        post(client, "/api/v2/deleted-notebooks/diary", {"action": "dismiss"})
+        assert all(manifest.get(f) is not None and not manifest.get(f).is_baseline for f in files)
+        assert config.sync.excluded_notebooks == ["diary"]
+        watcher.rescan.assert_not_awaited()
+
+    def test_legacy_route_forgets_too(self, config, cloud_sync, agent_loop, library, save_mock):
+        manifest, files = self._upload_all(config, library, "diary")
+        config.sync.excluded_notebooks = ["diary"]
+        legacy = create_app(config, cloud_sync, agent=None, agent_loop=agent_loop).test_client()
+        resp = legacy.post("/api/deleted-notebooks/diary/action", json={"action": "resync"}, base_url=BASE_URL)
+        assert resp.status_code == 200
+        assert all(manifest.get(f) is None for f in files)

@@ -232,6 +232,9 @@ Same data as the legacy routes, reshaped:
 `{"deleted_notebooks": [{"uuid": "…", "name": "…", "deleted_at": "<iso or null>"}]}` (empty list when signed out,
 and also when the cloud answers with an error: the list is a hint, so a cloud error is not reported).
 `POST` body `{"action": "resync" | "dismiss"}` returns `{"ok": true}`.
+`resync` takes the notebook off the excluded list, selects it (unless everything is synced), forgets its upload
+records for the current host and asks the watcher to rescan now, which uploads all its pages again (the page limit
+does not apply, as for any watcher upload); `synced_pages` reads 0 until then. `dismiss` changes nothing locally.
 
 ### `GET /api/v2/update-check`
 

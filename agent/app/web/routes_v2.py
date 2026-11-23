@@ -719,11 +719,12 @@ def register_v2_routes(app: Flask) -> None:
         if action not in ("resync", "dismiss"):
             raise ApiError("invalid_request", 400, "action must be resync or dismiss")
         cloud_sync = _require_signed_in()
-        config = _config()
-        if action == "resync" and uuid in config.sync.excluded_notebooks:
-            config.sync.excluded_notebooks.remove(uuid)
-            config.save()
+        if action == "resync":
+            shared.prepare_resync(current_app, uuid)
         _on_loop(cloud_sync.acknowledge_deleted_notebook(uuid, action), BACKEND_TIMEOUT_SECONDS)
+        if action == "resync":
+            # Upload it now rather than at the next periodic rescan
+            shared.request_rescan(current_app, "resync")
         return _ok()
 
     # -- updates ---------------------------------------------------------

@@ -256,6 +256,41 @@ def launch_initial_sync(app: Flask, job: InitialSyncJob, selected_uuids: list[st
     return job
 
 
+def prepare_resync(app: Flask, notebook_uuid: str) -> int:
+    """"Sync again" for a notebook deleted on the server (before acknowledging it).
+
+    Takes it off the excluded list, makes sure it is selected (unless everything
+    is synced), and forgets its manifest entries for the current host: otherwise
+    its pages would still count as uploaded and nothing would ever send them again.
+    Returns the number of manifest entries removed.
+    """
+    from app.sync.manifest import UploadManifest
+
+    config = app.config["AGENT_CONFIG"]
+    if notebook_uuid in config.sync.excluded_notebooks:
+        config.sync.excluded_notebooks.remove(notebook_uuid)
+    if not config.sync.sync_all_notebooks and notebook_uuid not in config.sync.selected_notebooks:
+        config.sync.selected_notebooks.append(notebook_uuid)
+    config.save()
+    manifest = app.config.get("V2_MANIFEST") or UploadManifest.for_config(config)
+    removed = manifest.forget_notebook(config.remarkable.source_directory, notebook_uuid)
+    logger.info(f"Notebook {notebook_uuid[:8]} set to sync again ({removed} manifest entries cleared)")
+    return removed
+
+
+def request_rescan(app: Flask, reason: str) -> bool:
+    """Ask the running watcher to rescan now (no wait). False if no watcher is running."""
+    agent = get_agent(app)
+    file_watcher = getattr(agent, "file_watcher", None) if agent else None
+    if file_watcher is None or not getattr(file_watcher, "running", False):
+        return False
+    try:
+        agent_loop(app).submit(file_watcher.rescan(reason=reason))
+    except AgentLoopNotRunningError:
+        return False
+    return True
+
+
 def get_agent(app: Flask) -> Any:
     return app.config.get("AGENT")
 

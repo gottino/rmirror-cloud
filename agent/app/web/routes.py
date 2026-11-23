@@ -776,7 +776,6 @@ def register_routes(app: Flask) -> None:
     @legacy_route("/api/deleted-notebooks/<uuid>/action", methods=["POST"])
     def api_deleted_notebook_action(uuid):
         """Handle re-sync or dismiss for a deleted notebook."""
-        config: Config = app.config["AGENT_CONFIG"]
         cloud_sync: CloudSync = app.config["CLOUD_SYNC"]
 
         if not cloud_sync or not cloud_sync.authenticated:
@@ -789,13 +788,14 @@ def register_routes(app: Flask) -> None:
             return jsonify({"error": "action must be 'resync' or 'dismiss'"}), 400
 
         try:
-            # If re-syncing, remove from excluded list
-            if action == "resync" and uuid in config.sync.excluded_notebooks:
-                config.sync.excluded_notebooks.remove(uuid)
-                config.save()
+            # If re-syncing: off the excluded list, and its pages count as not uploaded
+            if action == "resync":
+                shared.prepare_resync(app, uuid)
 
             # Acknowledge on server (removes tombstone)
             _on_loop(cloud_sync.acknowledge_deleted_notebook(uuid, action), BACKEND_TIMEOUT_SECONDS)
+            if action == "resync":
+                shared.request_rescan(app, "resync")
 
             return jsonify({"success": True, "action": action})
         except _LOOP_ERRORS as e:
