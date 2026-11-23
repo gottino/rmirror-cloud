@@ -25,41 +25,41 @@ from app.services.sync_queue import enabled_todo_targets, queue_todo_sync
 logger = logging.getLogger(__name__)
 
 
-# The OCR prompt asks for a page's handwritten date as the first line:
-# "**Date: dd-mm-yyyy**" (European order). Accept the usual separators and
-# a two-digit year, and only near the top of the page.
-_PAGE_DATE_RE = re.compile(
-    r"^\**\s*date\s*:\s*\**\s*(\d{1,2})[-./](\d{1,2})[-./](\d{4}|\d{2})\b",
-    re.IGNORECASE,
+# The OCR prompt asks for each handwritten date on its own line as
+# "**Date: dd-mm-yyyy**" (European order), where it appears on the page.
+# Older OCR text may have later dates as a bare date line ("20.11.2026",
+# "## 20-11-2026"). Dates inside a sentence are not date lines.
+_DATE = r"(\d{1,2})[-./](\d{1,2})[-./](\d{4}|\d{2})"
+_LABELLED_DATE_RE = re.compile(
+    r"^(?:#{1,6}\s*)?\**\s*date\s*:\s*\**\s*" + _DATE + r"\b", re.IGNORECASE
 )
-_PAGE_DATE_MAX_LINES = 5
+_BARE_DATE_RE = re.compile(r"^(?:#{1,6}\s*)?\**\s*" + _DATE + r"\s*\**$")
+
+
+def parse_date_line(line: str) -> Optional[datetime]:
+    """The date a line stands for, if the line is a date line; else None.
+
+    An impossible date (31-02-2026) gives None.
+    """
+    line = line.strip()
+    match = _LABELLED_DATE_RE.match(line) or _BARE_DATE_RE.match(line)
+    if not match:
+        return None
+    day, month, year = (int(g) for g in match.groups())
+    if year < 100:
+        year += 2000
+    try:
+        return datetime(year, month, day)
+    except ValueError:
+        return None
 
 
 def extract_page_date(text: Optional[str]) -> Optional[datetime]:
-    """The handwritten date of a page from its OCR text, or None.
-
-    Looks at the first few non-empty lines for the OCR's ``Date: dd-mm-yyyy``
-    line. An impossible date (31-02-2026) gives None.
-    """
-    if not text:
-        return None
-    seen = 0
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        match = _PAGE_DATE_RE.match(line)
-        if match:
-            day, month, year = (int(g) for g in match.groups())
-            if year < 100:
-                year += 2000
-            try:
-                return datetime(year, month, day)
-            except ValueError:
-                return None
-        seen += 1
-        if seen >= _PAGE_DATE_MAX_LINES:
-            return None
+    """The first date line of a page's OCR text, or None."""
+    for line in (text or "").splitlines():
+        date = parse_date_line(line)
+        if date is not None:
+            return date
     return None
 
 
@@ -84,6 +84,11 @@ def extract_todos_from_text(
     todos = []
     lines = text.split("\n")
 
+    # Each todo takes the nearest date line above it; todos above the first
+    # date line take the page's first date (a date at the top right is often
+    # transcribed after the first lines).
+    current_date = extract_page_date(text)
+
     # Todo patterns: (pattern, completed_status)
     todo_patterns = [
         # Markdown-style checkboxes (what Claude Vision outputs)
@@ -104,6 +109,11 @@ def extract_todos_from_text(
         if not line_stripped:
             continue
 
+        line_date = parse_date_line(line_stripped)
+        if line_date is not None:
+            current_date = line_date
+            continue
+
         # Skip lines that start with curved arrows (sub-points, not tasks)
         if line_stripped.startswith("↳") or line_stripped.startswith("- ↳"):
             continue
@@ -122,6 +132,7 @@ def extract_todos_from_text(
                         page_id=page_id,
                         confidence=1.0,  # High confidence from Claude Vision
                         completed=completed,
+                        date_extracted=current_date,
                     )
                     todos.append(todo)
                 break  # Don't match multiple patterns for same line
@@ -181,7 +192,6 @@ def process_page_todos(
     page_number = notebook_page.page_number if notebook_page else 0
     notebook = page.notebook
 
-    page_date = extract_page_date(page.ocr_text)
     new_todos = extract_todos_from_text(
         text=page.ocr_text,
         notebook_id=page.notebook_id,
@@ -232,7 +242,7 @@ def process_page_todos(
                     completed=candidate.completed,
                     confidence=candidate.confidence,
                     source_file=notebook.visible_name if notebook else "",
-                    date_extracted=page_date,
+                    date_extracted=candidate.date_extracted,
                 )
             )
             changed += 1
@@ -256,9 +266,9 @@ def process_page_todos(
         if todo.page_number != page_number:
             todo.page_number = page_number
             dirty = True
-        # A page whose date line is gone keeps the date its todos had.
-        if page_date is not None and todo.date_extracted != page_date:
-            todo.date_extracted = page_date
+        # A todo whose date line is gone keeps the date it had.
+        if candidate.date_extracted is not None and todo.date_extracted != candidate.date_extracted:
+            todo.date_extracted = candidate.date_extracted
             dirty = True
         if dirty:
             todo.updated_at = now

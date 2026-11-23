@@ -2,8 +2,9 @@
 """Fill in the written date of existing todos from their page's OCR text.
 
 Todos extracted before the page date was read have no ``date_extracted``.
-This sets it from the page's ``Date: dd-mm-yyyy`` line (the same parser the
-extraction uses) and queues the changed todos for the user's todo targets,
+This sets it from the page's date lines with the same rule as the extraction
+(the nearest date line above the todo, else the page's first date) and
+queues the changed todos for the user's todo targets,
 so Notion's "Date Written" is filled by the sync worker. Only empty dates
 are set; nothing else about a todo changes, and pages are not re-extracted.
 
@@ -27,6 +28,7 @@ from app.models.todo import Todo  # noqa: E402
 from app.processors.todo_extractor import (  # noqa: E402
     _queue_todos_for_sync,
     extract_page_date,
+    extract_todos_from_text,
 )
 
 
@@ -45,14 +47,20 @@ def backfill(db: Session, apply: bool) -> dict:
     dated_pages: list[Page] = []
     for page_id, page_todos in by_page.items():
         page = db.get(Page, page_id)
-        page_date = extract_page_date(page.ocr_text if page else None)
+        text = page.ocr_text if page else None
+        page_date = extract_page_date(text)
         if page_date is None:
             continue
+        # Date of each todo line on the page, as the extraction gives it.
+        line_dates = {
+            candidate.text: candidate.date_extracted
+            for candidate in extract_todos_from_text(text, page.notebook_id, 0, page.id)
+        }
         counts["pages_dated"] += 1
         counts["dated"] += len(page_todos)
         if apply:
             for todo in page_todos:
-                todo.date_extracted = page_date
+                todo.date_extracted = line_dates.get(todo.text) or page_date
             dated_pages.append(page)
 
     if apply and dated_pages:
