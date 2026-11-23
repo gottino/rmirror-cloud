@@ -281,7 +281,7 @@ final class LocalAPITests: XCTestCase {
         body = try lastBodyJSON()
         XCTAssertNil(body["notebook_uuids"], "omitted when nil")
         XCTAssertFalse(body.keys.contains("page_limit"), "omitted, so the saved limit is kept")
-        XCTAssertEqual(body.count, 1)
+        XCTAssertEqual(body.count, 0)
     }
 
     func testSetSelectionBody() async throws {
