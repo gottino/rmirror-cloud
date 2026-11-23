@@ -33,13 +33,18 @@ public struct SelectionDiff: Equatable, Sendable {
     public var added: [String]
     /// Newly unticked notebooks, in list order.
     public var removed: [String]
-    /// Pages that would upload for the newly ticked notebooks (pages not uploaded yet).
+    /// Pages not uploaded yet in the newly ticked notebooks only.
     public var newPages: Int
+    /// Pages "Save and sync" uploads: it syncs the whole ticked selection, so this counts the pages not
+    /// uploaded yet in every ticked notebook, including ones that were already ticked. This is the
+    /// number to show and to compare with the allowance.
+    public var pagesToUpload: Int
 
-    public init(added: [String] = [], removed: [String] = [], newPages: Int = 0) {
+    public init(added: [String] = [], removed: [String] = [], newPages: Int = 0, pagesToUpload: Int = 0) {
         self.added = added
         self.removed = removed
         self.newPages = newPages
+        self.pagesToUpload = pagesToUpload
     }
 
     public var isEmpty: Bool { added.isEmpty && removed.isEmpty }
@@ -136,7 +141,7 @@ public enum NotebookList {
         return .partly(synced: synced, total: total)
     }
 
-    /// Pages of this notebook not uploaded yet.
+    /// Pages of this notebook not uploaded yet. `pageCount` is already capped by the saved page limit.
     public static func pagesToUpload(_ notebook: NotebookEntry) -> Int {
         max(0, notebook.pageCount - max(0, notebook.syncedPages))
     }
@@ -153,6 +158,7 @@ public enum NotebookList {
         for notebook in notebooks {
             let wasSelected = saved.contains(notebook.uuid)
             let isSelected = draft.contains(notebook.uuid)
+            if isSelected { result.pagesToUpload += pagesToUpload(notebook) }
             if isSelected && !wasSelected {
                 result.added.append(notebook.uuid)
                 result.newPages += pagesToUpload(notebook)

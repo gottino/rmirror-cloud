@@ -31,10 +31,16 @@ final class MainCopyTests: XCTestCase {
     }
 
     func testChangeSummary() {
-        XCTAssertEqual(MainCopy.changeSummary(added: 2, removed: 0, newPages: 31), "2 notebooks added · 31 new pages")
-        XCTAssertEqual(MainCopy.changeSummary(added: 0, removed: 1, newPages: 0), "1 notebook removed")
-        XCTAssertEqual(MainCopy.changeSummary(added: 1, removed: 2, newPages: 1), "1 notebook added · 2 removed · 1 new page")
-        XCTAssertEqual(MainCopy.changeSummary(added: 1, removed: 0, newPages: 0), "1 notebook added")
+        XCTAssertEqual(MainCopy.changeSummary(added: 2, removed: 0, pagesToUpload: 31), "2 notebooks added · 31 pages to upload")
+        XCTAssertEqual(MainCopy.changeSummary(added: 0, removed: 1, pagesToUpload: 0), "1 notebook removed")
+        XCTAssertEqual(MainCopy.changeSummary(added: 0, removed: 1, pagesToUpload: 9), "1 notebook removed")
+        XCTAssertEqual(MainCopy.changeSummary(added: 1, removed: 2, pagesToUpload: 1), "1 notebook added · 2 removed · 1 page to upload")
+        XCTAssertEqual(MainCopy.changeSummary(added: 1, removed: 0, pagesToUpload: 0), "1 notebook added")
+    }
+
+    func testSyncAgainSaysWhatItUploads() {
+        XCTAssertEqual(MainCopy.syncAgainUploads(pages: 12), "Sync again uploads 12 pages.")
+        XCTAssertEqual(MainCopy.syncAgainUploads(pages: nil), "Sync again uploads the whole notebook again.")
     }
 
     func testAllowanceBannerFollowsWhatTheCoreReports() {

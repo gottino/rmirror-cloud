@@ -70,7 +70,8 @@ struct MainNotebookSection: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     if !deleted.isEmpty && !browser.isSearching {
-                        MainDeletedSection(notebooks: deleted, resolving: resolvingDeleted, onResolve: onResolveDeleted)
+                        MainDeletedSection(notebooks: deleted, pageCounts: browser.pageCounts,
+                                           resolving: resolvingDeleted, onResolve: onResolveDeleted)
                             .padding(.horizontal, Theme.Space.l)
                             .padding(.vertical, Theme.Space.m)
                     }

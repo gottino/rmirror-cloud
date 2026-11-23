@@ -101,9 +101,10 @@ struct FirstSyncView: View {
                         .foregroundStyle(Theme.warning)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if noPagesLeft {
-                    if let reset = resetLine {
-                        Text(reset).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
-                    }
+                    Text(OnboardingCopy.noPagesLeftUploadNote(resetDay: store.state?.quota.flatMap { SharedCopy.resetDay($0) }))
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text(SharedCopy.allowanceUse(pages: selectedPages, remaining: remaining))
                         .font(Theme.Font.caption)
@@ -133,7 +134,7 @@ struct FirstSyncView: View {
     }
 
     private func buttonTitle(noPagesLeft: Bool) -> String {
-        if noPagesLeft { return OnboardingCopy.uploadNowButton(notebooks: selection.count) }
+        if noPagesLeft { return OnboardingCopy.uploadNowButton(notebooks: selection.count, pages: selectedPages) }
         return OnboardingCopy.syncButton(notebooks: selection.count, pages: selectedPages)
     }
 

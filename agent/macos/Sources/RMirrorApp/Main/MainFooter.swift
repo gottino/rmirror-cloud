@@ -13,16 +13,16 @@ struct MainFooter: View {
     var body: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(MainCopy.changeSummary(added: diff.added.count, removed: diff.removed.count, newPages: diff.newPages))
+                Text(MainCopy.changeSummary(added: diff.added.count, removed: diff.removed.count, pagesToUpload: pages))
                     .font(Theme.Font.bodyStrong)
                     .monospacedDigit()
                 if showsAllowanceUse {
-                    Text(SharedCopy.allowanceUse(pages: diff.newPages, remaining: remaining))
+                    Text(SharedCopy.allowanceUse(pages: pages, remaining: remaining))
                         .font(Theme.Font.caption)
                         .foregroundStyle(Theme.textSecondary)
                         .monospacedDigit()
                 }
-                if let remaining, NotebookList.exceedsAllowance(pages: diff.newPages, quota: quota) {
+                if let remaining, !diff.onlyRemoves, NotebookList.exceedsAllowance(pages: pages, quota: quota) {
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Image(systemName: "exclamationmark.triangle")
                             .accessibilityHidden(true)
@@ -68,8 +68,11 @@ struct MainFooter: View {
     }
 
     private var remaining: Int? { NotebookList.remainingPages(quota) }
+    /// What "Save and sync" uploads: every ticked notebook's pages not uploaded yet. Nothing for a
+    /// change that only unticks (that is saved without a sync).
+    private var pages: Int { diff.onlyRemoves ? 0 : diff.pagesToUpload }
     /// "Uses 31 of your 196 remaining pages", unless it is more than what is left: then the warning says it instead.
     private var showsAllowanceUse: Bool {
-        diff.newPages > 0 && remaining != nil && !NotebookList.exceedsAllowance(pages: diff.newPages, quota: quota)
+        pages > 0 && remaining != nil && !NotebookList.exceedsAllowance(pages: pages, quota: quota)
     }
 }

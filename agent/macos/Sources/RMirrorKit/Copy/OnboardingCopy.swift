@@ -125,9 +125,15 @@ public enum OnboardingCopy {
     public static let noPagesLeftMessage = "Your notebooks can still upload now. They are turned into text when your pages reset."
     public static let noPagesLeftNothingToUpload = "When your pages reset, rMirror can turn your notebooks into text again. This screen moves on by itself."
 
-    /// "Upload 3 notebooks now"
-    public static func uploadNowButton(notebooks: Int) -> String {
-        "Upload \(SharedCopy.notebooks(notebooks)) now"
+    /// "Upload 3 notebooks (23 pages)": with no pages left the upload still happens, so the count is shown.
+    public static func uploadNowButton(notebooks: Int, pages: Int) -> String {
+        "Upload \(SharedCopy.notebooks(notebooks)) (\(SharedCopy.pages(pages)))"
+    }
+
+    /// Under that button: what happens to those pages. `resetDay` is "1 December" when known.
+    public static func noPagesLeftUploadNote(resetDay: String?) -> String {
+        let reset = resetDay.map { "after your pages reset on \($0)" } ?? "after your pages reset"
+        return "These pages are turned into text \(reset), and they count against next month's pages."
     }
 
     // MARK: First sync: progress
@@ -166,7 +172,8 @@ public enum OnboardingCopy {
             loadingSuggestion, preparing,
             noNotebooksTitle, noNotebooksMessage, waitingForNotebooks,
             noPagesLeftTitle, noPagesLeftMessage, noPagesLeftNothingToUpload,
-            uploadNowButton(notebooks: 1), uploadNowButton(notebooks: 3),
+            uploadNowButton(notebooks: 1, pages: 1), uploadNowButton(notebooks: 3, pages: 23),
+            noPagesLeftUploadNote(resetDay: "1 December"), noPagesLeftUploadNote(resetDay: nil),
             progressTitle, progressReassurance,
             openOnWeb, whatHappensNext,
         ] + remarkableMissingSteps

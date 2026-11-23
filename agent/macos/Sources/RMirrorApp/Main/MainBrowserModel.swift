@@ -16,6 +16,8 @@ final class MainBrowserModel: ObservableObject {
     private(set) var notebooks: [NotebookEntry] = []
     private(set) var saved: Set<String> = []
     private(set) var visibleIDs: [String] = []
+    /// Page count per notebook, for "Sync again" on notebooks removed on the web.
+    private(set) var pageCounts: [String: Int] = [:]
     private var index = NotebookIndex([])
 
     var hasNotebooks: Bool { !notebooks.isEmpty }
@@ -34,6 +36,7 @@ final class MainBrowserModel: ObservableObject {
         saved = NotebookList.savedSelection(newNotebooks)
         draft = hadEdits ? NotebookList.reconciling(draft: draft, with: newNotebooks) : saved
         index = NotebookIndex(newNotebooks)
+        pageCounts = Dictionary(newNotebooks.map { ($0.uuid, $0.pageCount) }, uniquingKeysWith: { first, _ in first })
         regroup()
         recomputeDiff()
     }

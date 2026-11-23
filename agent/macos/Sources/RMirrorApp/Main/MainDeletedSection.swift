@@ -4,6 +4,9 @@ import SwiftUI
 /// Notebooks the user deleted on the website. Each one needs a decision: upload it again, or leave it out.
 struct MainDeletedSection: View {
     let notebooks: [DeletedNotebook]
+    /// Page counts of notebooks the core still lists, by identifier. A notebook removed on the web is
+    /// usually not among them; then "Sync again" says it uploads the whole notebook.
+    let pageCounts: [String: Int]
     let resolving: Set<String>
     let onResolve: (String, DeletedNotebookAction) -> Void
 
@@ -30,6 +33,10 @@ struct MainDeletedSection: View {
                                 .font(Theme.Font.caption)
                                 .foregroundStyle(Theme.textSecondary)
                         }
+                        Text(MainCopy.syncAgainUploads(pages: pageCounts[notebook.uuid]))
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .monospacedDigit()
                     }
                     .accessibilityElement(children: .combine)
                     Spacer(minLength: Theme.Space.m)

@@ -104,6 +104,8 @@ final class NotebookListTests: XCTestCase {
         XCTAssertEqual(diff.added, ["b", "c"])
         XCTAssertEqual(diff.removed, ["d"])
         XCTAssertEqual(diff.newPages, 31)
+        // "a" and "d" are fully uploaded, so the whole selection uploads the same 31 pages.
+        XCTAssertEqual(diff.pagesToUpload, 31)
         XCTAssertFalse(diff.isEmpty)
         XCTAssertFalse(diff.onlyRemoves)
 
@@ -112,6 +114,32 @@ final class NotebookListTests: XCTestCase {
         XCTAssertEqual(removalOnly.newPages, 0)
         XCTAssertTrue(NotebookList.diff(list, saved: saved, draft: saved).isEmpty)
         XCTAssertEqual(NotebookList.orderedSelection(list, draft: ["c", "a"]), ["a", "c"])
+    }
+
+    /// "Save and sync" syncs the whole selection: pages not uploaded yet in notebooks that were already
+    /// ticked upload too, so they count towards the footer and the allowance.
+    func testPagesToUploadCoverTheWholeSelection() {
+        let list = [
+            nb("old-partly", "Already ticked, partly synced", pages: 40, synced: 15, selected: true),
+            nb("old-done", "Already ticked, complete", pages: 12, synced: 12, selected: true),
+            nb("new-1", "New one", pages: 4, synced: 0),
+            nb("new-2", "New two", pages: 2, synced: 0),
+            nb("unticked", "Stays unticked", pages: 99, synced: 0),
+        ]
+        let saved = NotebookList.savedSelection(list)
+        let diff = NotebookList.diff(list, saved: saved, draft: saved.union(["new-1", "new-2"]))
+        XCTAssertEqual(diff.added, ["new-1", "new-2"])
+        XCTAssertEqual(diff.newPages, 6)
+        XCTAssertEqual(diff.pagesToUpload, 31, "25 left in the partly synced notebook + 6 new")
+        XCTAssertEqual(MainCopy.changeSummary(added: diff.added.count, removed: diff.removed.count, pagesToUpload: diff.pagesToUpload),
+                       "2 notebooks added · 31 pages to upload")
+        let quota = QuotaInfo(used: 180, limit: 200, remaining: 20)
+        XCTAssertTrue(NotebookList.exceedsAllowance(pages: diff.pagesToUpload, quota: quota))
+        XCTAssertFalse(NotebookList.exceedsAllowance(pages: diff.newPages, quota: quota))
+
+        // Unticking the partly synced one removes its pages from the count.
+        let swapped = NotebookList.diff(list, saved: saved, draft: ["old-done", "new-1"])
+        XCTAssertEqual(swapped.pagesToUpload, 4)
     }
 
     func testSelectAllAndNoneOnlyTouchVisibleRows() {

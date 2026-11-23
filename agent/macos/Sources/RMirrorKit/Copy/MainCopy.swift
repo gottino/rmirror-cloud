@@ -91,16 +91,18 @@ public enum MainCopy {
 
     // MARK: Pending change
 
-    /// "2 notebooks added · 31 new pages", "1 notebook removed", "1 notebook added · 1 removed · 4 new pages"
-    public static func changeSummary(added: Int, removed: Int, newPages: Int) -> String {
+    /// "2 notebooks added · 31 pages to upload", "1 notebook removed", "1 notebook added · 2 removed · 4 pages to upload".
+    /// `pagesToUpload` counts every ticked notebook's pages not uploaded yet (the sync covers the whole
+    /// selection), so it can include pages of notebooks that were ticked before.
+    public static func changeSummary(added: Int, removed: Int, pagesToUpload: Int) -> String {
         var parts: [String] = []
         if added > 0 { parts.append("\(SharedCopy.notebooks(added)) added") }
         if removed > 0 { parts.append(added > 0 ? "\(removed) removed" : "\(SharedCopy.notebooks(removed)) removed") }
-        if added > 0 && newPages > 0 { parts.append("\(newPages) new \(newPages == 1 ? "page" : "pages")") }
+        if added > 0 && pagesToUpload > 0 { parts.append("\(SharedCopy.pages(pagesToUpload)) to upload") }
         return parts.joined(separator: " · ")
     }
 
-    /// Shown, without blocking, when the new pages are more than the pages left this month.
+    /// Shown, without blocking, when the pages to upload are more than the pages left this month.
     public static func overAllowance(remaining: Int) -> String {
         "That's more than the \(SharedCopy.pages(remaining)) you have left this month. The rest is turned into text after your pages reset."
     }
@@ -117,6 +119,11 @@ public enum MainCopy {
     public static let deletedTitle = "Removed on the web"
     public static let deletedBody = "You deleted these notebooks on the rMirror website. Sync one again to bring it back, or keep it removed and rMirror leaves it alone."
     public static let syncAgain = "Sync again"
+    /// Under a notebook removed on the web: what "Sync again" uploads.
+    public static func syncAgainUploads(pages: Int?) -> String {
+        guard let pages else { return "Sync again uploads the whole notebook again." }
+        return "Sync again uploads \(SharedCopy.pages(pages))."
+    }
     public static let keepRemoved = "Keep removed"
     public static func deletedWhen(_ relative: String) -> String { "Removed \(relative)" }
 
@@ -139,11 +146,12 @@ public enum MainCopy {
             rowAccessibilityValue(folder: "Work / 2026", indicator: syncIndicator(.complete(total: 12))),
             rowAccessibilityHint,
             loading, emptyTitle, emptyBody, noMatches("garden"), noMatchesBody,
-            changeSummary(added: 2, removed: 0, newPages: 31), changeSummary(added: 0, removed: 1, newPages: 0),
-            changeSummary(added: 1, removed: 2, newPages: 1),
+            changeSummary(added: 2, removed: 0, pagesToUpload: 31), changeSummary(added: 0, removed: 1, pagesToUpload: 0),
+            changeSummary(added: 1, removed: 2, pagesToUpload: 1),
             overAllowance(remaining: 12), overAllowance(remaining: 1),
             removalNote, cancel, saveAndSync, save, saving, waitForSync,
             deletedTitle, deletedBody, syncAgain, keepRemoved, deletedWhen("yesterday"),
+            syncAgainUploads(pages: 12), syncAgainUploads(pages: 1), syncAgainUploads(pages: nil),
         ] + allowanceExhaustedLines(uploadsPaused: true, resetDay: "1 December")
           + allowanceExhaustedLines(uploadsPaused: true, resetDay: nil)
           + allowanceExhaustedLines(uploadsPaused: false, resetDay: "1 December")

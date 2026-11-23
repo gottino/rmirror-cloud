@@ -7,6 +7,12 @@ final class OnboardingCopyTests: XCTestCase {
         XCTAssertEqual(OnboardingCopy.syncButton(notebooks: 3, pages: 23), "Sync 3 notebooks (23 pages)")
     }
 
+    func testNoPagesLeftButtonShowsThePages() {
+        XCTAssertEqual(OnboardingCopy.uploadNowButton(notebooks: 3, pages: 23), "Upload 3 notebooks (23 pages)")
+        XCTAssertEqual(OnboardingCopy.noPagesLeftUploadNote(resetDay: "1 December"),
+                       "These pages are turned into text after your pages reset on 1 December, and they count against next month's pages.")
+    }
+
     func testOverAllowanceMessage() {
         XCTAssertEqual(OnboardingCopy.overAllowance(remaining: 12),
                        "That's more than the 12 pages you have left this month. Untick a notebook.")
