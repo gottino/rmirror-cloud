@@ -45,6 +45,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in self?.windows.show(.settings) }
         }
 
+        // Automatic updates (inactive until the app is built with a feed URL and public key).
+        Updater.shared.setPresenter { [weak self] in self?.windows.show(.main) }
+        Updater.shared.start()
+
         startCore()
 
         // Bring the window forward by itself whenever the user has something to do:

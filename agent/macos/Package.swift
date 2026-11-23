@@ -8,11 +8,17 @@ let package = Package(
         .library(name: "RMirrorKit", targets: ["RMirrorKit"]),
         .executable(name: "RMirrorApp", targets: ["RMirrorApp"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.1"),
+    ],
     targets: [
         // No UI. Local API client, core supervisor, app state, user-facing copy.
         .target(name: "RMirrorKit", path: "Sources/RMirrorKit"),
         // AppKit lifecycle hosting SwiftUI views.
-        .executableTarget(name: "RMirrorApp", dependencies: ["RMirrorKit"], path: "Sources/RMirrorApp"),
+        .executableTarget(
+            name: "RMirrorApp",
+            dependencies: ["RMirrorKit", .product(name: "Sparkle", package: "Sparkle")],
+            path: "Sources/RMirrorApp"),
         .testTarget(name: "RMirrorKitTests", dependencies: ["RMirrorKit"], path: "Tests/RMirrorKitTests"),
     ],
     swiftLanguageVersions: [.v5]
