@@ -15,6 +15,7 @@ Key features:
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
 
@@ -32,7 +33,7 @@ class TodoCandidate:
     confidence: float = 1.0
     bounding_box: Optional[Dict] = None  # {x, y, width, height}
     existing_id: Optional[int] = None  # If this matches an existing todo
-    date_extracted: Optional[str] = None
+    date_extracted: Optional[datetime] = None  # date line above the todo
     completed: bool = False
 
 
@@ -268,7 +269,7 @@ def create_todo_candidate(
     page_id: Optional[int] = None,
     confidence: float = 1.0,
     bounding_box: Optional[Dict] = None,
-    date_extracted: Optional[str] = None,
+    date_extracted: Optional[datetime] = None,
     completed: bool = False,
 ) -> TodoCandidate:
     """Helper function to create TodoCandidate from extraction results."""

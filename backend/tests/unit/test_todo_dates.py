@@ -1,8 +1,9 @@
 """Todos carry the date written on their page.
 
-The OCR puts a page's handwritten date first ("**Date: dd-mm-yyyy**"). Todo
-extraction stores it as ``todos.date_extracted`` and the todo targets get it
-(Notion: "Date Written"). A todo whose page date appears or changes is
+The OCR writes each handwritten date as a line "**Date: dd-mm-yyyy**" where
+it appears. Each todo takes the nearest date line above it (todos above the
+first one take the page's first date); extraction stores it as
+``todos.date_extracted`` and the todo targets get it (Notion: "Date Written"). A todo whose page date appears or changes is
 synced again; todos without a date keep their sync fingerprint.
 """
 
@@ -13,7 +14,7 @@ import pytest
 
 from app.models.page import Page
 from app.models.sync_record import SyncQueue
-from app.processors.todo_extractor import extract_page_date
+from app.processors.todo_extractor import extract_page_date, extract_todos_from_text
 from app.services.fingerprinting import fingerprint_todo
 from scripts.backfill_todo_dates import backfill
 from tests.test_config import test_app  # noqa: F401 - fixture
@@ -35,13 +36,40 @@ from tests.unit.test_todo_pipeline import (  # noqa: F401 - fixture
         ("# Errands\n**Date: 01-02-2026**", datetime(2026, 2, 1)),
         ("- [ ] Buy milk", None),
         ("**Date: 31-02-2026**", None),  # impossible date
-        ("a\nb\nc\nd\ne\nDate: 01-02-2026", None),  # too far down the page
+        ("a\nb\nc\nd\ne\nDate: 01-02-2026", datetime(2026, 2, 1)),  # anywhere on the page
+        ("notes\n## 20.11.2026\n- [ ] x", datetime(2026, 11, 20)),  # bare date line
+        ("20.11.2026 standup notes", None),  # a date with text is not a date line
         ("Call about the date: 12-12-2026 meeting", None),  # not a date line
         (None, None),
     ],
 )
 def test_extract_page_date(text, expected):
     assert extract_page_date(text) == expected
+
+
+def test_each_todo_takes_the_nearest_date_above_it():
+    text = (
+        "- [ ] Before any date\n"
+        "**Date: 18-11-2026**\n---\n"
+        "- [ ] Monday task\n"
+        "notes\n"
+        "**Date: 20-11-2026**\n"
+        "- [x] Wednesday task\n"
+        "22.11.2026\n"
+        "- [ ] Friday task"
+    )
+    dates = {c.text: c.date_extracted for c in extract_todos_from_text(text, 1, 1)}
+    assert dates == {
+        "Before any date": datetime(2026, 11, 18),  # the page's first date
+        "Monday task": datetime(2026, 11, 18),
+        "Wednesday task": datetime(2026, 11, 20),
+        "Friday task": datetime(2026, 11, 22),
+    }
+
+
+def test_page_without_dates_gives_todos_no_date():
+    [todo] = extract_todos_from_text("- [ ] Buy milk", 1, 1)
+    assert todo.date_extracted is None
 
 
 def test_fingerprint_unchanged_without_a_date():
@@ -108,8 +136,10 @@ async def test_backfill_sets_missing_dates_and_queues_them(db, api):  # noqa: F8
     fake = FakeTodoist()
     # As before this change: the page date was not read, todos stored and
     # synced without it.
-    with patch("app.processors.todo_extractor.extract_page_date", return_value=None):
-        upload("**Date: 20-11-2026**\n- [ ] Buy milk\n- [ ] Call Bob")
+    with patch("app.processors.todo_extractor.parse_date_line", return_value=None), patch(
+        "app.processors.todo_extractor.extract_page_date", return_value=None
+    ):
+        upload("**Date: 20-11-2026**\n- [ ] Buy milk\n**Date: 21-11-2026**\n- [ ] Call Bob")
     await _run_worker(db, fake)
     assert all(t.date_extracted is None for t in _todos(db))
 
@@ -119,9 +149,12 @@ async def test_backfill_sets_missing_dates_and_queues_them(db, api):  # noqa: F8
 
     applied = backfill(db, apply=True)
     assert applied["dated"] == 2
-    assert {t.date_extracted for t in _todos(db)} == {datetime(2026, 11, 20)}
+    assert {t.text: t.date_extracted for t in _todos(db)} == {
+        "Buy milk": datetime(2026, 11, 20),
+        "Call Bob": datetime(2026, 11, 21),
+    }
     await _run_worker(db, fake)
-    assert sorted(data["date_extracted"] for _, data in fake.updated) == ["2026-11-20"] * 2
+    assert sorted(data["date_extracted"] for _, data in fake.updated) == ["2026-11-20", "2026-11-21"]
 
     # Running it again finds nothing to do.
     assert backfill(db, apply=True)["todos_without_date"] == 0
