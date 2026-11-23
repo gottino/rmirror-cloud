@@ -4,6 +4,7 @@ Generates hashes and signatures for content to detect changes and prevent duplic
 """
 
 import hashlib
+from datetime import date, datetime
 from typing import Optional
 
 
@@ -64,11 +65,16 @@ def fingerprint_page(
     return generate_content_hash(content)
 
 
+def _as_date(value: date | datetime) -> date:
+    return value.date() if isinstance(value, datetime) else value
+
+
 def fingerprint_todo(
     todo_text: str,
     completed: bool,
     notebook_uuid: Optional[str],
     page_number: Optional[int] = None,
+    date_written: Optional[date | datetime] = None,
 ) -> str:
     """Content hash of what a todo target shows for a todo.
 
@@ -90,5 +96,8 @@ def fingerprint_todo(
             f"notebook:{notebook_uuid or ''}",
             f"page:{'' if page_number is None else page_number}",
         ]
+        # Only when known, so todos without a written date keep their hash
+        # (and are not synced again just because this field exists).
+        + ([f"date:{_as_date(date_written).isoformat()}"] if date_written else [])
     )
     return generate_content_hash(content)

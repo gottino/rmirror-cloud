@@ -1167,7 +1167,9 @@ class SyncWorker:
             db.commit()
             return
 
-        current_hash = fingerprint_todo(todo.text, todo.completed, notebook_uuid, todo.page_number)
+        current_hash = fingerprint_todo(
+            todo.text, todo.completed, notebook_uuid, todo.page_number, todo.date_extracted
+        )
 
         # Check for existing sync record (update vs create)
         existing_record = (
@@ -1205,7 +1207,8 @@ class SyncWorker:
             'notebook_name': notebook.visible_name if notebook else 'Unknown',
             'page_number': todo.page_number,
             'confidence': todo.confidence,
-            'date_extracted': todo.date_extracted.isoformat() if todo.date_extracted else None,
+            # Date only: the page's handwritten date has no time of day.
+            'date_extracted': todo.date_extracted.date().isoformat() if todo.date_extracted else None,
         }
         if existing_record:
             # Completed state the target was last given (unknown: created open).
@@ -1239,7 +1242,7 @@ class SyncWorker:
                     item_type='todo',
                     item_id=str(todo.id),
                     content_hash=fingerprint_todo(
-                        todo.text, False, notebook_uuid, todo.page_number
+                        todo.text, False, notebook_uuid, todo.page_number, todo.date_extracted
                     ),
                     external_id=result.target_id,
                     status='success',
