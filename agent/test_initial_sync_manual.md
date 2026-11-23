@@ -13,7 +13,7 @@ The initial sync feature allows you to upload all notebooks when the agent first
    Open http://localhost:5555 in your browser
 
 3. **Authenticate**:
-   - Click "Sign in with Clerk" or use password auth
+   - Click "Sign in" (browser sign-in through the dashboard; password sign-in no longer exists)
    - The agent will authenticate with the backend
 
 4. **Trigger initial sync via API**:

@@ -129,9 +129,9 @@ Edit `~/.config/rmirror/config.yaml`:
 ```yaml
 # rMirror Cloud API
 api:
-  url: "https://rmirror.cloud/v1"  # or http://localhost:8000/v1 for dev
-  email: "your@email.com"
-  password: "your-password"
+  url: "https://rmirror.io/api/v1"  # or http://localhost:8000/v1 for dev
+  # No credentials here: sign in through the web UI (http://localhost:5555);
+  # the sign-in is kept in the macOS Keychain
 
 # reMarkable Desktop app sync folder
 remarkable:

@@ -85,8 +85,11 @@ poetry run python -m app.main
 RMIRROR_APP_TOKEN=<64 hex chars> poetry run python -m app.main --headless
 ```
 - Contract: `docs/local-api.md` (process rules, `/api/v2/*`), decisions: `docs/native-app-architecture.md`
-- Never imports rumps, never opens a browser; binds `127.0.0.1:<web.port>` itself (`Agent.bind_web_server`, threaded werkzeug) and prints `RMIRROR_CORE_READY port=<port> api=2` once listening
-- Exit codes: 0 clean (SIGTERM, SIGINT or stdin EOF = the app is gone), 3 port in use, 4 missing/short `RMIRROR_APP_TOKEN`, 1 anything else
+- Never imports rumps, never opens a browser; binds `127.0.0.1:<web.port>` and `[::1]:<web.port>` itself (`Agent.bind_web_server`, threaded werkzeug), prints `RMIRROR_CORE_READY port=<port> api=2` once listening, then nothing more on stdout
+- Serves only `/health`, `/auth/bridge`, `/auth/callback`, `/auth/done` and the token-guarded `/api/v2/*` (legacy routes are not registered: they take no token)
+- Exit codes: 0 clean (SIGTERM, SIGINT or stdin EOF = the app is gone; also no parent at launch), 3 port in use (either address), 4 missing/short `RMIRROR_APP_TOKEN`, 1 anything else
+- `Agent.auth_state` (checking / signed_in / signed_out / offline) with a background retry (5 s doubling to 60 s) when the cloud cannot be reached at launch
+- Changing the folder through v2 (`Agent.change_source_directory`) baselines the new folder's files before the watcher runs on it
 - Keeps a quota cache (`app/sync/quota_cache.py`) refreshed on the agent loop (sign-in, after upload batches, every 5 min) so `GET /api/v2/state` never calls the cloud
 - Built by `rmirror-core.spec` (onedir console executable `rmirror-core`, no rumps, no `app/tray`); `rmirror.spec` still builds the legacy menu-bar app
 - Manual runs: use a temp `RMIRROR_CONFIG_PATH`, a non-default port, `HOME=<temp dir>` (logs go to `~/.config/rmirror`) and `PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring` so the real keychain sign-in is not used
@@ -129,6 +132,8 @@ Flask web server for configuration:
 - Clerk sign-in flow (`/auth/bridge`, `/auth/callback`) for backend authentication; in headless mode a successful callback renders `auth_headless.html` (opens `rmirror://signed-in`) instead of redirecting to `/`
 - Runs in background thread (non-blocking)
 - `routes.py`: legacy page and `/api/*` routes; `routes_v2.py`: local API v2 for the native app (`X-RMirror-App-Token` required when an app token is set); `shared.py`: state and helpers both use (initial-sync job, loop helpers, environment presets)
+- Keychain account / manifest namespace: `config.keychain_account_for_url` (bare host for https:443 and http loopback, `host:port` otherwise)
+- Initial sync: rate-limited pages and pages not reached after a sign-in stop are left for the next rescan (`_defer`), counted as `rate_limited`; notebooks in `excluded_notebooks` are skipped
 - Password sign-in (`POST /auth/login`) is gone (issue #47); old `email`/`password`/`use_clerk_auth` config keys are ignored and no longer saved
 
 ### 5. Menu Bar App (`app/tray/`)
