@@ -60,6 +60,7 @@ struct OnboardingSuggestedList: View {
 struct OnboardingAllNotebooksList: View {
     let notebooks: [NotebookEntry]
     @Binding var query: String
+    var searchFocused: FocusState<Bool>.Binding
     let isOn: (String) -> Binding<Bool>
 
     static let listHeight: CGFloat = 230
@@ -79,6 +80,8 @@ struct OnboardingAllNotebooksList: View {
                 .textFieldStyle(.roundedBorder)
                 .font(Theme.Font.body)
                 .accessibilityLabel(OnboardingCopy.searchPrompt)
+                .focused(searchFocused)
+                .onExitCommand { query = "" }
 
             ScrollView {
                 LazyVStack(spacing: 0) {

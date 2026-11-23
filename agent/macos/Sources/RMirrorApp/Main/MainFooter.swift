@@ -7,6 +7,9 @@ struct MainFooter: View {
     let quota: QuotaInfo?
     let isSaving: Bool
     let isSyncRunning: Bool
+    /// False while the search field has focus: Return must not start an upload and Esc must only
+    /// clear the search, so the buttons give up their Return / Esc shortcuts meanwhile.
+    var takesReturnAndEscape = true
     let onCancel: () -> Void
     let onSave: () -> Void
 
@@ -49,7 +52,7 @@ struct MainFooter: View {
 
             Button(MainCopy.cancel, action: onCancel)
                 .buttonStyle(.rmSecondary)
-                .keyboardShortcut(.cancelAction)
+                .keyboardShortcut(takesReturnAndEscape ? .cancelAction : nil)
                 .disabled(isSaving)
             Button(action: onSave) {
                 HStack(spacing: 6) {
@@ -58,7 +61,7 @@ struct MainFooter: View {
                 }
             }
             .buttonStyle(.rmPrimary)
-            .keyboardShortcut(.defaultAction)
+            .keyboardShortcut(takesReturnAndEscape ? .defaultAction : nil)
             .disabled(isSaving || (isSyncRunning && !diff.onlyRemoves))
         }
         .padding(.horizontal, Theme.Space.l)

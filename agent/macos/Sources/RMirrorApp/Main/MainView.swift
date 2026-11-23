@@ -12,6 +12,8 @@ struct MainView: View {
     @State private var lastSyncState: SyncState?
     @State private var isSaving = false
     @State private var resolvingDeleted: Set<String> = []
+    /// The notebook search field has keyboard focus: Return and Esc then belong to it, not to the footer.
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,6 +24,7 @@ struct MainView: View {
             Rectangle().fill(Theme.border).frame(height: 1)
             MainNotebookSection(
                 browser: browser,
+                searchFocused: $searchFocused,
                 loaded: store.notebooksLoaded,
                 deleted: store.deletedNotebooks,
                 resolvingDeleted: resolvingDeleted,
@@ -34,6 +37,7 @@ struct MainView: View {
                     quota: store.state?.quota,
                     isSaving: isSaving,
                     isSyncRunning: isSyncRunning,
+                    takesReturnAndEscape: WindowRules.defaultButtonsTakeKeys(searchFieldFocused: searchFocused),
                     onCancel: { browser.cancel() },
                     onSave: { Task { await save() } }
                 )

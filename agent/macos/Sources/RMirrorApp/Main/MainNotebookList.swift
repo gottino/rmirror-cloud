@@ -5,12 +5,12 @@ import SwiftUI
 /// Rows are built lazily, so a library of thousands of notebooks stays quick.
 struct MainNotebookSection: View {
     @ObservedObject var browser: MainBrowserModel
+    /// Owned by `MainView`, which also hands it to the footer (see `WindowRules.defaultButtonsTakeKeys`).
+    var searchFocused: FocusState<Bool>.Binding
     let loaded: Bool
     let deleted: [DeletedNotebook]
     let resolvingDeleted: Set<String>
     let onResolveDeleted: (String, DeletedNotebookAction) -> Void
-
-    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,7 +29,7 @@ struct MainNotebookSection: View {
             HStack(spacing: Theme.Space.m) {
                 Text(MainCopy.listTitle).font(Theme.Font.heading)
                 Spacer(minLength: Theme.Space.m)
-                MainSearchField(text: $browser.query, focused: $searchFocused)
+                MainSearchField(text: $browser.query, focused: searchFocused)
                     .frame(maxWidth: 260)
             }
             HStack(spacing: Theme.Space.m) {
@@ -53,7 +53,7 @@ struct MainNotebookSection: View {
         }
         .background(
             // Cmd-F focuses the search field.
-            Button("") { searchFocused = true }
+            Button("") { searchFocused.wrappedValue = true }
                 .keyboardShortcut("f", modifiers: .command)
                 .opacity(0)
                 .accessibilityHidden(true)
@@ -113,6 +113,7 @@ struct MainSearchField: View {
                 .textFieldStyle(.plain)
                 .font(Theme.Font.body)
                 .focused(focused)
+                // Esc clears the search; the footer's Cancel gives up Esc while this field has focus.
                 .onExitCommand { text = "" }
             if !text.isEmpty {
                 Button {

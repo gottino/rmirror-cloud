@@ -12,6 +12,8 @@ struct FirstSyncView: View {
     @State private var seededFrom: [String]?
     @State private var choosing = false
     @State private var query = ""
+    /// The search field has keyboard focus: Return then must not start the upload.
+    @FocusState private var searchFocused: Bool
 
     // While the suggestion is not `.ok`, the store looks again every few seconds (`AppStore.refresh()`),
     // so this view needs no polling of its own.
@@ -75,7 +77,8 @@ struct FirstSyncView: View {
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if choosing {
-                    OnboardingAllNotebooksList(notebooks: allNotebooks(suggestion), query: $query, isOn: binding(for:))
+                    OnboardingAllNotebooksList(notebooks: allNotebooks(suggestion), query: $query,
+                                               searchFocused: $searchFocused, isOn: binding(for:))
                     if !suggestion.notebooks.isEmpty {
                         Button(OnboardingCopy.backToSuggestion) { backToSuggestion(suggestion) }
                             .buttonStyle(.rmLink)
@@ -94,7 +97,7 @@ struct FirstSyncView: View {
                     OnboardingBusyLabel(title: buttonTitle(noPagesLeft: noPagesLeft), busy: store.isStartingSync)
                 }
                 .buttonStyle(.rmPrimary)
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(WindowRules.defaultButtonsTakeKeys(searchFieldFocused: searchFocused) ? .defaultAction : nil)
                 .disabled(blockedReason(noPagesLeft: noPagesLeft) != nil || store.isStartingSync)
 
                 if let reason = blockedReason(noPagesLeft: noPagesLeft) {
