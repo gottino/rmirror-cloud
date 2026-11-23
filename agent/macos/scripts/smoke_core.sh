@@ -89,10 +89,11 @@ env -i \
     LANG="en_US.UTF-8" \
     RMIRROR_CONFIG_PATH="$WORK/config.yaml" \
     PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring" \
-    RMIRROR_APP_TOKEN="$TOKEN" \
     "$CORE" --headless < "$WORK/stdin" > "$WORK/stdout" 2> "$WORK/stderr" &
 CORE_PID=$!
 exec 3> "$WORK/stdin"
+# The launch token is the first line on the core's stdin (never in its environment).
+printf '%s\n' "$TOKEN" >&3
 
 # 1. Ready line
 READY_LINE="RMIRROR_CORE_READY port=$PORT api=2"

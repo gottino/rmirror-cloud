@@ -3,7 +3,7 @@ import XCTest
 
 /// Talks to a real, running core. Skipped unless RMIRROR_LIVE_PORT and RMIRROR_LIVE_TOKEN are set.
 /// Start one with a throwaway HOME and config, for example:
-///   RMIRROR_APP_TOKEN=$TOKEN RMIRROR_CONFIG_PATH=$TMP/config.yaml HOME=$TMP rmirror-core --headless
+///   (printf '%s\\n' "$TOKEN"; sleep 600) | RMIRROR_CONFIG_PATH=$TMP/config.yaml HOME=$TMP rmirror-core --headless
 final class LiveCoreTests: XCTestCase {
     private func client() throws -> LocalAPIClient {
         let environment = ProcessInfo.processInfo.environment

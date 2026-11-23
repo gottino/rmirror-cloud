@@ -190,7 +190,6 @@ public final class CoreSupervisor: @unchecked Sendable {
     /// launch token and unbuffered Python output.
     public static func childEnvironment(
         parent: [String: String],
-        token: String,
         extra: [String: String],
         development: Bool = CoreSupervisor.isDebugBuild
     ) -> [String: String] {
@@ -200,7 +199,6 @@ public final class CoreSupervisor: @unchecked Sendable {
             if let value = parent[key] { environment[key] = value }
         }
         for (key, value) in extra { environment[key] = value }
-        environment["RMIRROR_APP_TOKEN"] = token
         environment["PYTHONUNBUFFERED"] = "1"
         return environment
     }
@@ -228,7 +226,7 @@ public final class CoreSupervisor: @unchecked Sendable {
         child.arguments = spec.arguments
         child.currentDirectoryURL = spec.workingDirectory
         child.environment = CoreSupervisor.childEnvironment(
-            parent: ProcessInfo.processInfo.environment, token: token, extra: spec.extraEnvironment)
+            parent: ProcessInfo.processInfo.environment, extra: spec.extraEnvironment)
 
         let stdin = Pipe()
         let stdout = Pipe()
@@ -272,6 +270,14 @@ public final class CoreSupervisor: @unchecked Sendable {
         }
         process = child
         stdinPipe = stdin
+        // The launch token goes to the core as the first line on its stdin, never through the
+        // environment or arguments: other processes of the same user can read those (`ps eww`).
+        // The pipe then stays open and silent; its closing is the core's signal to stop.
+        do {
+            try stdin.fileHandleForWriting.write(contentsOf: Data((token + "\n").utf8))
+        } catch {
+            // The child died at once; its exit is handled by the termination handler.
+        }
         armReadyTimeout(generation: launchGeneration)
     }
 

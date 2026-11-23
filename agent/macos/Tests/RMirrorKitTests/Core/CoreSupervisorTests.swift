@@ -53,9 +53,9 @@ final class CoreSupervisorTests: XCTestCase {
         XCTAssertEqual(supervisor.currentStatus, .stopped)
     }
 
-    func testTheTokenReachesTheChildEnvironment() throws {
+    func testTheTokenArrivesAsTheFirstLineOnStdin() throws {
         let out = directory.appendingPathComponent("token.txt")
-        let url = try script("printf '%s' \"$RMIRROR_APP_TOKEN\" > '\(out.path)'\necho 'RMIRROR_CORE_READY port=5999 api=2'\ncat >/dev/null")
+        let url = try script("read -r TOKEN\nprintf '%s' \"$TOKEN\" > '\(out.path)'\necho 'RMIRROR_CORE_READY port=5999 api=2'\ncat >/dev/null")
         let (supervisor, recorder) = supervisor(url)
         supervisor.start()
         let status = try XCTUnwrap(recorder.waitFor { if case .running = $0 { return true } else { return false } })
@@ -141,7 +141,8 @@ final class CoreSupervisorTests: XCTestCase {
         guard case .running(let connection) = status else { return XCTFail("not running") }
         let lines = try String(contentsOf: out, encoding: .utf8).split(separator: "\n").map(String.init)
         XCTAssertFalse(lines.contains { $0.hasPrefix("RMIRROR_TEST_PARENT_SECRET=") }, "parent variable leaked to the core")
-        XCTAssertTrue(lines.contains("RMIRROR_APP_TOKEN=\(connection.appToken)"))
+        XCTAssertFalse(lines.contains { $0.hasPrefix("RMIRROR_APP_TOKEN=") }, "the token must not be in the environment")
+        XCTAssertFalse(lines.contains { $0.contains(connection.appToken) })
         XCTAssertTrue(lines.contains("PYTHONUNBUFFERED=1"))
         XCTAssertTrue(lines.contains { $0.hasPrefix("HOME=") })
         supervisor.stopAndWait()
@@ -153,15 +154,16 @@ final class CoreSupervisorTests: XCTestCase {
             "RMIRROR_CONFIG_PATH": "/tmp/evil.yaml", "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring",
             "DYLD_INSERT_LIBRARIES": "/tmp/x.dylib", "RMIRROR_APP_TOKEN": "parent-token",
         ]
-        let release = CoreSupervisor.childEnvironment(parent: parent, token: "t", extra: ["EXTRA": "1"], development: false)
+        let release = CoreSupervisor.childEnvironment(parent: parent, extra: ["EXTRA": "1"], development: false)
         XCTAssertEqual(release, ["HOME": "/Users/x", "PATH": "/usr/bin", "LANG": "en_GB.UTF-8",
-                                 "EXTRA": "1", "RMIRROR_APP_TOKEN": "t", "PYTHONUNBUFFERED": "1"])
-        let debug = CoreSupervisor.childEnvironment(parent: parent, token: "t", extra: [:], development: true)
+                                 "EXTRA": "1", "PYTHONUNBUFFERED": "1"])
+        let debug = CoreSupervisor.childEnvironment(parent: parent, extra: [:], development: true)
         XCTAssertEqual(debug["RMIRROR_CONFIG_PATH"], "/tmp/evil.yaml")
         XCTAssertEqual(debug["PYTHON_KEYRING_BACKEND"], "keyring.backends.null.Keyring")
         XCTAssertNil(debug["SECRET"])
         XCTAssertNil(debug["DYLD_INSERT_LIBRARIES"])
-        XCTAssertEqual(debug["RMIRROR_APP_TOKEN"], "t")
+        XCTAssertNil(debug["RMIRROR_APP_TOKEN"], "a token in the parent's environment is never passed on")
+        XCTAssertNil(release["RMIRROR_APP_TOKEN"])
     }
 
     #if DEBUG
@@ -246,7 +248,7 @@ final class CoreSupervisorTests: XCTestCase {
     }
 
     func testStderrContainingTheTokenIsNotLogged() throws {
-        let url = try script("echo \"leaked $RMIRROR_APP_TOKEN\" >&2\nexit 1")
+        let url = try script("read -r TOKEN\necho \"leaked $TOKEN\" >&2\nexit 1")
         var timing = fastTiming()
         timing.maxFailures = 0
         let log = LogRecorder()

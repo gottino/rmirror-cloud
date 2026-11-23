@@ -27,7 +27,7 @@ RMIRROR_CORE_CWD="$(cd .. && pwd)" \
 ```
 
 - `RMIRROR_CORE_CMD`: executable to start; `RMIRROR_CORE_ARGS`: its arguments, split on spaces (default
-  `--headless`); `RMIRROR_CORE_CWD`: its working directory. The app adds `RMIRROR_APP_TOKEN` itself.
+  `--headless`); `RMIRROR_CORE_CWD`: its working directory. The app sends the launch token itself, as the first line on the core's stdin.
 - The core does not inherit the app's environment. It gets `HOME`, `PATH`, `TMPDIR`, `USER`, `LOGNAME`, `LANG`,
   `LC_ALL`, `LC_CTYPE`, `SHELL`, `__CF_USER_TEXT_ENCODING` (when set), the token and `PYTHONUNBUFFERED=1`; debug
   builds also pass `RMIRROR_CONFIG_PATH` and `PYTHON_KEYRING_BACKEND` through, so a throwaway config works there.
@@ -38,8 +38,9 @@ Screens without a core: `.build/debug/RMirrorApp --render-screens <dir>` writes 
 dark, from fixture data and exits.
 
 Live-core tests (`Tests/RMirrorKitTests/Live/`): start a core with a throwaway `HOME` and config (they expect a
-signed-out core), e.g. `HOME=$TMP RMIRROR_CONFIG_PATH=$TMP/config.yaml RMIRROR_APP_TOKEN=$TOKEN
-PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring rmirror-core --headless`, then run
+signed-out core), e.g. `(printf '%s\n' "$TOKEN"; sleep 600) | HOME=$TMP RMIRROR_CONFIG_PATH=$TMP/config.yaml
+PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring rmirror-core --headless` (the launch token is the first line on
+the core's stdin, and the core stops when that pipe closes), then run
 `RMIRROR_LIVE_PORT=<port> RMIRROR_LIVE_TOKEN=$TOKEN swift test`.
 
 ## Package: `scripts/build_app.sh`
