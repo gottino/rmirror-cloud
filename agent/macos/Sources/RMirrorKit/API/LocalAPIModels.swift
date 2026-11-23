@@ -294,11 +294,35 @@ public struct AppState: Codable, Equatable, Sendable {
 
 // MARK: - Notebooks and selection
 
+/// A folder on the reMarkable (`folders` in `GET /api/v2/notebooks`). Every folder that is not in the
+/// trash is listed, empty ones included.
+public struct FolderEntry: Codable, Equatable, Sendable, Identifiable {
+    public var uuid: String
+    public var name: String
+    /// The folder that directly contains this one; nil at the top level.
+    public var parentUUID: String?
+
+    public var id: String { uuid }
+
+    public init(uuid: String, name: String, parentUUID: String? = nil) {
+        self.uuid = uuid
+        self.name = name
+        self.parentUUID = parentUUID
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case uuid, name
+        case parentUUID = "parent_uuid"
+    }
+}
+
 public struct NotebookEntry: Codable, Equatable, Sendable, Identifiable {
     public var uuid: String
     public var name: String
     /// Chain of parent folder names, outermost first. Empty at the top level.
     public var folderPath: [String]
+    /// The folder that directly contains the notebook; nil at the top level, or from a core that does not send it.
+    public var parentUUID: String?
     public var documentType: String
     public var pageCount: Int
     public var lastOpenedAt: Date?
@@ -308,12 +332,13 @@ public struct NotebookEntry: Codable, Equatable, Sendable, Identifiable {
 
     public var id: String { uuid }
 
-    public init(uuid: String, name: String, folderPath: [String] = [], documentType: String = "notebook",
-                pageCount: Int, lastOpenedAt: Date? = nil, lastModifiedAt: Date? = nil,
-                selected: Bool = false, syncedPages: Int = 0) {
+    public init(uuid: String, name: String, folderPath: [String] = [], parentUUID: String? = nil,
+                documentType: String = "notebook", pageCount: Int, lastOpenedAt: Date? = nil,
+                lastModifiedAt: Date? = nil, selected: Bool = false, syncedPages: Int = 0) {
         self.uuid = uuid
         self.name = name
         self.folderPath = folderPath
+        self.parentUUID = parentUUID
         self.documentType = documentType
         self.pageCount = pageCount
         self.lastOpenedAt = lastOpenedAt
@@ -325,6 +350,7 @@ public struct NotebookEntry: Codable, Equatable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case uuid, name
         case folderPath = "folder_path"
+        case parentUUID = "parent_uuid"
         case documentType = "document_type"
         case pageCount = "page_count"
         case lastOpenedAt = "last_opened_at"
@@ -337,18 +363,31 @@ public struct NotebookEntry: Codable, Equatable, Sendable, Identifiable {
 public struct NotebooksResponse: Codable, Equatable, Sendable {
     public var folderState: FolderState
     public var syncAll: Bool
+    /// Every folder on the reMarkable. Empty from a core that does not send them (the list then works
+    /// them out from `NotebookEntry.folderPath`, see `NotebookTree`).
+    public var folders: [FolderEntry]
     public var notebooks: [NotebookEntry]
 
-    public init(folderState: FolderState, syncAll: Bool, notebooks: [NotebookEntry]) {
+    public init(folderState: FolderState, syncAll: Bool, folders: [FolderEntry] = [], notebooks: [NotebookEntry]) {
         self.folderState = folderState
         self.syncAll = syncAll
+        self.folders = folders
         self.notebooks = notebooks
     }
 
     enum CodingKeys: String, CodingKey {
         case folderState = "folder_state"
         case syncAll = "sync_all"
+        case folders
         case notebooks
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        folderState = try c.decode(FolderState.self, forKey: .folderState)
+        syncAll = try c.decode(Bool.self, forKey: .syncAll)
+        folders = try c.decodeIfPresent([FolderEntry].self, forKey: .folders) ?? []
+        notebooks = try c.decode([NotebookEntry].self, forKey: .notebooks)
     }
 }
 

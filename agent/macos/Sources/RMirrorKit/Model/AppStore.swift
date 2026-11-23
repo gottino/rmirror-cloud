@@ -44,6 +44,8 @@ public final class AppStore: ObservableObject {
     @Published public private(set) var state: AppState?
     @Published public private(set) var stage: Stage = .starting
     @Published public private(set) var notebooks: [NotebookEntry] = []
+    /// The reMarkable's folders, from the same request as `notebooks`. Empty from a core that does not send them.
+    @Published public private(set) var folders: [FolderEntry] = []
     @Published public private(set) var notebooksLoaded = false
     @Published public private(set) var suggestion: FirstRunSuggestion?
     @Published public private(set) var settings: AppSettings?
@@ -110,6 +112,7 @@ public final class AppStore: ObservableObject {
         core: CoreStatus = .running(CoreConnection(port: 5555, appToken: "preview")),
         api: LocalAPI = MockLocalAPI(),
         notebooks: [NotebookEntry] = [],
+        folders: [FolderEntry] = [],
         suggestion: FirstRunSuggestion? = nil,
         settings: AppSettings? = nil,
         guidedSyncActive: Bool = false,
@@ -123,6 +126,7 @@ public final class AppStore: ObservableObject {
         store.api = api
         store.state = state
         store.notebooks = notebooks
+        store.folders = folders
         store.notebooksLoaded = true
         store.suggestion = suggestion
         store.settings = settings
@@ -286,6 +290,7 @@ public final class AppStore: ObservableObject {
     public func reloadNotebooks() async {
         guard let api else { return }
         if let response = try? await api.notebooks() {
+            if response.folders != folders { folders = response.folders }
             notebooks = response.notebooks
             notebooksLoaded = true
         }

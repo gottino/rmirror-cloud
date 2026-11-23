@@ -83,6 +83,29 @@ final class LocalAPITests: XCTestCase {
         XCTAssertEqual(r.notebooks[0].lastModifiedAt, LocalAPICoding.parseDate("2026-11-20T10:05:00Z"))
         XCTAssertNil(r.notebooks[1].lastOpenedAt)
         XCTAssertEqual(r.notebooks[1].id, "u2")
+        // A core without folders: none, and no parent for each notebook.
+        XCTAssertEqual(r.folders, [])
+        XCTAssertNil(r.notebooks[0].parentUUID)
+    }
+
+    func testDecodesFoldersAndParents() async throws {
+        stub("""
+        {"folder_state": "ok", "sync_all": false,
+         "folders": [{"uuid": "f1", "name": "Work", "parent_uuid": null},
+                     {"uuid": "f2", "name": "2026", "parent_uuid": "f1"},
+                     {"uuid": "f3", "name": "Empty"}],
+         "notebooks": [
+          {"uuid": "u1", "name": "Meeting Notes", "folder_path": ["Work", "2026"], "parent_uuid": "f2",
+           "document_type": "notebook", "page_count": 12, "last_opened_at": null, "last_modified_at": null,
+           "selected": true, "synced_pages": 12},
+          {"uuid": "u2", "name": "Loose", "folder_path": [], "parent_uuid": null, "document_type": "notebook",
+           "page_count": 1, "selected": false, "synced_pages": 0}]}
+        """)
+        let r = try await client().notebooks()
+        XCTAssertEqual(r.folders, [FolderEntry(uuid: "f1", name: "Work"), FolderEntry(uuid: "f2", name: "2026", parentUUID: "f1"),
+                                   FolderEntry(uuid: "f3", name: "Empty")])
+        XCTAssertEqual(r.notebooks.map(\.parentUUID), ["f2", nil])
+        XCTAssertNil(r.notebooks[1].lastOpenedAt, "a missing date key reads as no date")
     }
 
     func testDecodesSuggestionAndUnlimited() async throws {
@@ -375,6 +398,8 @@ final class LocalAPITests: XCTestCase {
             XCTAssertEqual(try LocalAPICoding.makeDecoder().decode(AppState.self, from: data), s)
         }
         XCTAssertEqual(Fixtures.readyNotebooks.notebooks.count, 12)
+        let library = try LocalAPICoding.makeEncoder().encode(Fixtures.libraryNotebooks)
+        XCTAssertEqual(try LocalAPICoding.makeDecoder().decode(NotebooksResponse.self, from: library), Fixtures.libraryNotebooks)
         XCTAssertEqual(Fixtures.threeNotebookSuggestion.totalPages, 23)
         XCTAssertTrue(Fixtures.quotaExhaustedState.quota!.isExhausted)
         XCTAssertEqual(Fixtures.firstSyncRunningState.sync.counts.uploaded, 4)

@@ -274,6 +274,73 @@ public enum Fixtures {
         ])
     }()
 
+    /// A library as the reMarkable keeps it: folders nested four deep, an empty folder at the top and one
+    /// inside Work, two folders called "Archive" in different places, notebooks at the top level, some
+    /// ticked, some partly synced, one synced earlier and since unticked, one with no dates at all.
+    /// Ticked: Meeting Notes, Kick-off Workshop, Acme interviews (so Clients and Acme are fully ticked and
+    /// Work is mixed), Budget (Home mixed), Book Club (Reading mixed), Travel Journal (top level).
+    public static let libraryNotebooks: NotebooksResponse = {
+        let folders = [
+            FolderEntry(uuid: "f-work", name: "Work"),
+            FolderEntry(uuid: "f-work-2026", name: "2026", parentUUID: "f-work"),
+            FolderEntry(uuid: "f-work-2026-clients", name: "Clients", parentUUID: "f-work-2026"),
+            FolderEntry(uuid: "f-work-2026-clients-acme", name: "Acme", parentUUID: "f-work-2026-clients"),
+            FolderEntry(uuid: "f-work-2025", name: "2025", parentUUID: "f-work"),
+            FolderEntry(uuid: "f-work-archive", name: "Archive", parentUUID: "f-work"),
+            FolderEntry(uuid: "f-home", name: "Home"),
+            FolderEntry(uuid: "f-home-finance", name: "Finance", parentUUID: "f-home"),
+            FolderEntry(uuid: "f-home-archive", name: "Archive", parentUUID: "f-home"),
+            FolderEntry(uuid: "f-reading", name: "Reading"),
+            FolderEntry(uuid: "f-templates", name: "Templates"),
+        ]
+        let paths: [String: (path: [String], parent: String?)] = [
+            "": ([], nil),
+            "w": (["Work"], "f-work"),
+            "w26": (["Work", "2026"], "f-work-2026"),
+            "cl": (["Work", "2026", "Clients"], "f-work-2026-clients"),
+            "acme": (["Work", "2026", "Clients", "Acme"], "f-work-2026-clients-acme"),
+            "w25": (["Work", "2025"], "f-work-2025"),
+            "h": (["Home"], "f-home"),
+            "fin": (["Home", "Finance"], "f-home-finance"),
+            "harc": (["Home", "Archive"], "f-home-archive"),
+            "r": (["Reading"], "f-reading"),
+        ]
+        let hour: TimeInterval = 3_600, day: TimeInterval = 86_400
+        func nb(_ id: String, _ name: String, in place: String, pages: Int, selected: Bool = false, synced: Int = 0,
+                modified: TimeInterval?, opened: TimeInterval? = nil) -> NotebookEntry {
+            let p = paths[place]!
+            return NotebookEntry(uuid: id, name: name, folderPath: p.path, parentUUID: p.parent, pageCount: pages,
+                                 lastOpenedAt: opened.map { now.addingTimeInterval(-$0) },
+                                 lastModifiedAt: modified.map { now.addingTimeInterval(-$0) },
+                                 selected: selected, syncedPages: synced)
+        }
+        return NotebooksResponse(folderState: .ok, syncAll: false, folders: folders, notebooks: [
+            nb("nb-meeting-notes", "Meeting Notes", in: "w26", pages: 12, selected: true, synced: 12,
+               modified: 2 * hour, opened: 2 * hour),
+            nb("nb-roadmap", "Product Roadmap", in: "w26", pages: 21, modified: 3 * day, opened: 3 * day),
+            nb("nb-kickoff", "Kick-off Workshop", in: "cl", pages: 14, selected: true, synced: 9,
+               modified: 26 * hour, opened: 26 * hour),
+            nb("nb-acme-interviews", "Acme discovery interviews and stakeholder mapping, second round", in: "acme",
+               pages: 38, selected: true, synced: 38, modified: 9 * day, opened: 8 * day),
+            nb("nb-standup-2025", "Standup 2025", in: "w25", pages: 45, modified: 330 * day, opened: 300 * day),
+            nb("nb-quarterly", "Quarterly Review", in: "w25", pages: 18, synced: 18, modified: 60 * day, opened: 45 * day),
+            nb("nb-ideas", "Ideas", in: "w", pages: 6, modified: 5 * day),
+            nb("nb-standup", "Standup", in: "w", pages: 45, modified: 20 * hour, opened: 20 * hour),
+            nb("nb-recipes", "Recipes", in: "h", pages: 17, modified: 12 * day, opened: 2 * day),
+            nb("nb-garden", "Garden Plan", in: "h", pages: 4, modified: 40 * day),
+            nb("nb-budget", "Budget", in: "fin", pages: 9, selected: true, synced: 5, modified: 4 * hour, opened: 4 * hour),
+            nb("nb-taxes", "Taxes 2025", in: "fin", pages: 11, modified: 90 * day),
+            nb("nb-letters", "Old Letters", in: "harc", pages: 7, modified: 400 * day),
+            nb("nb-book-club", "Book Club", in: "r", pages: 8, selected: true, synced: 8, modified: 6 * day, opened: 6 * day),
+            nb("nb-reading", "Reading List", in: "r", pages: 2, modified: 15 * day),
+            nb("nb-travel-journal", "Travel Journal", in: "", pages: 3, selected: true, synced: 3,
+               modified: 21 * day, opened: 21 * day),
+            nb("nb-sketches", "Sketches", in: "", pages: 31, modified: 7 * day),
+            nb("nb-cafe", "Café Ideas", in: "", pages: 5, modified: 2 * day),
+            nb("nb-quick", "Quick Notes", in: "", pages: 1, modified: nil),
+        ])
+    }()
+
     public static let settings = AppSettings(
         pageLimit: nil, sourceDirectory: remarkableFolder,
         environment: EnvironmentSetting(name: .production, apiURL: "https://rmirror.io/api/v1"),
