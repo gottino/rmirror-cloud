@@ -19,6 +19,12 @@ final class WindowRulesTests: XCTestCase {
         XCTAssertTrue(WindowRules.defaultButtonsTakeKeys(searchFieldFocused: false))
     }
 
+    func testReturnBelongsToTheNotebookListWhileItHasTheKeyboard() {
+        XCTAssertTrue(WindowRules.defaultButtonTakesReturn(searchFieldFocused: false, listHasKeyboard: false))
+        XCTAssertFalse(WindowRules.defaultButtonTakesReturn(searchFieldFocused: false, listHasKeyboard: true))
+        XCTAssertFalse(WindowRules.defaultButtonTakesReturn(searchFieldFocused: true, listHasKeyboard: false))
+    }
+
     private func opens(_ stage: Stage, firstLaunch: Bool = false, firstStage: Bool = false, visible: Bool = false) -> Bool {
         WindowRules.opensWindowByItself(stage: stage, firstLaunch: firstLaunch, firstStageThisSession: firstStage,
                                         windowVisible: visible)

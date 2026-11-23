@@ -60,4 +60,12 @@ final class MainCopyTests: XCTestCase {
         XCTAssertEqual(MainCopy.rowAccessibilityLabel(name: "Meeting Notes", pages: 12, selected: true),
                        "Meeting Notes, 12 pages, selected")
     }
+
+    func testFolderWording() {
+        XCTAssertEqual(MainCopy.folderSummary(selected: 2, total: 5), "2 of 5 selected")
+        XCTAssertEqual(MainCopy.folderAccessibilityLabel(name: "Work", selected: 2, total: 5, expanded: true),
+                       "Work, folder, 2 of 5 selected, expanded")
+        XCTAssertEqual(MainCopy.folderAccessibilityLabel(name: "Templates", selected: 0, total: 0, expanded: false),
+                       "Templates, folder, empty")
+    }
 }

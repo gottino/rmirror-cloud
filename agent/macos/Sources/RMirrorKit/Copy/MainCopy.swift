@@ -52,6 +52,36 @@ public enum MainCopy {
     /// Heading for notebooks that are not in a folder.
     public static let topLevelGroup = "Notebooks"
 
+    /// The intro line in the "Folders" view: ticking a folder is a shortcut, not a standing rule.
+    public static let listIntroFolders = "Ticked notebooks stay in sync. Ticking a folder ticks the notebooks in it now, not ones added later."
+    public static let viewPickerLabel = "Show notebooks"
+    public static let viewFolders = "Folders"
+    public static let viewRecent = "Recent"
+    public static let expandAll = "Expand all"
+    public static let collapseAll = "Collapse all"
+    public static let syncedOnly = "Synced only"
+    public static let syncedOnlyHelp = "Show only notebooks that are ticked or already have pages in rMirror"
+    public static let noSyncedTitle = "No synced notebooks yet"
+    public static let noSyncedBody = "Tick a notebook and save to start syncing it."
+    public static let showAllNotebooks = "Show all notebooks"
+    public static let listAccessibilityLabel = "Notebooks"
+
+    /// Right-hand text on a folder row: "2 of 5 selected", counting every notebook below it.
+    public static func folderSummary(selected: Int, total: Int) -> String { "\(selected) of \(total) selected" }
+    public static let emptyFolder = "Empty"
+    public static let tickFolder = "Tick all in this folder"
+    public static let untickFolder = "Untick all in this folder"
+
+    /// VoiceOver label for a folder row: "Work, folder, 2 of 5 selected, expanded".
+    public static func folderAccessibilityLabel(name: String, selected: Int, total: Int, expanded: Bool) -> String {
+        if total == 0 { return "\(name), folder, empty" }
+        return "\(name), folder, \(folderSummary(selected: selected, total: total)), \(expanded ? "expanded" : "collapsed")"
+    }
+    public static let folderAccessibilityHint = "Opens or closes the folder"
+
+    /// VoiceOver value for a notebook in the Recent view: "Changed 3 days ago".
+    public static func changedAccessibility(_ relative: String) -> String { "Changed \(relative)" }
+
     public static func groupAccessibility(folder: String, count: Int) -> String {
         "\(folder), \(SharedCopy.notebooks(count))"
     }
@@ -140,6 +170,13 @@ public enum MainCopy {
             syncingTitle, dismiss, tryAgain, pausedTitle, pausedBody,
             listTitle, listIntro, searchPlaceholder, clearSearch, selectAll, selectNone,
             selectAllMatching, selectNoneMatching, topLevelGroup,
+            listIntroFolders, viewPickerLabel, viewFolders, viewRecent, expandAll, collapseAll,
+            syncedOnly, syncedOnlyHelp, noSyncedTitle, noSyncedBody, showAllNotebooks, listAccessibilityLabel,
+            folderSummary(selected: 2, total: 5), emptyFolder, tickFolder, untickFolder,
+            folderAccessibilityLabel(name: "Work", selected: 2, total: 5, expanded: true),
+            folderAccessibilityLabel(name: "Home", selected: 0, total: 3, expanded: false),
+            folderAccessibilityLabel(name: "Templates", selected: 0, total: 0, expanded: false),
+            folderAccessibilityHint, changedAccessibility("3 days ago"),
             groupAccessibility(folder: "Work", count: 4),
             syncIndicator(.empty), syncIndicator(.notSynced(total: 12)),
             syncIndicator(.partly(synced: 4, total: 12)), syncIndicator(.complete(total: 12)),

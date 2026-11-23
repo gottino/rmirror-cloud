@@ -16,6 +16,13 @@ public enum WindowRules {
         !searchFieldFocused
     }
 
+    /// Return goes to the default button only while neither the search field nor the notebook list has
+    /// the keyboard: in the list, Return ticks the highlighted notebook or opens and closes a folder.
+    /// Esc is unaffected by the list and still follows `defaultButtonsTakeKeys`.
+    public static func defaultButtonTakesReturn(searchFieldFocused: Bool, listHasKeyboard: Bool) -> Bool {
+        defaultButtonsTakeKeys(searchFieldFocused: searchFieldFocused) && !listHasKeyboard
+    }
+
     /// Whether reaching `stage` brings the main window forward by itself.
     ///
     /// - Parameters:
