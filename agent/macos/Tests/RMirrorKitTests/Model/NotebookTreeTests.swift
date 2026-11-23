@@ -26,11 +26,11 @@ final class NotebookTreeTests: XCTestCase {
     func testFoldersFirstAToZThenNotebooksAtEveryLevel() {
         let tree = library
         XCTAssertEqual(names(tree, tree.visibleRows(open: [])),
-                       ["[Home]", "[Reading]", "[Templates]", "[Work]",
+                       ["[Home]", "[Reading]", "[Work]",
                         "Café Ideas", "Quick Notes", "Sketches", "Travel Journal"])
         let open: Set = ["f-work", "f-work-2026", "f-work-2026-clients", "f-work-2026-clients-acme"]
         XCTAssertEqual(names(tree, tree.visibleRows(open: open)), [
-            "[Home]", "[Reading]", "[Templates]",
+            "[Home]", "[Reading]",
             "[Work]",
             "  [2025]", "  [2026]",
             "    [Clients]",
@@ -38,7 +38,6 @@ final class NotebookTreeTests: XCTestCase {
             "        Acme discovery interviews and stakeholder mapping, second round",
             "      Kick-off Workshop",
             "    Meeting Notes", "    Product Roadmap",
-            "  [Archive]",
             "  Ideas", "  Standup",
             "Café Ideas", "Quick Notes", "Sketches", "Travel Journal",
         ])
@@ -47,7 +46,9 @@ final class NotebookTreeTests: XCTestCase {
     func testSortingIgnoresCaseAndAccents() {
         let folders = [FolderEntry(uuid: "b", name: "beta"), FolderEntry(uuid: "a", name: "Älpha"),
                        FolderEntry(uuid: "c", name: "Gamma")]
-        let notebooks = [nb("2", "zeta"), nb("1", "Éclair"), nb("3", "apple")]
+        // Each folder holds a notebook, because folders without notebooks are not shown.
+        let notebooks = [nb("2", "zeta"), nb("1", "Éclair"), nb("3", "apple"),
+                         nb("4", "in a", parent: "a"), nb("5", "in b", parent: "b"), nb("6", "in c", parent: "c")]
         let tree = NotebookTree(folders: folders, notebooks: notebooks)
         XCTAssertEqual(names(tree, tree.visibleRows(open: [])), ["[Älpha]", "[beta]", "[Gamma]", "apple", "Éclair", "zeta"])
     }
@@ -82,7 +83,8 @@ final class NotebookTreeTests: XCTestCase {
         XCTAssertEqual(tree.pathText(of: "n1"), "Somewhere", "an orphan keeps the path the core sent")
         XCTAssertEqual(tree.pathText(of: "n2"), "A \u{203A} C")
         XCTAssertEqual(tree.notebookIDs(under: "a"), ["n2"])
-        XCTAssertEqual(tree.visibleRows(open: tree.expandableFolderIDs).count, 7)
+        // Only A and C lead to a notebook; the folders without notebooks (B, Self, Orphan) are not shown.
+        XCTAssertEqual(tree.visibleRows(open: tree.expandableFolderIDs).count, 4)
     }
 
     func testFoldersAreWorkedOutFromPathsWhenTheCoreSendsNone() {
@@ -187,9 +189,23 @@ final class NotebookTreeTests: XCTestCase {
         XCTAssertEqual(out.highlight, rows.first?.item)
         out = tree.handle(.down, rows: rows, highlight: rows.last?.item, open: open, flat: false)
         XCTAssertEqual(out.highlight, rows.last?.item)
-        // Right on an empty folder does nothing.
-        out = tree.handle(.right, rows: rows, highlight: .folder("f-work-archive"), open: open, flat: false)
-        XCTAssertEqual(out, ListKeyOutcome(highlight: .folder("f-work-archive"), open: open))
+        // A folder without notebooks is not a row, so the keys can never land on it.
+        XCTAssertFalse(rows.contains { $0.item == .folder("f-work-archive") })
+    }
+
+    func testFoldersWithoutNotebooksAreNotShown() {
+        let tree = library
+        let everything = Set(tree.folders.keys)
+        let rows = tree.visibleRows(open: everything)
+        let shownFolders = rows.compactMap { row -> String? in
+            if case .folder(let id) = row.item { return id } else { return nil }
+        }
+        XCTAssertFalse(shownFolders.contains("f-work-archive"), "a folder with no notebooks is hidden")
+        XCTAssertFalse(shownFolders.contains("f-templates"))
+        XCTAssertTrue(shownFolders.contains("f-home-archive"), "a folder with a notebook is shown")
+        XCTAssertTrue(shownFolders.allSatisfy { (tree.folders[$0]?.totalNotebooks ?? 0) > 0 })
+        let shownNotebooks = rows.filter { if case .notebook = $0.item { return true } else { return false } }.count
+        XCTAssertEqual(shownNotebooks, tree.notebookOrder.count, "every notebook is still reachable")
     }
 
     func testSpaceAndReturn() {
@@ -238,7 +254,8 @@ final class NotebookTreeTests: XCTestCase {
         let all = Set(notebooks.map(\.uuid))
         let counts = tree.selectedCounts(all)
         let rows = tree.visibleRows(open: tree.expandableFolderIDs)
-        XCTAssertEqual(rows.count, 2_500 + folders.count)
+        let foldersWithNotebooks = folders.filter { (tree.folders[$0.uuid]?.totalNotebooks ?? 0) > 0 }.count
+        XCTAssertEqual(rows.count, 2_500 + foldersWithNotebooks)
         XCTAssertEqual(counts["t0"], tree.folders["t0"]?.totalNotebooks)
         XCTAssertLessThan(Date().timeIntervalSince(start), 2, "debug build; release is far quicker")
     }

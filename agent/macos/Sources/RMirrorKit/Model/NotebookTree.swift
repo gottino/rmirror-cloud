@@ -214,11 +214,12 @@ public struct NotebookTree: Sendable {
 
     // MARK: Rows
 
-    /// The outline as shown with `open` folders open.
+    /// The outline as shown with `open` folders open. Folders with no notebooks anywhere below them
+    /// are left out: on the tablet they usually hold PDFs or ebooks, which rMirror does not sync.
     public func visibleRows(open: Set<String>) -> [TreeRow] {
         var rows: [TreeRow] = []
         func add(_ id: String) {
-            guard let folder = folders[id] else { return }
+            guard let folder = folders[id], folder.totalNotebooks > 0 else { return }
             rows.append(TreeRow(item: .folder(id), depth: folder.depth))
             guard open.contains(id) else { return }
             for child in folder.childFolderIDs { add(child) }

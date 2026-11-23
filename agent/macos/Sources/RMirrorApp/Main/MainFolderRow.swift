@@ -3,7 +3,7 @@ import SwiftUI
 
 /// One folder: chevron, tri-state checkbox, icon, name, and "2 of 5 selected" for every notebook below
 /// it. Clicking the row opens or closes it; clicking the checkbox ticks or unticks everything below.
-/// An empty folder is dimmed, says "Empty" and has no checkbox.
+/// Folders without notebooks are not shown at all (see `NotebookTree.visibleRows`); the empty state below is a safeguard.
 struct MainFolderRow: View {
     let folder: NotebookTree.Folder
     let isOpen: Bool
