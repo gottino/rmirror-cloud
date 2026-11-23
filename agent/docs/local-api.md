@@ -19,18 +19,19 @@ The app starts the core as a plain child process:
 | Aspect | Rule |
 |---|---|
 | Mode | `--headless`: no menu bar (rumps is never imported), no browser launch, no console prompts. Web server and sync loop only. |
-| Environment | `RMIRROR_APP_TOKEN` (required in headless mode, 32+ random bytes, hex) and optional `RMIRROR_CONFIG_PATH`. The core removes the token from its environment after reading it. |
+| Environment | Optional `RMIRROR_CONFIG_PATH`. Nothing secret goes into the environment or the arguments: on macOS any process of the same user can read another process's initial environment (`ps eww`). `RMIRROR_APP_TOKEN` is **not** read in headless mode; if it is set, the core ignores it and logs one warning (without the value). |
+| Launch token | Right after starting the core the app writes the token as the **first line on stdin**: 32+ random bytes as hex (64 hex characters) followed by `\n`, then keeps the pipe open and writes nothing more. The core reads exactly that one line (unbuffered, nothing after the newline) before it binds anything, waiting at most 10 s. Missing, empty, shorter than 32 characters, not received in time, or EOF before a full line → exit 4. The token is never logged. |
 | Listen address | `127.0.0.1` **and** `[::1]` on `config.web.port` (default 5555). The port must stay fixed because the dashboard sign-in callback targets `localhost`, which a browser may resolve to either address; holding both means no other process can receive the sign-in. If either is taken the core exits 3. (A Mac without IPv6 loopback only gets `127.0.0.1`.) |
 | Ready signal | One line on stdout once the server accepts connections: `RMIRROR_CORE_READY port=<port> api=2`. This is the only readiness signal: the app never treats an answer on the port as proof that its own core is ready, because another process could be listening there. |
-| Parent watch | The core reads stdin on a background thread. EOF means the app is gone: shut down cleanly and exit 0, normally within 1 second and at most 6 seconds. The app keeps the write end open for its whole life and never writes to it. If stdin is missing, closed or already at EOF at launch, the core exits 0 without starting. |
+| Parent watch | After the token line the core watches stdin on a background thread. EOF means the app is gone: shut down cleanly and exit 0, normally within 1 second and at most 6 seconds. The app keeps the write end open for its whole life and writes nothing after the token line. If stdin is missing, closed or at EOF before the token line, the core exits 4 without starting. |
 | stdout | After the ready line the core writes nothing more to stdout (logs go to the log file). The app must still keep draining stdout (and stderr) for the core's whole life so a write can never block it. |
 | Stop | `SIGTERM` → clean shutdown (existing `Agent.shutdown()`), exit 0. |
-| Exit codes | `0` clean stop (also: no parent at launch) · `3` port already in use on `127.0.0.1` or `[::1]` (another rMirror is running) · `4` missing or too-short `RMIRROR_APP_TOKEN` · `1` anything else. |
+| Exit codes | `0` clean stop · `3` port already in use on `127.0.0.1` or `[::1]` (another rMirror is running) · `4` no valid launch token on stdin (missing, empty, shorter than 32 characters, not within 10 s, or EOF first) · `1` anything else. |
 | Logs | Unchanged: `~/.config/rmirror/agent.log`. Nothing sensitive on stdout/stderr. |
 
 ## Request rules
 
-- Every `/api/v2/*` request must carry `X-RMirror-App-Token: <RMIRROR_APP_TOKEN>`. Compare in constant time.
+- Every `/api/v2/*` request must carry `X-RMirror-App-Token: <launch token>`. Compare in constant time.
   Missing or wrong → `401` with error code `bad_app_token`. This is checked for every path under `/api/v2/` before
   routing, so unknown paths and wrong methods also answer 401 without the token (with the token: 404 / 405 with
   code `invalid_request`). This is in addition to the existing Host/Origin checks (headless also accepts

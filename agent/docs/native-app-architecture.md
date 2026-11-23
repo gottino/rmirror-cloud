@@ -67,7 +67,7 @@ Derived from `GET /api/v2/state`, first match wins:
 
 ## Supervisor rules
 
-- Launch with a fresh 32-byte token in `RMIRROR_APP_TOKEN`; keep the stdin pipe open.
+- Launch with a fresh 32-byte token written as the first line on the core's stdin (never in the environment or arguments: other processes of the user can read those); keep the stdin pipe open.
 - Ready when the `RMIRROR_CORE_READY` line arrives or `/health` answers, whichever first; time out at 30 s.
 - Unexpected exit: restart with backoff 1, 2, 5, 15, 30 s; after 5 failures in 2 minutes stop and show `coreFailed`.
 - Exit code 3 → `portInUse`, no restart loop.

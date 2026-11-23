@@ -14,6 +14,7 @@ import signal
 import socket
 import sys
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
@@ -30,8 +31,12 @@ from app.sync.quota_cache import QuotaCache
 logger = logging.getLogger(__name__)
 
 # Headless mode (rMirror for Mac 2.0, see docs/local-api.md)
+# Ignored in headless mode (any process of the user can read another process's
+# initial environment); the token arrives as the first line on stdin instead
 APP_TOKEN_ENV = "RMIRROR_APP_TOKEN"
 MIN_APP_TOKEN_LENGTH = 32
+MAX_TOKEN_LINE_BYTES = 256
+TOKEN_READ_TIMEOUT_SECONDS = 10.0
 READY_LINE = "RMIRROR_CORE_READY port={port} api=2"
 HEADLESS_HOST = "127.0.0.1"
 EXIT_OK = 0
@@ -684,26 +689,54 @@ def bind_listen_socket(host: str, port: int, family: int = socket.AF_INET) -> so
     return sock
 
 
-def read_app_token(environ: "os._Environ[str] | dict[str, str]") -> str | None:
-    """The app token from the environment, or None if missing or too short."""
-    token = (environ.get(APP_TOKEN_ENV) or "").strip()
-    if len(token) < MIN_APP_TOKEN_LENGTH:
-        return None
-    return token
+def read_token_line(stream, timeout: float | None = None) -> str | None:
+    """Read the launch token: exactly one line from stdin, unbuffered.
 
-
-def parent_already_gone(stream) -> bool:
-    """True if stdin is missing, closed, or already at end of file (the app is gone)."""
+    Reads the file descriptor byte by byte up to the first newline, so nothing
+    after it is consumed and the parent watch can keep using the same descriptor.
+    Returns None if stdin is missing or closed, on EOF before a full line, after
+    ``timeout`` seconds, or for a line longer than MAX_TOKEN_LINE_BYTES.
+    The value is never logged.
+    """
+    if timeout is None:
+        timeout = TOKEN_READ_TIMEOUT_SECONDS
     if stream is None or getattr(stream, "closed", False):
-        return True
+        return None
     try:
         fd = stream.fileno()
-        os.fstat(fd)
-        readable, _, _ = select.select([fd], [], [], 0)
-        # The app never writes to the pipe: readable means end of file
-        return bool(readable) and os.read(fd, 1) == b""
     except (OSError, ValueError):
-        return True
+        return None
+    deadline = time.monotonic() + timeout
+    data = bytearray()
+    try:
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            readable, _, _ = select.select([fd], [], [], left)
+            if not readable:
+                return None
+            byte = os.read(fd, 1)
+            if not byte:
+                return None  # EOF before a full line
+            if byte == b"\n":
+                break
+            data += byte
+            if len(data) > MAX_TOKEN_LINE_BYTES:
+                return None
+    except (OSError, ValueError):
+        return None
+    try:
+        return data.decode("ascii").strip()
+    except UnicodeDecodeError:
+        return None
+
+
+def valid_app_token(token: str | None) -> str | None:
+    """The token if it is long enough and has no whitespace inside, else None."""
+    if not token or len(token) < MIN_APP_TOKEN_LENGTH or any(c.isspace() for c in token):
+        return None
+    return token
 
 
 def quiet_stdout_after_ready() -> None:
@@ -751,7 +784,7 @@ def watch_parent_stdin(on_eof: Callable[[], None], stream=None) -> threading.Thr
 @click.option(
     "--headless",
     is_flag=True,
-    help="Run as the core of the native app: no menu bar, no browser (needs RMIRROR_APP_TOKEN)",
+    help="Run as the core of the native app: no menu bar, no browser (launch token: first line on stdin)",
 )
 @click.pass_context
 def cli(ctx: click.Context, config: Optional[Path], foreground: bool, debug: bool, headless: bool) -> None:
@@ -860,25 +893,29 @@ def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> Non
 def run_headless(config_path: Optional[Path], debug: bool, stdin=None) -> int:
     """Run as the native app's core process; returns the exit code (see docs/local-api.md).
 
-    Never imports rumps and never opens a browser. Binds 127.0.0.1:<web.port>,
-    prints the ready line once the server is listening, stops cleanly on SIGTERM,
-    SIGINT or when stdin closes.
+    Never imports rumps and never opens a browser. Reads the launch token from the
+    first line of stdin, binds 127.0.0.1 and [::1] on <web.port>, prints the ready
+    line once the server is listening, stops cleanly on SIGTERM, SIGINT or when
+    stdin closes.
     """
-    app_token = read_app_token(os.environ)
-    # Keep the token out of anything this process starts later
-    os.environ.pop(APP_TOKEN_ENV, None)
-    if app_token is None:
-        print(f"{APP_TOKEN_ENV} is missing or shorter than {MIN_APP_TOKEN_LENGTH} characters", file=sys.stderr)
-        return EXIT_BAD_APP_TOKEN
-
+    # The launch token is the first line on stdin, read before anything is bound
     stdin = sys.stdin if stdin is None else stdin
-    if parent_already_gone(stdin):
-        # Started without a parent holding stdin open: nothing to serve
-        return EXIT_OK
+    app_token = valid_app_token(read_token_line(stdin))
+    if app_token is None:
+        print(
+            f"No launch token on stdin (one line of at least {MIN_APP_TOKEN_LENGTH} characters "
+            f"within {TOKEN_READ_TIMEOUT_SECONDS:g} s)",
+            file=sys.stderr,
+        )
+        return EXIT_BAD_APP_TOKEN
 
     try:
         setup_logging("DEBUG" if debug else "INFO")
         logger.info("rMirror core starting up (headless)")
+        if os.environ.get(APP_TOKEN_ENV):
+            logger.warning(
+                f"{APP_TOKEN_ENV} is set but ignored: the launch token must come as the first line on stdin"
+            )
         config = Config.load(config_path)
         agent = Agent(config, foreground=True, headless=True, app_token=app_token)
         agent.update_folder_flags()
