@@ -15,6 +15,9 @@ public enum AppCopy {
         /// Shown after a background check found an update; opens the update window.
         public static let updateAvailable = "Update Available…"
         public static let quit = "Quit rMirror"
+        /// Shown under the status line while the reMarkable desktop app is not running.
+        public static let remarkableNotRunning = "The reMarkable app isn't running, so new pages won't arrive."
+        public static let openRemarkable = "Open reMarkable"
         public static func tooltip(_ status: String) -> String { "rMirror: \(status)" }
     }
 
@@ -62,6 +65,7 @@ public enum AppCopy {
             appName, mainWindowTitle, settingsWindowTitle,
             StatusMenu.open, StatusMenu.settings, StatusMenu.checkForUpdates, StatusMenu.updateAvailable,
             StatusMenu.quit, StatusMenu.tooltip("Up to date"),
+            StatusMenu.remarkableNotRunning, StatusMenu.openRemarkable,
             MainMenu.about, MainMenu.settings, MainMenu.hide, MainMenu.hideOthers, MainMenu.showAll, MainMenu.quit,
             MainMenu.edit, MainMenu.undo, MainMenu.redo, MainMenu.cut, MainMenu.copy, MainMenu.paste,
             MainMenu.selectAll, MainMenu.window, MainMenu.minimise, MainMenu.close, MainMenu.bringAllToFront,

@@ -61,6 +61,13 @@ public final class AppStore: ObservableObject {
     /// The first-run suggestion could not be fetched the last time it was asked for. With no
     /// suggestion yet, the first-sync screen says so calmly instead of spinning forever.
     @Published public private(set) var suggestionUnreachable = false
+    /// The reMarkable desktop app is running in this login session. True until a source says otherwise,
+    /// so nothing is shown without one.
+    @Published public private(set) var remarkableAppRunning = true
+    /// The reMarkable desktop app is installed, so "Open reMarkable" can work.
+    @Published public private(set) var remarkableAppInstalled = true
+    /// "Open the reMarkable app when rMirror starts". Off by default.
+    @Published public private(set) var opensRemarkableAppAtStart = false
 
     // MARK: Dependencies
 
@@ -71,16 +78,24 @@ public final class AppStore: ObservableObject {
         public var restartCore: @MainActor () -> Void
         /// The clock, replaceable in tests.
         public var now: @MainActor () -> Date
+        /// Whether the reMarkable desktop app runs, and how to open it. nil: never warn, never open it.
+        public var remarkableApp: RemarkableAppSource?
+        /// Where rMirror's own preferences are remembered. nil remembers nothing.
+        public var preferences: UserDefaults?
         public init(
             makeAPI: @escaping @MainActor (CoreConnection) -> LocalAPI,
             openURL: @escaping @MainActor (URL) -> Void,
             restartCore: @escaping @MainActor () -> Void,
-            now: @escaping @MainActor () -> Date = { Date() }
+            now: @escaping @MainActor () -> Date = { Date() },
+            remarkableApp: RemarkableAppSource? = nil,
+            preferences: UserDefaults? = nil
         ) {
             self.makeAPI = makeAPI
             self.openURL = openURL
             self.restartCore = restartCore
             self.now = now
+            self.remarkableApp = remarkableApp
+            self.preferences = preferences
         }
     }
 
@@ -96,6 +111,8 @@ public final class AppStore: ObservableObject {
     private var lastAppliedRefresh = 0
     private var discardRefreshesBefore = 0
     private var lastSuggestionFetch: Date?
+    /// The "open the reMarkable app at start" decision was made in this run.
+    private var decidedRemarkableAppAtStart = false
 
     public static let fastPollInterval: TimeInterval = 2
     public static let slowPollInterval: TimeInterval = 15
@@ -104,6 +121,14 @@ public final class AppStore: ObservableObject {
 
     public init(dependencies: Dependencies) {
         self.dependencies = dependencies
+        if let preferences = dependencies.preferences {
+            opensRemarkableAppAtStart = RemarkableAppPreferences.load(from: preferences).opensAtStart
+        }
+        if let source = dependencies.remarkableApp {
+            remarkableAppRunning = source.isRunning
+            remarkableAppInstalled = source.isInstalled
+            source.startObserving { [weak self] running in self?.remarkableAppRunningChanged(running) }
+        }
     }
 
     /// A store with fixed content and no core, for screenshots and tests.
@@ -119,7 +144,8 @@ public final class AppStore: ObservableObject {
         problem: ActionProblem? = nil,
         isWaitingForSignIn: Bool = false,
         suggestionUnreachable: Bool = false,
-        deletedNotebooks: [DeletedNotebook] = []
+        deletedNotebooks: [DeletedNotebook] = [],
+        remarkableAppRunning: Bool = true
     ) -> AppStore {
         let store = AppStore(dependencies: Dependencies(makeAPI: { _ in api }, openURL: { _ in }, restartCore: {}))
         store.coreStatus = core
@@ -135,6 +161,7 @@ public final class AppStore: ObservableObject {
         store.isWaitingForSignIn = isWaitingForSignIn
         store.suggestionUnreachable = suggestionUnreachable
         store.deletedNotebooks = deletedNotebooks
+        store.remarkableAppRunning = remarkableAppRunning
         store.recomputeStage()
         return store
     }
@@ -406,6 +433,47 @@ public final class AppStore: ObservableObject {
             return .checked(try await api.updateCheck())
         } catch {
             return ActionProblem(error) == .coreUnreachable ? .coreNotRunning : .failed
+        }
+    }
+
+    // MARK: reMarkable desktop app
+
+    /// The main window and the menu bar warn that new pages will not arrive (`RemarkableApp.showsNotRunningWarning`).
+    public var showsRemarkableAppWarning: Bool {
+        RemarkableApp.showsNotRunningWarning(stage: stage, appRunning: remarkableAppRunning)
+    }
+
+    private func remarkableAppRunningChanged(_ running: Bool) {
+        if running != remarkableAppRunning { remarkableAppRunning = running }
+        // It may have been installed or removed since rMirror started.
+        if let installed = dependencies.remarkableApp?.isInstalled, installed != remarkableAppInstalled {
+            remarkableAppInstalled = installed
+        }
+    }
+
+    /// "Open reMarkable": opens the app normally (it may come to the front). The warning goes away
+    /// once the system reports the app running. Does nothing harmful when it is not installed.
+    public func openRemarkableApp() {
+        guard let source = dependencies.remarkableApp else { return }
+        if !source.open(inBackground: false) { remarkableAppInstalled = false }
+    }
+
+    /// Call once rMirror has finished launching. With the preference on and the reMarkable app not
+    /// running, opens it hidden and without taking focus. Decides once per run of rMirror, so the app
+    /// is not reopened every time the user quits it.
+    public func openRemarkableAppAtStartIfWanted() {
+        guard let source = dependencies.remarkableApp else { return }
+        let opens = RemarkableApp.opensAtStart(preferenceOn: opensRemarkableAppAtStart, appRunning: source.isRunning,
+                                               alreadyTried: decidedRemarkableAppAtStart)
+        decidedRemarkableAppAtStart = true
+        if opens { source.open(inBackground: true) }
+    }
+
+    /// Settings: "Open the reMarkable app when rMirror starts". Takes effect at the next start.
+    public func setOpensRemarkableAppAtStart(_ on: Bool) {
+        opensRemarkableAppAtStart = on
+        if let preferences = dependencies.preferences {
+            RemarkableAppPreferences(opensAtStart: on).save(to: preferences)
         }
     }
 

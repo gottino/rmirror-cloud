@@ -77,12 +77,26 @@ Needs a core that sends `folders` and `parent_uuid` (with an older core the fold
   "Tick all in this folder".
 - With full keyboard access on (System Settings > Keyboard), Tab reaches the list and a focus ring shows.
 
+### reMarkable app not running
+
+- Signed in, past the first sync, quit the reMarkable app. Expected: within a moment the main window shows "The
+  reMarkable app isn't running" with "Open reMarkable", and the menu bar icon gets a dot; its menu shows the same
+  line and an "Open reMarkable" item. No notification, no alert, and the rMirror window does not come forward.
+- "Open reMarkable" (window or menu) opens the reMarkable app. Expected: the warning and the dot go away by themselves.
+- Not shown while signed out, during the first sync, or on the missing-folder or permission screens.
+- With the reMarkable app running only in a different macOS user account (fast user switching), the warning still
+  shows. That is correct: its files land in that other account.
+
 ## 7. Settings
 
 - "Open rMirror when I log in" on, then restart the Mac. Expected: the menu bar icon is back after login without
   a window opening, and syncing works (Full Disk Access still applies).
 - Sign out and in again.
 - "More options" → page limit: set, remove.
+- "Open the reMarkable app when rMirror starts" (off by default): turn it on, quit both apps, start rMirror while
+  working in another app. Expected: the reMarkable app starts hidden in the background, does not take focus and is
+  not added to recent items; no warning shows. Quit the reMarkable app afterwards: rMirror does not start it again
+  until rMirror itself is restarted. With the setting off, nothing opens.
 
 ## 8. Quit and leftovers
 

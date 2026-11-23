@@ -18,7 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store = AppStore(dependencies: .init(
             makeAPI: { LocalAPIClient(port: $0.port, appToken: $0.appToken) },
             openURL: { OnboardingSystem.openInBrowser($0) },
-            restartCore: { [weak self] in self?.supervisor?.restart() }
+            restartCore: { [weak self] in self?.supervisor?.restart() },
+            remarkableApp: RemarkableAppWatcher(),
+            preferences: .standard
         ))
 
         windows = WindowCoordinator(
@@ -59,6 +61,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Updater.shared.start()
 
         startCore()
+
+        // "Open the reMarkable app when rMirror starts": hidden, without taking focus, once per run.
+        // Does not wait for sign-in; the reMarkable app syncs on its own.
+        store.openRemarkableAppAtStartIfWanted()
 
         // Bring the window forward by itself when the user has something to do (see
         // `WindowRules.opensWindowByItself`): never for a sign-in that expired or a core that failed

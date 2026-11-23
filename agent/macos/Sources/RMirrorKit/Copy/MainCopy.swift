@@ -39,6 +39,12 @@ public enum MainCopy {
     public static let pausedTitle = "Uploads are paused"
     public static let pausedBody = "New pages are waiting to upload. Try again to continue."
 
+    // MARK: reMarkable app not running
+
+    public static let remarkableNotRunningTitle = "The reMarkable app isn't running"
+    public static let remarkableNotRunningBody = "New pages won't arrive until it's open. It can stay in the background."
+    public static let openRemarkable = "Open reMarkable"
+
     // MARK: Notebook list
 
     public static let listTitle = "Notebooks to sync"
@@ -168,6 +174,7 @@ public enum MainCopy {
             openOnWeb, settings, settingsHelp, accountFallback, signedInAs("sample@example.com"),
             allowanceExhaustedTitle, allowanceUsedAccessibility(used: 24, limit: 200),
             syncingTitle, dismiss, tryAgain, pausedTitle, pausedBody,
+            remarkableNotRunningTitle, remarkableNotRunningBody, openRemarkable,
             listTitle, listIntro, searchPlaceholder, clearSearch, selectAll, selectNone,
             selectAllMatching, selectNoneMatching, topLevelGroup,
             listIntroFolders, viewPickerLabel, viewFolders, viewRecent, expandAll, collapseAll,

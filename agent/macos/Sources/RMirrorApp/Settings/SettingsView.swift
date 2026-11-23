@@ -90,6 +90,22 @@ struct SettingsView: View {
                         .buttonStyle(.rmLink)
                 }
             }
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                HStack {
+                    Text(SettingsCopy.openRemarkableAtStart).font(Theme.Font.body)
+                    Spacer()
+                    Toggle(SettingsCopy.openRemarkableAtStart, isOn: Binding(
+                        get: { store.opensRemarkableAppAtStart },
+                        set: { store.setOpensRemarkableAppAtStart($0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .accessibilityLabel(SettingsCopy.openRemarkableAtStart)
+                }
+                Text(SettingsCopy.openRemarkableAtStartExplanation)
+                    .font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

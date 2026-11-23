@@ -10,6 +10,8 @@ public enum SettingsCopy {
     public static let openAtLogin = "Open rMirror when I log in"
     public static let loginItemOff = "This was turned off in System Settings. You can turn it back on there."
     public static let openLoginItems = "Open Login Items settings"
+    public static let openRemarkableAtStart = "Open the reMarkable app when rMirror starts"
+    public static let openRemarkableAtStartExplanation = "It opens hidden in the background, so new pages from your tablet keep arriving."
 
     // Account
     public static let accountHeading = "Account"
@@ -63,6 +65,7 @@ public enum SettingsCopy {
     public static var generalStrings: [String] {
         [
             windowTitle, loading, generalHeading, openAtLogin, loginItemOff, openLoginItems,
+            openRemarkableAtStart, openRemarkableAtStartExplanation,
             accountHeading, notSignedIn, signedInAs, signOut, signOutConfirmTitle, signOutConfirmBody,
             signOutConfirmAction, cancel, syncingHeading, moreOptions, limitPages, limitPagesExplanation,
             pageLimitField, pageLimitInvalid, save, folderLabel, folderNotSet, changeFolder,
