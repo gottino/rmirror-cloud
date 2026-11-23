@@ -19,6 +19,8 @@ public enum OnboardingCopy {
 
     public static let startingTitle = "Starting rMirror…"
     public static let startingMessage = "This only takes a moment."
+    /// Shown when starting takes longer than usual (the first start after an install or update can take a minute).
+    public static let startingSlowMessage = "The first start after installing or updating can take up to a minute."
     public static let checkingSignIn = "Checking your sign-in…"
 
     // MARK: Could not start
@@ -145,7 +147,7 @@ public enum OnboardingCopy {
     public static var allStrings: [String] {
         [
             tryAgain, quit, cancel, done, checksByItself,
-            startingTitle, startingMessage, checkingSignIn,
+            startingTitle, startingMessage, startingSlowMessage, checkingSignIn,
             otherCopyTitle, otherCopyMessage, otherCopyHowTo,
             cannotStartTitle, cannotStartMissingPart, cannotStartMessage,
             signInTitle, signInIntro, signInRenewTitle, signInRenewMessage, signInButton, signInHint,

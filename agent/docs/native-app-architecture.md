@@ -70,10 +70,20 @@ Derived from the supervisor status and `GET /api/v2/state` in `Stage.derive`, fi
 ## Supervisor rules
 
 - Launch with a fresh 32-byte token in `RMIRROR_APP_TOKEN`; keep the stdin pipe open.
-- Ready only when the `RMIRROR_CORE_READY` line arrives on the child's stdout; time out at 30 s. A reply on the port is never used as readiness, so the launch token cannot be sent to a different process listening there.
+- Release builds only ever start the bundled `Contents/Resources/core/rmirror-core`; the `RMIRROR_CORE_CMD` /
+  `_ARGS` / `_CWD` override exists in debug builds only.
+- The child's environment is an allowlist, not the app's environment: `HOME`, `PATH`, `TMPDIR`, `USER`, `LOGNAME`,
+  `LANG`, `LC_ALL`, `LC_CTYPE`, `SHELL`, `__CF_USER_TEXT_ENCODING`, plus the token and `PYTHONUNBUFFERED=1`
+  (debug builds also pass `RMIRROR_CONFIG_PATH` and `PYTHON_KEYRING_BACKEND`).
+- stderr is drained into a 4 KB in-memory tail, written to the system log (`NSLog`) when the core exits
+  unexpectedly or never becomes ready, and withheld if it contains the launch token.
+- Ready only when the `RMIRROR_CORE_READY` line arrives on the child's stdout; time out at 90 s (the first launch
+  of a freshly notarized core can be slow while macOS scans it). A reply on the port is never used as readiness, so the launch token cannot be sent to a different process listening there.
 - Unexpected exit: restart with backoff 1, 2, 5, 15, 30 s; after 5 failures in 2 minutes stop and show `coreFailed`.
 - Exit code 3 → `portInUse`, no restart loop.
-- Quit: `SIGTERM`, wait up to 8 s, then `SIGKILL`.
+- Quit: close stdin and `SIGTERM`, wait up to 3 s, then `SIGKILL`; never spin the run loop while waiting.
+- Restart: stop the old child, launch the new one only once the old one has gone and only if no quit came in
+  meanwhile (`SIGKILL` after 8 s).
 - After the user grants Full Disk Access the child must be restarted; macOS normally also asks the user to quit
   and reopen the app. The permission screen offers "Reopen rMirror".
 

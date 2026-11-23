@@ -14,7 +14,9 @@ swift test           # RMirrorKit unit tests (live-core tests are skipped, see b
 ```
 
 Outside a `.app` bundle the app finds no bundled core, so point it at the core from source
-(`CoreLocator` in `Sources/RMirrorKit/Core/CoreSupervisor.swift`):
+(`CoreLocator` in `Sources/RMirrorKit/Core/CoreSupervisor.swift`). This override works in **debug builds only**
+(`swift build`); a release build ignores these variables and only ever starts the bundled
+`Contents/Resources/core/rmirror-core`:
 
 ```sh
 cd agent && poetry install --no-root && cd macos
@@ -26,6 +28,9 @@ RMIRROR_CORE_CWD="$(cd .. && pwd)" \
 
 - `RMIRROR_CORE_CMD`: executable to start; `RMIRROR_CORE_ARGS`: its arguments, split on spaces (default
   `--headless`); `RMIRROR_CORE_CWD`: its working directory. The app adds `RMIRROR_APP_TOKEN` itself.
+- The core does not inherit the app's environment. It gets `HOME`, `PATH`, `TMPDIR`, `USER`, `LOGNAME`, `LANG`,
+  `LC_ALL`, `LC_CTYPE`, `SHELL`, `__CF_USER_TEXT_ENCODING` (when set), the token and `PYTHONUNBUFFERED=1`; debug
+  builds also pass `RMIRROR_CONFIG_PATH` and `PYTHON_KEYRING_BACKEND` through, so a throwaway config works there.
 - The core from source uses your real `~/.config/rmirror` and login keychain, like the installed app.
 - Outside a bundle Sparkle is never started and "Reopen rMirror" is not offered.
 
