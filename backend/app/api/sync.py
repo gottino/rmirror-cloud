@@ -699,6 +699,73 @@ async def get_deleted_notebooks(
     )
 
 
+class StoredPageItem(BaseModel):
+    """One page the server holds the file for."""
+
+    page_uuid: str = Field(..., description="reMarkable page UUID")
+    file_hash: str = Field(..., description="SHA-256 hex digest of the raw .rm file as stored")
+    ocr_status: str = Field(..., description="OCR status as stored (e.g. completed, pending_quota)")
+
+
+class StoredNotebookItem(BaseModel):
+    """A notebook and the pages of it the server holds files for."""
+
+    notebook_uuid: str = Field(..., description="reMarkable notebook UUID")
+    pages: list[StoredPageItem] = Field(..., description="Pages with a stored file hash")
+
+
+class StoredPagesResponse(BaseModel):
+    """Which page files the server already holds, for first-contact reconciliation."""
+
+    notebooks: list[StoredNotebookItem] = Field(
+        ..., description="Live notebooks with at least one stored page"
+    )
+    notebook_count: int = Field(..., description="Number of notebooks returned")
+    page_count: int = Field(..., description="Number of pages returned in total")
+
+
+@router.get("/stored-pages", response_model=StoredPagesResponse)
+def get_stored_pages(
+    current_user: User = Depends(get_clerk_active_user),
+    db: Session = Depends(get_db),
+):
+    """List the page files the server holds (page UUID, file hash, OCR status).
+
+    The Mac app calls this once when it meets a server or account for the first
+    time and uploads only the pages that are missing or whose hash differs.
+    Left out: deleted notebooks, removed pages, and pages without a page UUID or
+    file hash. One query; pages are grouped by notebook row. A plain `def`, so the
+    query and the large response are built off the event loop.
+    """
+    rows = db.execute(
+        select(Notebook.id, Notebook.notebook_uuid, Page.page_uuid, Page.file_hash, Page.ocr_status)
+        .join(Page, Page.notebook_id == Notebook.id)
+        .where(
+            Notebook.user_id == current_user.id,
+            Notebook.deleted.is_(False),
+            Page.removed_at.is_(None),
+            Page.page_uuid.is_not(None),
+            Page.file_hash.is_not(None),
+        )
+        .order_by(Notebook.id, Page.id)
+    ).all()
+
+    by_notebook: dict[int, StoredNotebookItem] = {}
+    for notebook_id, notebook_uuid, page_uuid, file_hash, ocr_status in rows:
+        item = by_notebook.get(notebook_id)
+        if item is None:
+            item = by_notebook[notebook_id] = StoredNotebookItem(notebook_uuid=notebook_uuid, pages=[])
+        item.pages.append(
+            StoredPageItem(page_uuid=page_uuid, file_hash=file_hash, ocr_status=getattr(ocr_status, "value", ocr_status))
+        )
+
+    return StoredPagesResponse(
+        notebooks=list(by_notebook.values()),
+        notebook_count=len(by_notebook),
+        page_count=len(rows),
+    )
+
+
 @router.post("/deleted-notebooks/{notebook_uuid}/acknowledge")
 async def acknowledge_deleted_notebook(
     notebook_uuid: str,
