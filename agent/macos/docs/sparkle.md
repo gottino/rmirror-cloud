@@ -65,6 +65,12 @@ codesign -f -s "$CODESIGN_IDENTITY" -o runtime --timestamp --entitlements <app.e
 codesign --verify --strict --verbose=2 rMirror.app
 ```
 
+**[verified-disk, 2026-11-23]** `scripts/build_app.sh` follows this order with the XPC services kept and signed, no
+entitlements anywhere, and a universal `RMirrorApp` (`swift build -c release --arch arm64 --arch x86_64`; products
+in `<scratch>/out/Products/Release/`, `Sparkle.framework` included; `install_name_tool -add_rpath` adds the rpath to
+both slices). Result: `codesign --verify --deep --strict` passes, the DMG was notarized (Accepted) and stapled, and
+`spctl -a` accepts the app copied out of the DMG as "Notarized Developer ID".
+
 `--timestamp` is not in Sparkle's snippet but is required for notarization [inference from Apple's rules]. The app is signed
 last. Library validation: signing Sparkle with the same Developer ID team as the app satisfies it; no
 `disable-library-validation` entitlement is needed [inference]; the docs mention disabling it only for ad-hoc/Debug runs.

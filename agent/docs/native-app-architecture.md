@@ -49,8 +49,8 @@ Sources/RMirrorApp/        executable
   Settings/                settings window, developer options
   Theme/                   colours, type, shared controls
 Tests/RMirrorKitTests/
-Resources/                 Info.plist template, entitlements, icon
-scripts/                   build_app.sh (assemble, sign, notarize), render_screens.sh
+Resources/                 Info.plist template (no entitlements needed; icon generated at build time)
+scripts/                   build_app.sh (build, assemble, sign, notarize), smoke_core.sh (see macos/README.md)
 ```
 
 ## Onboarding stage logic (single source of truth, in `RMirrorKit/Model`)
