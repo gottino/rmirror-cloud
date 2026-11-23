@@ -70,7 +70,6 @@ def save_mock():
 
 @pytest.fixture
 def config(test_config_with_token, save_mock):
-    test_config_with_token.api.use_clerk_auth = True
     return test_config_with_token
 
 

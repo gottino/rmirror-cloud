@@ -44,7 +44,7 @@ def fake_keyring(monkeypatch, tmp_path):
 
 
 def _signed_in_config(backend) -> Config:
-    config = Config(api=APIConfig(url=API_URL, use_clerk_auth=True))
+    config = Config(api=APIConfig(url=API_URL))
     config.api.token = "secret-token"
     assert backend.store, "token should have been stored in the fake keychain"
     return config
@@ -76,7 +76,7 @@ def test_sign_out_deletes_stored_token(fake_keyring):
     assert sync.config.api._token is None
     assert sync.config.api.token is None
     # A restart builds a fresh config: it must start signed out
-    fresh = Config(api=APIConfig(url=API_URL, use_clerk_auth=True))
+    fresh = Config(api=APIConfig(url=API_URL))
     assert fresh.api.token is None
     assert CloudSync(fresh).authenticated is False
 
@@ -112,7 +112,7 @@ async def test_401_signs_out_and_deletes_token(fake_keyring, tmp_path):
     assert sync.authenticated is False
     assert fake_keyring.store == {}
     assert sync.config.api.token is None
-    assert Config(api=APIConfig(url=API_URL, use_clerk_auth=True)).api.token is None
+    assert Config(api=APIConfig(url=API_URL)).api.token is None
 
 
 async def test_401_on_user_info_signs_out(fake_keyring):

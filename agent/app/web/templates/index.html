@@ -1516,18 +1516,6 @@
                     <input type="text" id="api-url" name="api_url" value="{{ api_url }}" required>
                 </div>
 
-                {% if not use_clerk_auth %}
-                <div class="form-group">
-                    <label for="email">Email</label>
-                    <input type="email" id="email" name="email" value="{{ email }}" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password" placeholder="Enter to update">
-                </div>
-                {% endif %}
-
                 <h3 style="margin: 30px 0 15px; font-size: 1.2em;">reMarkable Settings</h3>
 
                 <div class="form-group">
@@ -1558,7 +1546,6 @@
                 <button class="close-button" onclick="closeAuth()">&times;</button>
             </div>
 
-            {% if use_clerk_auth %}
             <!-- Clerk Authentication -->
             <div style="text-align: center; padding: 20px 0;">
                 <p style="margin-bottom: 20px; color: var(--warm-charcoal); font-size: 1.05em;">
@@ -1576,24 +1563,6 @@
                     Sign in to rMirror
                 </button>
             </div>
-            {% else %}
-            <!-- Password Authentication -->
-            <form id="auth-form" onsubmit="handlePasswordAuth(event)">
-                <div class="form-group">
-                    <label for="auth-email">Email</label>
-                    <input type="email" id="auth-email" name="email" required autofocus>
-                </div>
-
-                <div class="form-group">
-                    <label for="auth-password">Password</label>
-                    <input type="password" id="auth-password" name="password" required>
-                </div>
-
-                <div class="button-group">
-                    <button type="submit">Sign In</button>
-                </div>
-            </form>
-            {% endif %}
         </div>
     </div>
 
@@ -1784,36 +1753,6 @@
                 }
             } catch (error) {
                 showMessage('Sign out failed: ' + error.message, 'error');
-            }
-        }
-
-        async function handlePasswordAuth(event) {
-            event.preventDefault();
-            const formData = new FormData(event.target);
-
-            try {
-                const response = await fetch('/api/test-connection', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        email: formData.get('email'),
-                        password: formData.get('password'),
-                    }),
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    showMessage('Successfully authenticated!', 'success');
-                    closeAuth();
-                    refreshStatus();
-                } else {
-                    showMessage(data.message || 'Authentication failed', 'error');
-                }
-            } catch (error) {
-                showMessage('Authentication failed: ' + error.message, 'error');
             }
         }
 
@@ -2282,7 +2221,6 @@
             const config = {
                 api: {
                     url: formData.get('api_url'),
-                    email: formData.get('email'),
                 },
                 remarkable: {
                     source_directory: formData.get('remarkable_dir'),
@@ -2291,12 +2229,6 @@
                     auto_sync: formData.get('auto_sync') === 'on',
                 },
             };
-
-            // Include password if provided
-            const password = formData.get('password');
-            if (password) {
-                config.api.password = password;
-            }
 
             try {
                 const response = await fetch('/api/config', {
@@ -2311,9 +2243,6 @@
 
                 if (data.success) {
                     showMessage(data.message, 'success');
-                    // Clear password field (only exists in legacy auth mode)
-                    const passwordField = document.getElementById('password');
-                    if (passwordField) passwordField.value = '';
                     // Close settings modal
                     closeSettings();
                 } else {

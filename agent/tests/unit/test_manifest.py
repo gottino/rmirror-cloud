@@ -78,7 +78,8 @@ class TestUploadManifest:
         with patch.object(Config, "get_default_config_path", return_value=tmp_path / "cfg" / "config.yaml"):
             manifest = UploadManifest.for_config(test_config)
         assert manifest.db_path == tmp_path / "cfg" / manifest_module.MANIFEST_FILENAME
-        assert manifest.api_host == "test-api.rmirror.io"
+        # plain http to a remote host: namespaced with the port (never the https key)
+        assert manifest.api_host == "test-api.rmirror.io:80"
         test_config.api.url = "https://other.example/api/v1"
         assert manifest.api_host == "other.example"
 

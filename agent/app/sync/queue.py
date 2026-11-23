@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 PAUSED_QUOTA = "quota_exceeded"
 PAUSED_SIGN_IN = "sign_in_required"
 
+# Why the worker is waiting before it carries on by itself (None when it is not):
+# the cloud asked to slow down, or uploads fail with network/server errors.
+WAITING_RATE_LIMITED = "rate_limited"
+WAITING_OFFLINE = "offline"
+
 # Tray texts for each pause reason (shown via tray_app.update_status)
 PAUSE_STATUS_TEXT = {
     PAUSED_QUOTA: "Paused: quota exceeded",
@@ -136,6 +141,11 @@ class SyncQueue:
         self._resume_requested = threading.Event()
         # Called when the queue resumes after sign-in (the "reconnect" rescan)
         self.on_reconnect: Callable[[], Awaitable[object]] | None = None
+        # Set while the worker sleeps on a rate limit or before retrying a
+        # network/server error (read by the local API; no effect on syncing)
+        self.waiting_reason: str | None = None
+        # Called (on the agent loop) with the stats of every processed batch
+        self.on_batch_complete: Callable[[dict], None] | None = None
 
         self.running = False
         self.worker_task: Optional[asyncio.Task] = None
@@ -357,7 +367,11 @@ class SyncQueue:
                     stats["requeued"] += len(rest)
                     logger.warning(f"Rate limited; {len(rest)} item(s) put back, waiting {wait}s")
                     print(f"⏳ Rate limited, waiting {wait}s before continuing...")
-                    await self._sleep(wait)
+                    self.waiting_reason = WAITING_RATE_LIMITED
+                    try:
+                        await self._sleep(wait)
+                    finally:
+                        self.waiting_reason = None
                     return stats
                 except QuotaExceededError:
                     self._requeue(rest)
@@ -377,7 +391,11 @@ class SyncQueue:
                             f"Upload of {item.file_path.name} failed ({e}); retrying in {backoff}s"
                         )
                         print(f"⚠️  Upload failed, retrying in {backoff}s...")
-                        await self._sleep(backoff)
+                        self.waiting_reason = WAITING_OFFLINE
+                        try:
+                            await self._sleep(backoff)
+                        finally:
+                            self.waiting_reason = None
                         backoff = min(backoff * 2, self.MAX_BACKOFF_SECONDS)
                         continue
                     logger.error(f"Upload of {item.file_path.name} rejected, dropping it: {e}")
@@ -417,6 +435,11 @@ class SyncQueue:
             f"\n✓ Batch complete: {stats['uploaded']} uploaded, "
             f"{stats['failed']} failed, {stats['retried']} retried\n"
         )
+        if self.on_batch_complete is not None:
+            try:
+                self.on_batch_complete(stats)
+            except Exception as e:  # Observers must never break syncing
+                logger.debug(f"Batch callback failed: {e}")
         return stats
 
     async def _worker(self) -> None:
