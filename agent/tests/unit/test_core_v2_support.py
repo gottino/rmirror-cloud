@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.remarkable.library import DocumentInfo, folder_state, scan_documents
+from app.remarkable.library import DocumentInfo, folder_state, scan_documents, scan_library
 from app.sync.cloud_sync import AuthenticationRequiredError, QuotaExceededError, RateLimitError
 from app.sync.first_run import choose_notebooks, suggest_first_sync
 from app.sync.initial_sync import InitialSync
@@ -164,6 +164,77 @@ class TestScanDocuments:
         _meta(tmp_path, "n", visibleName="N", type="DocumentType", parent="x")
         (doc_,) = scan_documents(tmp_path)
         assert doc_.folder_path == ["Y", "X"]
+
+
+def _folder(root: Path, uuid: str, name: str | None, parent: str = "", **extra) -> None:
+    data = {"type": "CollectionType", "parent": parent, **extra}
+    if name is not None:
+        data["visibleName"] = name
+    _meta(root, uuid, **data)
+
+
+class TestScanLibraryFolders:
+    def test_nested_three_deep_and_empty_folder(self, tmp_path):
+        _folder(tmp_path, "a", "A")
+        _folder(tmp_path, "b", "B", "a")
+        _folder(tmp_path, "c", "C", "b")
+        _folder(tmp_path, "empty", "Empty")
+        _meta(tmp_path, "n", visibleName="N", type="DocumentType", parent="c")
+        lib = scan_library(tmp_path)
+        assert [(f.uuid, f.name, f.parent_uuid) for f in lib.folders] == [
+            ("a", "A", None), ("b", "B", "a"), ("c", "C", "b"), ("empty", "Empty", None)]
+        (n,) = lib.documents
+        assert n.parent_uuid == "c"
+        assert n.folder_path == ["A", "B", "C"]
+
+    def test_trashed_folder_and_everything_under_it_is_absent(self, tmp_path):
+        _folder(tmp_path, "t", "T", "trash")
+        _folder(tmp_path, "t2", "T2", "t")
+        _folder(tmp_path, "d", "D", deleted=True)
+        _folder(tmp_path, "d2", "D2", "d")
+        _folder(tmp_path, "keep", "Keep")
+        _meta(tmp_path, "n1", visibleName="N1", type="DocumentType", parent="t2")
+        _meta(tmp_path, "n2", visibleName="N2", type="DocumentType", parent="d2")
+        _meta(tmp_path, "n3", visibleName="N3", type="DocumentType", parent="trash")
+        _meta(tmp_path, "n4", visibleName="N4", type="DocumentType", parent="keep")
+        lib = scan_library(tmp_path)
+        assert [f.uuid for f in lib.folders] == ["keep"]
+        assert [d.uuid for d in lib.documents] == ["n4"]
+
+    def test_missing_parent_becomes_top_level_notebooks_keep_it(self, tmp_path):
+        _folder(tmp_path, "orphan", "Orphan", "ghost")
+        _meta(tmp_path, "n", visibleName="N", type="DocumentType", parent="orphan")
+        _meta(tmp_path, "m", visibleName="M", type="DocumentType", parent="ghost")
+        lib = scan_library(tmp_path)
+        assert [(f.uuid, f.parent_uuid) for f in lib.folders] == [("orphan", None)]
+        docs = {d.uuid: d for d in lib.documents}
+        assert docs["n"].parent_uuid == "orphan"
+        assert docs["n"].folder_path == ["Orphan"]
+        assert docs["m"].parent_uuid is None
+        assert docs["m"].folder_path == []
+
+    def test_parent_loop_terminates_both_top_level(self, tmp_path):
+        _folder(tmp_path, "x", "X", "y")
+        _folder(tmp_path, "y", "Y", "x")
+        _folder(tmp_path, "z", "Z", "x")
+        _meta(tmp_path, "n", visibleName="N", type="DocumentType", parent="x")
+        lib = scan_library(tmp_path)
+        assert {f.uuid: f.parent_uuid for f in lib.folders} == {"x": None, "y": None, "z": "x"}
+        assert lib.documents[0].parent_uuid == "x"
+        assert lib.documents[0].folder_path == ["Y", "X"]
+
+    def test_self_parent_is_top_level(self, tmp_path):
+        _folder(tmp_path, "s", "S", "s")
+        assert [(f.uuid, f.parent_uuid) for f in scan_library(tmp_path).folders] == [("s", None)]
+
+    def test_name_fallback_and_stable_order(self, tmp_path):
+        _folder(tmp_path, "u2", None)
+        _folder(tmp_path, "u1", "")
+        _folder(tmp_path, "b", "beta")
+        _folder(tmp_path, "a", "Alpha")
+        _folder(tmp_path, "b2", "Beta")
+        names = [(f.name, f.uuid) for f in scan_library(tmp_path).folders]
+        assert names == [("Alpha", "a"), ("Beta", "b2"), ("beta", "b"), ("Untitled", "u1"), ("Untitled", "u2")]
 
 
 # ----------------------------------------------------------------------

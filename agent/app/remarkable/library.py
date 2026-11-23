@@ -2,9 +2,10 @@
 Read-only views of the reMarkable Desktop folder for the local API v2.
 
 - ``folder_state``: whether the folder exists and can be listed.
-- ``scan_documents``: a flat list of notebooks with their folder path, page
-  count and timestamps (no folders, no trashed items, no PDFs/EPUBs, which the
-  sync does not upload either).
+- ``scan_library``: the notebooks (folder path, parent folder uuid, page count
+  and timestamps; no trashed items, no PDFs/EPUBs, which the sync does not
+  upload either) plus the folders that are not in the trash, in one pass.
+- ``scan_documents``: just the notebooks of ``scan_library``.
 
 Both only read ``.metadata`` / ``.content`` JSON files and directory listings.
 """
@@ -54,6 +55,7 @@ class DocumentInfo:
     uuid: str
     name: str
     folder_path: list[str] = field(default_factory=list)
+    parent_uuid: str | None = None
     document_type: str = "notebook"
     page_count: int = 0
     last_opened_at: datetime | None = None
@@ -63,6 +65,21 @@ class DocumentInfo:
     def recency(self) -> datetime:
         """Last opened, falling back to last modified (for "most recent first")."""
         return self.last_opened_at or self.last_modified_at or datetime.min.replace(tzinfo=UTC)
+
+
+@dataclass
+class FolderInfo:
+    """One folder (not in the trash). ``parent_uuid`` is None at the top level."""
+
+    uuid: str
+    name: str
+    parent_uuid: str | None = None
+
+
+@dataclass
+class Library:
+    documents: list[DocumentInfo] = field(default_factory=list)
+    folders: list[FolderInfo] = field(default_factory=list)
 
 
 def _timestamp(value: object) -> datetime | None:
@@ -103,10 +120,14 @@ def _page_count(content_file: Path) -> int:
     return 0
 
 
-def scan_documents(folder: Union[str, Path]) -> list[DocumentInfo]:
-    """All notebooks in the folder, unsorted. Blocking (reads files); never raises for one bad file."""
+def scan_library(folder: Union[str, Path]) -> Library:
+    """Notebooks and folders in one pass. Blocking (reads files); never raises for one bad file.
+
+    Documents are unsorted; folders are sorted by name (case-insensitive), then uuid.
+    """
     root = Path(folder)
-    collections: dict[str, tuple[str, str]] = {}  # uuid -> (name, parent)
+    # uuid -> (raw visibleName, parent, deleted)
+    collections: dict[str, tuple[str, str, bool]] = {}
     candidates: list[tuple[Path, dict]] = []
 
     for metadata_file in root.glob("*.metadata"):
@@ -122,24 +143,57 @@ def scan_documents(folder: Union[str, Path]) -> list[DocumentInfo]:
         doc_type = data.get("type", "DocumentType")
         parent = data.get("parent") or ""
         if doc_type == "CollectionType":
-            collections[uuid] = (str(data.get("visibleName", "")), str(parent))
+            collections[uuid] = (str(data.get("visibleName", "")), str(parent), data.get("deleted") is True)
         elif doc_type == "DocumentType":
             candidates.append((metadata_file, data))
 
-    def folder_chain(parent: str) -> list[str] | None:
-        """Names from the top folder down to parent; None if the item is in the trash."""
+    def folder_chain(parent: str) -> list[str]:
+        """Names from the top folder down to parent."""
         names: list[str] = []
         seen: set[str] = set()
         while parent:
-            if parent == TRASH_PARENT:
-                return None
             if parent in seen or parent not in collections:
                 break
             seen.add(parent)
-            name, parent = collections[parent]
+            name, parent, _ = collections[parent]
             names.append(name)
         names.reverse()
         return names
+
+    def in_trash(parent: str) -> bool:
+        """True if the folder ``parent`` (or an ancestor) is trashed, or ``parent`` is the trash."""
+        seen: set[str] = set()
+        while parent:
+            if parent == TRASH_PARENT:
+                return True
+            if parent in seen or parent not in collections:
+                return False
+            seen.add(parent)
+            _, next_parent, deleted = collections[parent]
+            if deleted:
+                return True
+            parent = next_parent
+        return False
+
+    def on_cycle(uuid: str) -> bool:
+        seen: set[str] = set()
+        cur = collections[uuid][1]
+        while cur in collections and cur not in seen:
+            if cur == uuid:
+                return True
+            seen.add(cur)
+            cur = collections[cur][1]
+        return False
+
+    folders: list[FolderInfo] = []
+    for uuid, (name, parent, _deleted) in collections.items():
+        if in_trash(uuid):
+            continue
+        # A missing parent or a parent loop makes the folder top-level
+        parent_uuid = parent if parent in collections and not on_cycle(uuid) else None
+        folders.append(FolderInfo(uuid=uuid, name=name or "Untitled", parent_uuid=parent_uuid))
+    folders.sort(key=lambda f: (f.name.casefold(), f.uuid))
+    listed = {f.uuid for f in folders}
 
     documents: list[DocumentInfo] = []
     for metadata_file, data in candidates:
@@ -148,20 +202,26 @@ def scan_documents(folder: Union[str, Path]) -> list[DocumentInfo]:
         # PDFs and EPUBs are not uploaded by the sync (see MetadataScanner)
         if metadata_file.with_suffix(".pdf").exists() or metadata_file.with_suffix(".epub").exists():
             continue
-        path = folder_chain(str(data.get("parent") or ""))
-        if path is None:
+        parent = str(data.get("parent") or "")
+        if in_trash(parent):
             continue
         documents.append(
             DocumentInfo(
                 uuid=metadata_file.stem,
                 name=str(data.get("visibleName", "Untitled")),
-                folder_path=path,
+                folder_path=folder_chain(parent),
+                parent_uuid=parent if parent in listed else None,
                 page_count=_page_count(metadata_file.with_suffix(".content")),
                 last_opened_at=_timestamp(data.get("lastOpened")),
                 last_modified_at=_timestamp(data.get("lastModified")),
             )
         )
-    return documents
+    return Library(documents=documents, folders=folders)
+
+
+def scan_documents(folder: Union[str, Path]) -> list[DocumentInfo]:
+    """All notebooks in the folder, unsorted. Blocking (reads files); never raises for one bad file."""
+    return scan_library(folder).documents
 
 
 def count_page_files(folder: Union[str, Path], notebook_uuid: str) -> int:
