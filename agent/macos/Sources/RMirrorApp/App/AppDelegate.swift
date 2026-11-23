@@ -28,7 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .settings: return AnyView(SettingsView().environmentObject(store!))
                 }
             },
-            visibilityChanged: { [store] visible in store!.setWindowVisible(visible) }
+            visibilityChanged: { [store] visible in
+                store!.setWindowVisible(visible)
+                Updater.shared.refreshDockBadge()
+            }
         )
 
         statusItem = StatusItemController(
@@ -38,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             checkForUpdates: { [weak self] in self?.checkForUpdates() }
         )
 
+        // Cmd-Q, Cmd-W, Cmd-comma and the text editing commands.
+        MainMenu.install(openSettings: { [weak self] in self?.windows.show(.settings) })
+
         // The main window's gear button asks for the settings window this way.
         NotificationCenter.default.addObserver(
             forName: Notification.Name("io.rmirror.openSettings"), object: nil, queue: .main
@@ -46,13 +52,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Automatic updates (inactive until the app is built with a feed URL and public key).
-        Updater.shared.setPresenter { [weak self] in self?.windows.show(.main) }
+        // A background check only shows a reminder in the menu bar item; it never opens a window.
+        Updater.shared.onUpdateAvailableChange = { [weak self] available in
+            self?.statusItem.setUpdateAvailable(available)
+        }
         Updater.shared.start()
 
         startCore()
 
-        // Bring the window forward by itself whenever the user has something to do:
-        // first launch, sign-in, a missing permission, the first sync.
+        // Bring the window forward by itself when the user has something to do (see
+        // `WindowRules.opensWindowByItself`): never for a sign-in that expired or a core that failed
+        // while no window is open; the menu bar icon shows a dot then.
         store.$stage
             .removeDuplicates()
             .receive(on: RunLoop.main)
@@ -81,19 +91,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stageChanged(_ stage: Stage) {
-        switch stage {
-        case .starting, .ready:
-            // Nothing for the user to do. Show the window once on the very first launch only.
-            if case .ready = stage, !hasShownWindowForFirstRun, !Preferences.hasLaunchedBefore {
-                windows.show(.main)
-            }
-        case .firstSyncProgress, .firstSyncResult:
-            break
-        case .coreProblem, .signIn, .remarkableMissing, .permission, .firstSync:
-            if !hasShownWindowForFirstRun || !windows.hasVisibleWindow {
-                windows.show(.main)
-            }
-        }
+        let opens = WindowRules.opensWindowByItself(
+            stage: stage,
+            firstLaunch: !hasShownWindowForFirstRun && !Preferences.hasLaunchedBefore,
+            firstStageThisSession: !hasShownWindowForFirstRun,
+            windowVisible: windows.hasVisibleWindow
+        )
+        if opens { windows.show(.main) }
         if stage != .starting {
             hasShownWindowForFirstRun = true
             Preferences.hasLaunchedBefore = true

@@ -25,6 +25,15 @@ public enum ActionProblem: Equatable, Sendable {
     }
 }
 
+/// The outcome of the fallback update check.
+public enum UpdateCheckResult: Equatable, Sendable {
+    case checked(UpdateCheck)
+    /// rMirror's own core is not running (or not reachable), so the internet is not to blame.
+    case coreNotRunning
+    /// The core answered with an error (usually the cloud could not be reached).
+    case failed
+}
+
 /// The app's single source of truth. Owns polling of the core and every action a view can take.
 /// Views read the published properties and call the methods; they never talk to the API directly.
 @MainActor
@@ -368,9 +377,14 @@ public final class AppStore: ObservableObject {
         await loadDeletedNotebooks()
     }
 
-    public func checkForUpdate() async -> UpdateCheck? {
-        guard let api else { return nil }
-        return try? await api.updateCheck()
+    /// The fallback update check (when automatic updates are not set up in this build).
+    public func checkForUpdate() async -> UpdateCheckResult {
+        guard let api else { return .coreNotRunning }
+        do {
+            return .checked(try await api.updateCheck())
+        } catch {
+            return ActionProblem(error) == .coreUnreachable ? .coreNotRunning : .failed
+        }
     }
 
     /// Which window an action came from, so its problem shows only there.

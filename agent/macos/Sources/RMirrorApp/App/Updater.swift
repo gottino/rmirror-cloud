@@ -8,16 +8,33 @@ import Sparkle
 /// non-empty `SUPublicEDKey`. Otherwise (including `swift build` runs outside a bundle) nothing from
 /// Sparkle is instantiated and the fallback below is used: the core's `version.json` check plus an alert.
 /// See `docs/sparkle.md`.
+///
+/// Background (scheduled) checks follow Sparkle's gentle-reminder guidance for background apps: the
+/// app never switches to a regular app, opens a window or activates itself for them. It shows a
+/// reminder it controls instead (`updateAvailable`, shown as "Update Available…" in the menu bar
+/// item, plus a Dock badge while the Dock icon is visible). Choosing it runs a user-initiated check,
+/// which brings the update window forward.
 @MainActor
 final class Updater: NSObject {
     static let shared = Updater()
 
     private var controller: SPUStandardUpdaterController?
-    private var presenter: (() -> Void)?
     private var started = false
 
     /// True when Sparkle is configured and running.
     var isSparkleActive: Bool { controller != nil }
+
+    /// A background check found an update the user has not looked at yet. Independent of the store.
+    private(set) var updateAvailable = false {
+        didSet {
+            guard updateAvailable != oldValue else { return }
+            refreshDockBadge()
+            onUpdateAvailableChange?(updateAvailable)
+        }
+    }
+
+    /// Called whenever `updateAvailable` changes (the menu bar item shows or hides its entry).
+    var onUpdateAvailableChange: ((Bool) -> Void)?
 
     private override init() {
         super.init()
@@ -39,13 +56,16 @@ final class Updater: NSObject {
             startingUpdater: true, updaterDelegate: nil, userDriverDelegate: self)
     }
 
-    /// Closure used to bring the app forward (e.g. show the main window) when Sparkle has an update to show.
-    func setPresenter(_ presenter: @escaping () -> Void) {
-        self.presenter = presenter
+    /// The Dock badge is a reminder only while the Dock icon is visible (a window is open).
+    /// Call when the activation policy may have changed.
+    func refreshDockBadge() {
+        let showBadge = updateAvailable && NSApp.activationPolicy() == .regular
+        NSApp.dockTile.badgeLabel = showBadge ? "1" : ""
     }
 
+    /// A check the user asked for (menu bar item, or the "Update Available…" reminder): this one may
+    /// bring rMirror forward.
     func checkForUpdates(store: AppStore, showWindow: @escaping () -> Void) {
-        if presenter == nil { presenter = showWindow }
         if let controller {
             showWindow()
             NSApp.activate(ignoringOtherApps: true)
@@ -59,24 +79,26 @@ final class Updater: NSObject {
         Task {
             let result = await store.checkForUpdate()
             let alert = NSAlert()
-            if let result, result.hasUpdate, let version = result.latestVersion {
-                alert.messageText = "rMirror \(version) is available"
-                alert.informativeText = "You have \(result.currentVersion). Download the new version and replace rMirror in your Applications folder."
-                alert.addButton(withTitle: "Download")
-                alert.addButton(withTitle: "Later")
+            let copy = AppCopy.Update.self
+            switch result {
+            case .checked(let check) where check.hasUpdate && check.latestVersion != nil:
+                alert.messageText = copy.availableTitle(check.latestVersion ?? "")
+                alert.informativeText = copy.availableBody(current: check.currentVersion)
+                alert.addButton(withTitle: copy.download)
+                alert.addButton(withTitle: copy.later)
                 NSApp.activate(ignoringOtherApps: true)
-                if alert.runModal() == .alertFirstButtonReturn, let url = SafeURL.browserURL(from: result.downloadURL) {
+                if alert.runModal() == .alertFirstButtonReturn, let url = SafeURL.browserURL(from: check.downloadURL) {
                     NSWorkspace.shared.open(url)
                 }
-            } else if result != nil {
-                alert.messageText = "rMirror is up to date"
-                alert.addButton(withTitle: "OK")
+            case .checked:
+                alert.messageText = copy.upToDate
+                alert.addButton(withTitle: copy.ok)
                 NSApp.activate(ignoringOtherApps: true)
                 alert.runModal()
-            } else {
-                alert.messageText = "Could not check for updates"
-                alert.informativeText = "Check your internet connection and try again."
-                alert.addButton(withTitle: "OK")
+            case .coreNotRunning, .failed:
+                alert.messageText = copy.checkFailedTitle
+                alert.informativeText = result == .coreNotRunning ? copy.checkFailedNotRunning : copy.checkFailedOffline
+                alert.addButton(withTitle: copy.ok)
                 NSApp.activate(ignoringOtherApps: true)
                 alert.runModal()
             }
@@ -84,29 +106,41 @@ final class Updater: NSObject {
     }
 }
 
-// Gentle reminders for background apps (Sparkle docs: "Gentle reminders").
+// Gentle reminders for background apps (https://sparkle-project.org/documentation/gentle-reminders).
 extension Updater: SPUStandardUserDriverDelegate {
     nonisolated var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    /// Scheduled checks: rMirror shows the reminder itself and never pops Sparkle's window over
+    /// whatever the user is doing. User-initiated checks are always shown by Sparkle.
+    nonisolated func standardUserDriverShouldHandleShowingScheduledUpdate(
+        _ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool
+    ) -> Bool {
+        false
+    }
 
     nonisolated func standardUserDriverWillHandleShowingUpdate(
         _ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState
     ) {
+        let userInitiated = state.userInitiated
         Task { @MainActor in
-            // Show the Dock icon so the update window is reachable via Cmd-Tab and not lost behind others.
-            NSApp.setActivationPolicy(.regular)
-            self.presenter?()
-            NSApp.activate(ignoringOtherApps: true)
-            if !state.userInitiated { NSApp.dockTile.badgeLabel = "1" }
+            if userInitiated {
+                // The user asked: make sure the update window is reachable (Dock icon, Cmd-Tab).
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+            } else {
+                // Keep it for when the user next opens rMirror.
+                self.updateAvailable = true
+            }
         }
     }
 
     nonisolated func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
-        Task { @MainActor in NSApp.dockTile.badgeLabel = "" }
+        Task { @MainActor in self.updateAvailable = false }
     }
 
-    // The app's own window manager decides when to return to `.accessory` (when its last window closes),
-    // so the policy is deliberately not changed here.
+    // The window coordinator decides when to return to `.accessory` (when no window of the app is
+    // left, Sparkle's included), so the policy is deliberately not changed here.
     nonisolated func standardUserDriverWillFinishUpdateSession() {
-        Task { @MainActor in NSApp.dockTile.badgeLabel = "" }
+        Task { @MainActor in self.updateAvailable = false }
     }
 }

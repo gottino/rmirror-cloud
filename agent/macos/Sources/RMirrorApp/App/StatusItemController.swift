@@ -2,11 +2,15 @@ import AppKit
 import Combine
 import RMirrorKit
 
-/// The menu bar item: a status line and four commands. No item duplicates another.
+/// The menu bar item: a status line and four commands (five while an update is waiting).
+/// No item duplicates another.
 @MainActor
 final class StatusItemController: NSObject {
     private let item: NSStatusItem
-    private let statusLine = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
+    private let statusLine = NSMenuItem(title: SharedCopy.statusLine(stage: .starting, state: nil), action: nil, keyEquivalent: "")
+    private var updateItem: NSMenuItem!
+    private var needsAttention = false
+    private var updateAvailable = false
     private let openMain: () -> Void
     private let openSettings: () -> Void
     private let checkForUpdates: () -> Void
@@ -22,18 +26,22 @@ final class StatusItemController: NSObject {
 
         if let button = item.button {
             button.image = StatusItemController.icon()
-            button.setAccessibilityLabel("rMirror")
+            button.setAccessibilityLabel(AppCopy.appName)
         }
 
         let menu = NSMenu()
         statusLine.isEnabled = false
         menu.addItem(statusLine)
         menu.addItem(.separator())
-        menu.addItem(command("Open rMirror", #selector(openMainAction), key: "o"))
-        menu.addItem(command("Settings…", #selector(openSettingsAction), key: ","))
-        menu.addItem(command("Check for Updates…", #selector(checkForUpdatesAction)))
+        menu.addItem(command(AppCopy.StatusMenu.open, #selector(openMainAction), key: "o"))
+        menu.addItem(command(AppCopy.StatusMenu.settings, #selector(openSettingsAction), key: ","))
+        // A background check found an update: the reminder rMirror controls (see `Updater`).
+        updateItem = command(AppCopy.StatusMenu.updateAvailable, #selector(checkForUpdatesAction))
+        updateItem.isHidden = true
+        menu.addItem(updateItem)
+        menu.addItem(command(AppCopy.StatusMenu.checkForUpdates, #selector(checkForUpdatesAction)))
         menu.addItem(.separator())
-        menu.addItem(command("Quit rMirror", #selector(quitAction), key: "q"))
+        menu.addItem(command(AppCopy.StatusMenu.quit, #selector(quitAction), key: "q"))
         item.menu = menu
 
         store.$stage.combineLatest(store.$state)
@@ -50,17 +58,29 @@ final class StatusItemController: NSObject {
         return menuItem
     }
 
+    /// Shows or hides "Update Available…" (and the dot on the icon).
+    func setUpdateAvailable(_ available: Bool) {
+        updateAvailable = available
+        updateItem.isHidden = !available
+        refreshIcon()
+    }
+
     private func update(stage: Stage, state: AppState?) {
         let line = SharedCopy.statusLine(stage: stage, state: state)
         statusLine.title = line
-        item.button?.toolTip = "rMirror: \(line)"
-        // A small dot on the icon when the user has something to do.
-        let needsAttention: Bool
+        item.button?.toolTip = AppCopy.StatusMenu.tooltip(line)
+        // A small dot on the icon when the user has something to do. With no window open this is
+        // the only signal for an expired sign-in or a core that cannot run (the window does not
+        // open by itself for those).
         switch stage {
         case .coreProblem, .signIn, .remarkableMissing, .permission, .firstSync: needsAttention = true
         default: needsAttention = state?.queue.pausedReason == .signIn
         }
-        item.button?.image = StatusItemController.icon(attention: needsAttention)
+        refreshIcon()
+    }
+
+    private func refreshIcon() {
+        item.button?.image = StatusItemController.icon(attention: needsAttention || updateAvailable)
     }
 
     /// A template image so it follows the menu bar's light or dark appearance.

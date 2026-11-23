@@ -292,4 +292,22 @@ final class AppStoreFlowTests: XCTestCase {
         XCTAssertNil(store.settingsProblem)
         XCTAssertEqual(store.problem, .cloudUnavailable, "signing out in Settings leaves the main window's problem alone")
     }
+
+    // MARK: S14d
+
+    func testUpdateCheckTellsCoreNotRunningApartFromOtherFailures() async {
+        let store = makeStore(MockLocalAPI())
+        let notRunning = await store.checkForUpdate()
+        XCTAssertEqual(notRunning, .coreNotRunning)
+
+        let api = MockLocalAPI(state: Fixtures.readyState)
+        let running = makeStore(api)
+        running.coreStatusChanged(.running(connection))
+        api.updateCheckResult = .failure(.api(code: .cloudTimeout, status: 504, detail: nil))
+        let failed = await running.checkForUpdate()
+        XCTAssertEqual(failed, .failed)
+        api.updateCheckResult = .failure(.coreUnreachable)
+        let unreachable = await running.checkForUpdate()
+        XCTAssertEqual(unreachable, .coreNotRunning)
+    }
 }
