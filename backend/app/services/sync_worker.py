@@ -20,7 +20,7 @@ from app.core.sync_engine import (
 )
 from app.core.upserts import dialect_insert
 from app.database import SessionLocal
-from app.integrations.registry import create_target, supports
+from app.integrations.registry import PAGE_REMOVAL, create_target, supports
 from app.models.notebook import Notebook
 from app.models.page import Page
 from app.models.sync_record import IntegrationConfig, SyncQueue, SyncRecord, SyncStatus
@@ -262,6 +262,7 @@ def handle_parent_gone(
             SyncQueue.target_name == queue_item.target_name,
             SyncQueue.notebook_uuid == queue_item.notebook_uuid,
             SyncQueue.status == 'pending',
+            SyncQueue.item_type == 'page_text',
         )
     }
     for record in resync:
@@ -385,6 +386,7 @@ class SyncWorker:
         # Round-robin cursor (last user id handled) for retroactive OCR
         self._pending_quota_cursor = 0
         self._last_queue_prune: Optional[float] = None
+        self._last_page_purge: Optional[float] = None
 
     async def start(self):
         """Start the background worker."""
@@ -427,6 +429,9 @@ class SyncWorker:
 
                 # Delete old finished queue rows (about hourly, small batches)
                 self._prune_sync_queue()
+
+                # Purge pages removed on the tablet long ago (about hourly)
+                await self._purge_removed_pages()
 
                 # Check drip emails every hour
                 if self._last_drip_check is None or (time.time() - self._last_drip_check) > 3600:
@@ -658,6 +663,41 @@ class SyncWorker:
         finally:
             db.close()
 
+    async def _purge_removed_pages(self):
+        """Delete pages removed more than PAGE_PURGE_AFTER_DAYS ago, about once an hour.
+
+        A bounded batch per run (``purge_removed_pages``). On PostgreSQL one
+        worker process at a time holds an advisory lock for it; a page whose
+        stored files could not be deleted stays for the next run.
+        """
+        from app.dependencies import get_storage_service
+        from app.jobs.process_pending_pages import advisory_claim
+        from app.services.page_removal import (
+            PAGE_PURGE_INTERVAL_SECONDS,
+            PAGE_PURGE_LOCK_CLASS,
+            purge_removed_pages,
+        )
+
+        if self._last_page_purge is not None and (
+            time.time() - self._last_page_purge
+        ) < PAGE_PURGE_INTERVAL_SECONDS:
+            return
+        self._last_page_purge = time.time()
+
+        db: Session = SessionLocal()
+        try:
+            with advisory_claim(db, PAGE_PURGE_LOCK_CLASS, 0) as claimed:
+                if not claimed:
+                    return
+                purged = await purge_removed_pages(db, get_storage_service())
+                if purged:
+                    logger.info("Purged %d removed page(s)", purged)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error purging removed pages: {e}", exc_info=True)
+        finally:
+            db.close()
+
     async def _process_queue_item(self, db: Session, queue_item: SyncQueue):
         """
         Process a single queue item.
@@ -735,6 +775,8 @@ class SyncWorker:
             await self._process_notebook_metadata_sync(db, queue_item, config, _item_start)
         elif queue_item.item_type == 'todo':
             await self._process_todo_sync(db, queue_item, config, _item_start)
+        elif queue_item.item_type == PAGE_REMOVAL:
+            await self._process_page_removal(db, queue_item, config, _item_start)
         else:
             logger.warning(f"Unsupported item type: {queue_item.item_type}")
             queue_item.status = 'failed'
@@ -763,6 +805,15 @@ class SyncWorker:
             logger.warning(f"Page {queue_item.item_id} not found")
             queue_item.status = 'failed'
             queue_item.error_message = "Page not found"
+            db.commit()
+            return
+
+        if page.removed_at is not None:
+            # Deleted on the tablet since this row was queued; restoring the
+            # page queues it again.
+            logger.info(f"Page {page.id} was removed; not syncing it to {queue_item.target_name}")
+            queue_item.status = 'completed'
+            queue_item.completed_at = datetime.utcnow()
             db.commit()
             return
 
@@ -1119,6 +1170,136 @@ class SyncWorker:
                 },
             )
 
+        db.commit()
+
+    async def _process_page_removal(
+        self,
+        db: Session,
+        queue_item: SyncQueue,
+        config: IntegrationConfig,
+        _item_start: float = 0.0,
+    ):
+        """Delete a removed page's toggle block from the notebook's Notion page.
+
+        The block is the page's SyncRecord ``external_id`` (plus old blocks an
+        update could not delete). Once Notion confirms they are gone (missing
+        or archived counts), the SyncRecord is deleted, so restoring the page
+        later syncs a new toggle at its position. Nothing to do when the page
+        was restored meanwhile or was never synced. Failures are retried like
+        page syncs (rate limits deferred, transient errors backed off).
+        """
+        def complete() -> None:
+            _set_rate_limit_deferrals(queue_item, 0)
+            queue_item.status = 'completed'
+            queue_item.completed_at = datetime.utcnow()
+            queue_item.error_message = None
+            db.commit()
+
+        page = db.query(Page).filter(Page.id == int(queue_item.item_id)).first()
+        if page is not None and page.removed_at is None:
+            logger.info(f"Page {page.id} was restored; keeping its {queue_item.target_name} block")
+            complete()
+            return
+
+        record = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == queue_item.user_id,
+                SyncRecord.page_uuid == queue_item.page_uuid,
+                SyncRecord.target_name == queue_item.target_name,
+                SyncRecord.item_type == 'page_text',
+            )
+            .first()
+        )
+        if record is None or not queue_item.page_uuid:
+            complete()
+            return
+
+        notebook_record = (
+            db.query(SyncRecord)
+            .filter(
+                SyncRecord.user_id == queue_item.user_id,
+                SyncRecord.notebook_uuid == record.notebook_uuid,
+                SyncRecord.item_type == 'notebook',
+                SyncRecord.target_name == queue_item.target_name,
+            )
+            .first()
+        )
+        notebook_page_id = notebook_record.external_id if notebook_record else None
+
+        block_ids = [
+            b
+            for b in dict.fromkeys(
+                [record.external_id, *(_load_json(record.metadata_json).get("stale_block_ids") or [])]
+            )
+            if b
+            # Never archive the notebook page itself through a stale id.
+            and (not notebook_page_id or b.replace("-", "") != notebook_page_id.replace("-", ""))
+        ]
+
+        result = None
+        if not notebook_page_id:
+            # Without the notebook's Notion page the stored ids cannot be
+            # checked, so nothing is deleted in Notion; the record is forgotten.
+            logger.warning(
+                "No notebook record for removed page %s; leaving %s untouched",
+                queue_item.page_uuid,
+                queue_item.target_name,
+            )
+        else:
+            target = create_target(queue_item.target_name, config.get_config())
+            for block_id in block_ids:
+                result = await target.remove_page_block(block_id, notebook_page_id)
+                if not result.success:
+                    break
+
+        duration_ms = round((time.monotonic() - _item_start) * 1000, 1)
+        if result is None or result.success:
+            db.delete(record)
+            logger.info(
+                "Removed page %s from %s",
+                queue_item.page_uuid,
+                queue_item.target_name,
+                extra={
+                    "event": "sync.page_removed",
+                    "queue_id": queue_item.id,
+                    "target": queue_item.target_name,
+                    "duration_ms": duration_ms,
+                    "page_uuid": queue_item.page_uuid,
+                    "notebook_uuid": queue_item.notebook_uuid,
+                },
+            )
+            complete()
+            # The page may have been restored while Notion was being called.
+            # That restore saw the record still in place and queued nothing,
+            # so queue the page's sync here: it recreates the toggle.
+            if page is not None:
+                db.refresh(page)
+                if page.removed_at is None and page.ocr_text:
+                    from app.services.page_events import enqueue_integration_syncs
+
+                    notebook = db.query(Notebook).filter(Notebook.id == page.notebook_id).first()
+                    if notebook is not None:
+                        logger.info(f"Page {page.id} was restored during its removal; re-syncing it")
+                        enqueue_integration_syncs(db, page, notebook)
+            return
+
+        outcome = apply_sync_result(queue_item, result)
+        logger.log(
+            logging.INFO if outcome == "skipped" else logging.ERROR,
+            "Page removal %s: page %s: %s",
+            outcome,
+            queue_item.page_uuid,
+            result.error_message,
+            extra={
+                "event": f"sync.{'fail' if outcome == 'failed' else outcome}",
+                "queue_id": queue_item.id,
+                "target": queue_item.target_name,
+                "duration_ms": duration_ms,
+                "error": result.error_message,
+                "retrying": outcome == "retry",
+            },
+        )
         db.commit()
 
     @staticmethod

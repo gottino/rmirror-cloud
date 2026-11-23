@@ -329,6 +329,7 @@ async def obsidian_status(
             .filter(
                 Notebook.notebook_uuid.in_(synced_notebook_uuids),
                 Page.ocr_status == OcrStatus.COMPLETED.value,
+                Page.removed_at.is_(None),
             )
             .count()
         )
@@ -380,6 +381,7 @@ async def sync_notebooks(
             .filter(
                 NotebookPage.notebook_id == nb.id,
                 Page.ocr_status == OcrStatus.COMPLETED.value,
+                Page.removed_at.is_(None),
             )
             .order_by(NotebookPage.page_number)
             .all()

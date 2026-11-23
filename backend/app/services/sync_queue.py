@@ -85,6 +85,8 @@ def queue_sync(
                 SyncQueue.target_name == target_name,
                 SyncQueue.user_id == user_id,
                 SyncQueue.status == 'pending',
+                # Not a pending page_removal row of the same page
+                SyncQueue.item_type == 'page_text',
             )
             .first()
         )

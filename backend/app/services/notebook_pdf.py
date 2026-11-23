@@ -44,6 +44,7 @@ def _page_pdf_keys(db: Session, notebook_id: int) -> List[str]:
         .filter(
             NotebookPage.notebook_id == notebook_id,
             Page.pdf_s3_key.isnot(None),
+            Page.removed_at.is_(None),
         )
         .order_by(NotebookPage.page_number)
         .all()

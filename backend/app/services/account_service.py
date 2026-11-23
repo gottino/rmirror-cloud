@@ -111,6 +111,7 @@ class AccountService:
 
             notebook_index = []
             total_pages = 0
+            total_removed_pages = 0
 
             for notebook in notebooks:
                 # Skip folders
@@ -143,7 +144,7 @@ class AccountService:
                 notebook_pages = (
                     db.query(NotebookPage, Page)
                     .join(Page, NotebookPage.page_id == Page.id)
-                    .filter(NotebookPage.notebook_id == notebook.id)
+                    .filter(NotebookPage.notebook_id == notebook.id, Page.removed_at.is_(None))
                     .order_by(NotebookPage.page_number)
                     .all()
                 )
@@ -151,15 +152,56 @@ class AccountService:
                 nb_page_count = len(notebook_pages)
                 total_pages += nb_page_count
 
+                # Pages deleted on the tablet are still stored until they are
+                # purged (app/services/page_removal.py), so they belong in the
+                # export too, in files of their own.
+                removed_pages = (
+                    db.query(Page)
+                    .filter(Page.notebook_id == notebook.id, Page.removed_at.isnot(None))
+                    .order_by(Page.removed_at, Page.id)
+                    .all()
+                )
+                total_removed_pages += len(removed_pages)
+
                 notebook_index.append(
                     {
                         "name": notebook.visible_name,
                         "uuid": notebook.notebook_uuid,
                         "type": notebook.document_type,
                         "pages": nb_page_count,
+                        "deleted_pages_awaiting_removal": len(removed_pages),
                         "path": notebook.full_path,
                     }
                 )
+
+                if removed_pages:
+                    removed_pdfs = []
+                    removed_lines = [
+                        f"# {notebook.visible_name or 'Untitled Notebook'}: deleted pages\n",
+                        "Pages deleted on the tablet that are still stored until their removal.\n",
+                    ]
+                    for page in removed_pages:
+                        removed_lines.append(f"\n## Deleted on {page.removed_at.date().isoformat()}\n")
+                        removed_lines.append(page.ocr_text or "[No OCR text]")
+                        removed_lines.append("\n---\n")
+                        if page.pdf_s3_key:
+                            try:
+                                removed_pdfs.append(await storage.download_file(page.pdf_s3_key))
+                            except Exception as e:
+                                logger.warning(f"Failed to download PDF for removed page {page.id}: {e}")
+                    zf.writestr(
+                        f"{notebook_dir}/{safe_name} - deleted pages.md", "\n".join(removed_lines)
+                    )
+                    if removed_pdfs:
+                        try:
+                            zf.writestr(
+                                f"{notebook_dir}/{safe_name} - deleted pages.pdf",
+                                PDFService.combine_page_pdfs(removed_pdfs),
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to combine removed-page PDFs for notebook {notebook.id}: {e}"
+                            )
 
                 if not notebook_pages:
                     continue
@@ -216,6 +258,7 @@ class AccountService:
                 "export_timestamp": datetime.utcnow().isoformat(),
                 "notebook_count": len(notebook_index),
                 "total_pages": total_pages,
+                "deleted_pages_awaiting_removal": total_removed_pages,
                 "notebooks": notebook_index,
             }
             zf.writestr(

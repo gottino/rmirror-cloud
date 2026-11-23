@@ -166,6 +166,7 @@ class PostgreSQLSearchBackend(SearchBackend):
                 JOIN notebooks n ON n.id = np.notebook_id
                 WHERE n.user_id = :user_id AND n.deleted = false
                   AND :query <<% p.ocr_text AND p.ocr_status = 'completed'
+                  AND p.removed_at IS NULL
                   {filter_conditions}
                 GROUP BY np.notebook_id
             ),
@@ -239,6 +240,7 @@ class PostgreSQLSearchBackend(SearchBackend):
             WHERE np.notebook_id = ANY(:notebook_ids)
               AND :query <<% p.ocr_text
               AND p.ocr_status = 'completed'
+              AND p.removed_at IS NULL
             ORDER BY np.notebook_id, content_score DESC
         """)
 
@@ -401,6 +403,7 @@ class SQLiteSearchBackend(SearchBackend):
                 *base_filters,
                 Page.ocr_text.ilike(like_pattern),
                 Page.ocr_status == "completed",
+                Page.removed_at.is_(None),
             )
             .all()
         )

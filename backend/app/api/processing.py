@@ -296,7 +296,8 @@ async def process_rm_file(
                     Page.notebook_id.in_(
                         db.query(Notebook.id).filter(Notebook.user_id == current_user.id)
                     ),
-                    Page.ocr_status == OcrStatus.PENDING_QUOTA
+                    Page.ocr_status == OcrStatus.PENDING_QUOTA,
+                    Page.removed_at.is_(None),
                 ).count()
 
                 if pending_count >= 100:

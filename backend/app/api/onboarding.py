@@ -64,7 +64,11 @@ async def get_onboarding_progress(
     has_ocr = (
         db.query(Page)
         .join(Notebook, Page.notebook_id == Notebook.id)
-        .filter(Notebook.user_id == current_user.id, Page.ocr_status == "completed")
+        .filter(
+            Notebook.user_id == current_user.id,
+            Page.ocr_status == "completed",
+            Page.removed_at.is_(None),
+        )
         .first()
         is not None
     )
@@ -154,7 +158,11 @@ async def update_onboarding_progress(
     has_ocr = (
         db.query(Page)
         .join(Notebook, Page.notebook_id == Notebook.id)
-        .filter(Notebook.user_id == current_user.id, Page.ocr_status == "completed")
+        .filter(
+            Notebook.user_id == current_user.id,
+            Page.ocr_status == "completed",
+            Page.removed_at.is_(None),
+        )
         .first()
         is not None
     )

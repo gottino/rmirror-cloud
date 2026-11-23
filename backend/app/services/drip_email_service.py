@@ -54,7 +54,12 @@ class DripEmailService:
 
             # Get notebook/page counts for the email
             notebook_count = db.query(Notebook).filter(Notebook.user_id == user.id).count()
-            page_count = db.query(Page).join(Notebook).filter(Notebook.user_id == user.id).count()
+            page_count = (
+                db.query(Page)
+                .join(Notebook)
+                .filter(Notebook.user_id == user.id, Page.removed_at.is_(None))
+                .count()
+            )
 
             success = email_service.send_first_sync_celebration_email(
                 user_email=user.email,
@@ -74,7 +79,12 @@ class DripEmailService:
             ocr_page = (
                 db.query(Page)
                 .join(Notebook)
-                .filter(Notebook.user_id == user.id, Page.ocr_status == "completed", Page.ocr_text.isnot(None))
+                .filter(
+                    Notebook.user_id == user.id,
+                    Page.ocr_status == "completed",
+                    Page.ocr_text.isnot(None),
+                    Page.removed_at.is_(None),
+                )
                 .first()
             )
             snippet = ocr_page.ocr_text[:200] if ocr_page and ocr_page.ocr_text else None

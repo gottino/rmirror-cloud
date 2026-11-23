@@ -33,6 +33,7 @@ def update_obsidian_content_hash(db: Session, notebook: Notebook) -> None:
                 NotebookPage.notebook_id == notebook.id,
                 Page.ocr_status == OcrStatus.COMPLETED.value,
                 Page.ocr_text.isnot(None),
+                Page.removed_at.is_(None),
             )
             .order_by(NotebookPage.page_number)
             .all()
@@ -144,6 +145,11 @@ def on_ocr_completed(db: Session, page: Page, notebook: Notebook) -> None:
     That step makes no external calls and never raises.
     """
     update_obsidian_content_hash(db, notebook)
+
+    if page.removed_at is not None:
+        # Deleted on the tablet: no syncs or todos until it is listed again
+        # (restoring it does both, see app/services/page_removal.py).
+        return
 
     if page.ocr_status == OcrStatus.COMPLETED and page.ocr_text:
         enqueue_integration_syncs(db, page, notebook)

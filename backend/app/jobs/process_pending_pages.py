@@ -102,6 +102,7 @@ def _processable(now: datetime):
     return and_(
         or_(Page.ocr_status == OcrStatus.PENDING_QUOTA, retry_due(now)),
         Page.pdf_s3_key.isnot(None),  # Must have PDF to process
+        Page.removed_at.is_(None),  # Deleted on the tablet: OCR'd if restored
     )
 
 
@@ -276,13 +277,19 @@ def _users_with_processable_pages(
     return [row[0] for row in rows]
 
 
+def _user_claim(db: Session, user_id: int):
+    """Claim a user's pending pages for this worker (see ``advisory_claim``)."""
+    return advisory_claim(db, PENDING_QUOTA_LOCK_CLASS, user_id)
+
+
 @contextmanager
-def _user_claim(db: Session, user_id: int) -> Iterator[bool]:
-    """Claim a user's pending pages for this worker; yields False if already claimed.
+def advisory_claim(db: Session, lock_class: int, key: int) -> Iterator[bool]:
+    """Claim (lock_class, key) for this worker process; yields False if already claimed.
 
     Production runs several uvicorn workers, each with its own SyncWorker. Two
     of them working on the same user would OCR the same pages twice and race on
-    the quota counter, so a user is processed by one worker at a time.
+    the quota counter, so a user is processed by one worker at a time
+    (``_user_claim``); the removed-page purge uses its own lock class.
 
     On PostgreSQL the claim is a session-level advisory lock held on a dedicated
     connection (``pg_try_advisory_lock``, which never blocks). Holding it on its
@@ -303,7 +310,7 @@ def _user_claim(db: Session, user_id: int) -> Iterator[bool]:
         locked = bool(
             conn.execute(
                 text("SELECT pg_try_advisory_lock(:cls, :uid)"),
-                {"cls": PENDING_QUOTA_LOCK_CLASS, "uid": user_id},
+                {"cls": lock_class, "uid": key},
             ).scalar()
         )
         conn.commit()
@@ -313,13 +320,13 @@ def _user_claim(db: Session, user_id: int) -> Iterator[bool]:
             if locked:
                 conn.execute(
                     text("SELECT pg_advisory_unlock(:cls, :uid)"),
-                    {"cls": PENDING_QUOTA_LOCK_CLASS, "uid": user_id},
+                    {"cls": lock_class, "uid": key},
                 )
                 conn.commit()
         except Exception:
             # Never return a connection that may still hold the lock to the pool.
             logger.error(
-                "Failed to release pending-quota claim for user %s", user_id, exc_info=True
+                "Failed to release advisory claim %s/%s", lock_class, key, exc_info=True
             )
             conn.invalidate()
         finally:

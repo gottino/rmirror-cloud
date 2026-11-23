@@ -35,6 +35,7 @@ from app.schemas.notebook import (
 )
 from app.schemas.page import Page as PageSchema
 from app.services import quota_service
+from app.services.page_removal import apply_page_lists, finish_page_lists, parse_content_pages
 from app.storage import StorageService
 from app.utils.files import (
     calculate_file_hash,
@@ -217,7 +218,7 @@ async def get_notebooks_tree(
             func.coalesce(func.sum(case((Page.ocr_status == "pending_quota", 1), else_=0)), 0),
         )
         .join(Page, NotebookPage.page_id == Page.id)
-        .where(NotebookPage.notebook_id.in_(notebook_ids))
+        .where(NotebookPage.notebook_id.in_(notebook_ids), Page.removed_at.is_(None))
         .group_by(NotebookPage.notebook_id)
     ).all()
     counts_by_id = {row[0]: (row[1], row[2], row[3]) for row in status_counts}
@@ -244,7 +245,7 @@ async def get_notebooks_tree(
             .label("rn_text"),
         )
         .join(Page, NotebookPage.page_id == Page.id)
-        .where(NotebookPage.notebook_id.in_(notebook_ids))
+        .where(NotebookPage.notebook_id.in_(notebook_ids), Page.removed_at.is_(None))
         .subquery()
     )
     preview_rows = db.execute(
@@ -404,7 +405,7 @@ def _page_counts(db: Session, notebook_id: int) -> dict[str, int]:
     rows = (
         db.query(Page.ocr_status, func.count(NotebookPage.id))
         .join(Page, NotebookPage.page_id == Page.id)
-        .filter(NotebookPage.notebook_id == notebook_id)
+        .filter(NotebookPage.notebook_id == notebook_id, Page.removed_at.is_(None))
         .group_by(Page.ocr_status)
         .all()
     )
@@ -453,7 +454,7 @@ async def get_notebook(
         notebook_pages = (
             db.query(NotebookPage, Page)
             .join(Page, NotebookPage.page_id == Page.id)
-            .filter(NotebookPage.notebook_id == notebook.id)
+            .filter(NotebookPage.notebook_id == notebook.id, Page.removed_at.is_(None))
             .order_by(NotebookPage.page_number)
             .all()
         )
@@ -503,7 +504,8 @@ async def get_notebook_pages(
 
     total = (
         db.query(func.count(NotebookPage.id))
-        .filter(NotebookPage.notebook_id == notebook.id)
+        .join(Page, NotebookPage.page_id == Page.id)
+        .filter(NotebookPage.notebook_id == notebook.id, Page.removed_at.is_(None))
         .scalar()
     ) or 0
 
@@ -511,7 +513,7 @@ async def get_notebook_pages(
     rows = (
         db.query(NotebookPage.page_number, Page)
         .join(Page, NotebookPage.page_id == Page.id)
-        .filter(NotebookPage.notebook_id == notebook.id)
+        .filter(NotebookPage.notebook_id == notebook.id, Page.removed_at.is_(None))
         .order_by(sort_key)
         .offset(offset)
         .limit(limit)
@@ -594,7 +596,7 @@ async def export_notebook(
     notebook_pages = (
         db.query(NotebookPage, Page)
         .join(Page, NotebookPage.page_id == Page.id)
-        .filter(NotebookPage.notebook_id == notebook.id)
+        .filter(NotebookPage.notebook_id == notebook.id, Page.removed_at.is_(None))
         .order_by(NotebookPage.page_number)
         .all()
     )
@@ -930,9 +932,15 @@ async def upload_content_file(
 
     This endpoint:
     1. Accepts a .content JSON file for a notebook
-    2. Parses the pages array (handles both old and new formats)
-    3. Updates the notebook_pages mapping table with correct page order
-    4. Stores the .content JSON in the notebooks table
+    2. Parses the page list (old ``pages`` and new ``cPages`` formats; cPages
+       entries marked deleted count as deleted)
+    3. Removes pages the list marks deleted or no longer has, and restores
+       removed pages it lists again (app/services/page_removal.py)
+    4. Updates the notebook_pages mapping table with correct page order
+    5. Stores the .content JSON in the notebooks table
+
+    An empty page list, or one that would remove every page of the notebook,
+    changes no pages and leaves the page order as it was.
 
     Args:
         notebook_uuid: UUID of the notebook
@@ -980,54 +988,54 @@ async def upload_content_file(
         # Store the raw content JSON
         notebook.content_json = json.dumps(content_json)
 
-        # Extract pages array (handle both old and new formats)
-        pages_array = content_json.get("pages", [])
+        # Ordered uuids of the pages the file lists as present (cPages entries
+        # marked deleted are left out); None when it has no page list.
+        listed = parse_content_pages(content_json)
 
-        # If pages is empty, try cPages.pages (newer format)
-        if not pages_array and "cPages" in content_json:
-            c_pages = content_json["cPages"].get("pages", [])
-            # Extract page IDs from cPages format
-            pages_array = [
-                p["id"] for p in c_pages if isinstance(p, dict) and "id" in p
-            ]
-
-        # Delete existing mappings for this notebook
-        db.query(NotebookPage).filter(
-            NotebookPage.notebook_id == notebook.id
-        ).delete()
-
-        # Create new mappings from .content file
         pages_added = 0
-        for index, page_uuid in enumerate(pages_array):
-            page_number = index + 1  # 1-indexed
+        outcome = None
+        if listed:
+            # Remove pages the list no longer has, restore ones it has again.
+            # An empty or missing list changes nothing (see apply_page_lists).
+            outcome = apply_page_lists(db, current_user.id, {notebook.id: listed})
 
-            # Find the page by UUID
-            page = (
-                db.query(Page)
+        if outcome is not None and notebook.id not in outcome.skipped:
+            # Rebuild the page order from the list (removed pages are not in it)
+            db.query(NotebookPage).filter(
+                NotebookPage.notebook_id == notebook.id
+            ).delete()
+
+            page_ids = {
+                page_uuid: page_id
+                for page_id, page_uuid in db.query(Page.id, Page.page_uuid)
                 .filter(
-                    Page.page_uuid == page_uuid,
-                    Page.notebook_id == notebook.id,  # Ensure it belongs to this user
+                    Page.notebook_id == notebook.id,
+                    Page.page_uuid.in_(listed),
                 )
-                .first()
-            )
-
-            if page:
-                # Create mapping
-                notebook_page = NotebookPage(
-                    notebook_id=notebook.id,
-                    page_id=page.id,
-                    page_number=page_number,
+                .order_by(Page.id.desc())  # lowest id wins below
+            }
+            for index, page_uuid in enumerate(listed):
+                page_id = page_ids.get(page_uuid)
+                if page_id is None:
+                    continue
+                db.add(
+                    NotebookPage(
+                        notebook_id=notebook.id,
+                        page_id=page_id,
+                        page_number=index + 1,  # 1-indexed
+                    )
                 )
-                db.add(notebook_page)
                 pages_added += 1
 
         db.commit()
+        if outcome is not None:
+            finish_page_lists(db, current_user.id, outcome)
 
         return {
             "success": True,
             "message": "Content file processed successfully",
             "notebook_uuid": notebook_uuid,
-            "pages_in_content": len(pages_array),
+            "pages_in_content": len(listed or []),
             "pages_mapped": pages_added,
         }
 

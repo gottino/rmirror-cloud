@@ -113,9 +113,12 @@ class PagePlanner:
                     content_data = json.load(f)
 
                 # Get pages array (try both locations for different reMarkable versions)
-                pages_array = content_data.get("pages", [])
-                if not pages_array and "cPages" in content_data:
-                    pages_array = content_data.get("cPages", {}).get("pages", [])
+                # cPages (newer files, carries deletion marks) wins when it has
+                # entries, as on the server; older files only have the plain list.
+                c_pages = content_data.get("cPages")
+                pages_array = c_pages.get("pages") if isinstance(c_pages, dict) else None
+                if not isinstance(pages_array, list) or not pages_array:
+                    pages_array = content_data.get("pages", [])
 
                 # Extract page UUIDs - pages can be plain strings or dicts with 'id' field
                 # Skip deleted pages (they have 'deleted': {'value': 1} or similar)

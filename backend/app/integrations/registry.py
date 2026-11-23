@@ -6,7 +6,7 @@ one entry instead of editing if/elif chains and hard-coded name lists.
 
 Item types are the ``SyncQueue.item_type`` values the worker processes:
 ``page_text`` (a page's OCR text), ``notebook_metadata`` (notebook properties
-only) and ``todo``. A target with no push item types (Obsidian) is pull-based
+only), ``page_removal`` (a page deleted on the tablet) and ``todo``. A target with no push item types (Obsidian) is pull-based
 and never gets queue rows.
 """
 
@@ -21,6 +21,9 @@ from app.integrations.todoist_sync import TodoistSyncTarget
 PAGE_TEXT = "page_text"
 NOTEBOOK_METADATA = "notebook_metadata"
 TODO = "todo"
+# Delete a page's toggle from the notebook's page in the target (the page was
+# deleted on the tablet). Queued by app/services/page_removal.py.
+PAGE_REMOVAL = "page_removal"
 
 
 @dataclass(frozen=True)
@@ -43,7 +46,7 @@ _TARGETS: Dict[str, TargetSpec] = {
                 access_token=cfg.get("access_token"),
                 database_id=cfg.get("database_id"),
             ),
-            item_types=frozenset({PAGE_TEXT, NOTEBOOK_METADATA}),
+            item_types=frozenset({PAGE_TEXT, NOTEBOOK_METADATA, PAGE_REMOVAL}),
             required_config=("access_token", "database_id"),
         ),
         TargetSpec(

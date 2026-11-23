@@ -23,6 +23,7 @@ from app.models.page import OcrStatus, Page
 from app.models.sync_record import IntegrationConfig
 from app.models.user import User
 from app.services.initial_sync import queue_pages_for_sync
+from app.services.page_removal import PageListOutcome, apply_page_lists, finish_page_lists
 from app.utils.files import parse_uuid
 
 logger = logging.getLogger(__name__)
@@ -137,7 +138,9 @@ def _parse_last_opened(value: str | None) -> datetime | None:
         return None
 
 
-def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int, int, int, int]:
+def _apply_metadata_sync(
+    db: Session, user_id: int, entries: list
+) -> tuple[int, int, int, int, PageListOutcome]:
     """Upsert notebooks, page stubs and page order for a metadata sync in bulk.
 
     ``entries`` is a list of ``(notebook_uuid, NotebookMetadataItem, page_uuids)``
@@ -151,13 +154,18 @@ def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int,
     that already have content are left alone, and pages without content that
     are not completed/pending/processing are reset to NOT_SYNCED. A notebook's
     page order is the page list of its last entry that has pages; pages no
-    longer listed lose their order mapping.
+    longer listed lose their order mapping and are removed, removed pages
+    listed again are restored (``apply_page_lists``, the same rule as the
+    ``.content`` upload). A list ``apply_page_lists`` refuses (it would remove
+    every page) leaves the notebook's pages and order as they were.
 
     Inserts use ON CONFLICT DO NOTHING against the unique indexes and then
     re-read the rows a concurrent sync created first, so two syncs of the same
     notebook at once neither fail nor duplicate rows.
 
-    Returns (notebooks_created, notebooks_updated, pages_registered, pages_already_synced).
+    Returns (notebooks_created, notebooks_updated, pages_registered,
+    pages_already_synced, page_list_outcome); the caller commits and then
+    passes the outcome to ``finish_page_lists``.
     """
     notebooks_created = notebooks_updated = pages_registered = pages_already_synced = 0
     now = datetime.utcnow()
@@ -271,15 +279,20 @@ def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int,
 
     # 3. Existing pages and page-order mappings of the existing notebooks.
     pages: dict[tuple[int, str], tuple[int, str | None, str]] = {}
+    page_index: dict[tuple[int, str], tuple[int, datetime | None, bool]] = {}  # for apply_page_lists
     mappings: dict[int, dict[int, int]] = {}  # notebook_id -> {page_id: page_number}
     for chunk in _chunks(existing_notebook_ids):
         page_rows = db.execute(
-            select(Page.id, Page.notebook_id, Page.page_uuid, Page.s3_key, Page.ocr_status)
+            select(
+                Page.id, Page.notebook_id, Page.page_uuid, Page.s3_key, Page.ocr_status, Page.removed_at
+            )
             .where(Page.notebook_id.in_(chunk))
             .order_by(Page.id)
         ).all()
-        for page_id, nb_id, page_uuid, s3_key, ocr_status in page_rows:
+        for page_id, nb_id, page_uuid, s3_key, ocr_status, removed_at in page_rows:
             pages.setdefault((nb_id, page_uuid), (page_id, s3_key, ocr_status))
+            if page_uuid:
+                page_index.setdefault((nb_id, page_uuid), (page_id, removed_at, bool(s3_key)))
         mapping_rows = db.execute(
             select(NotebookPage.notebook_id, NotebookPage.page_id, NotebookPage.page_number)
             .where(NotebookPage.notebook_id.in_(chunk))
@@ -353,9 +366,16 @@ def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int,
     # delete them, then insert the wanted order, ignoring conflicts with rows a
     # concurrent sync of the same notebook inserted meanwhile. Pages no longer
     # listed lose their mapping.
+    # Pages deleted on the tablet: remove the ones no longer listed, restore
+    # removed ones listed again. Notebooks whose list is refused keep their order.
+    page_lists = {nb_id: list(order) for nb_id, order in wanted_order.items()}
+    outcome = apply_page_lists(db, user_id, page_lists, pages=page_index, now=now)
+
     replaced: list[int] = []
     new_mappings = []
     for nb_id, order in sorted(wanted_order.items()):
+        if nb_id in outcome.skipped:
+            continue
         wanted = {pages[(nb_id, page_uuid)][0]: number for page_uuid, number in order.items()}
         if wanted == mappings.get(nb_id, {}):
             continue
@@ -373,7 +393,7 @@ def _apply_metadata_sync(db: Session, user_id: int, entries: list) -> tuple[int,
     if new_mappings:
         db.execute(insert_ignoring_conflicts(db, NotebookPage), new_mappings)
 
-    return notebooks_created, notebooks_updated, pages_registered, pages_already_synced
+    return notebooks_created, notebooks_updated, pages_registered, pages_already_synced, outcome
 
 
 @router.post("/metadata", response_model=MetadataSyncResponse)
@@ -444,10 +464,11 @@ async def sync_metadata(
                     skipped += 1
             entries.append((nb_uuid, nb_data, page_uuids))
 
-        counts = _apply_metadata_sync(db, current_user.id, entries)
-        notebooks_created, notebooks_updated, pages_registered, pages_already_synced = counts
+        result = _apply_metadata_sync(db, current_user.id, entries)
+        notebooks_created, notebooks_updated, pages_registered, pages_already_synced, outcome = result
 
         db.commit()
+        finish_page_lists(db, current_user.id, outcome)
 
         total_pages = pages_registered + pages_already_synced
         logger.info(
