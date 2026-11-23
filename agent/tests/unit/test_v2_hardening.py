@@ -352,3 +352,96 @@ async def test_sign_out_during_sync_ends_it_as_stopped_sign_in(test_config_with_
     assert progress["outcome"] == "stopped_sign_in"
     assert progress["counts"]["uploaded"] == 1 and progress["counts"]["will_retry"] == 1
     await cloud_sync.close()
+
+
+class TestPagesTotalMatchesTheRun:
+    async def test_counts_add_up_and_uploaded_pages_are_skipped(self, setup, test_config):
+        sync, manifest, handler, folder = setup
+        _add_pages(folder, 4)  # 6 pages, newest first: extra-3..extra-0, page-uuid-2, page-uuid-1
+        # extra-3 (newest) was uploaded before in this version
+        newest = folder / NB / "extra-3.rm"
+        manifest.record_upload(newest, fingerprint_file(newest))
+        test_config.sync.max_pages_per_notebook = 4  # newest 4: extra-3..extra-0
+
+        total = sync.count_pages_to_upload()
+        assert total == 3  # extra-2, extra-1, extra-0
+
+        calls = []
+
+        async def upload(path, uuid, ftype):
+            calls.append(path.name)
+            if len(calls) == 3:
+                raise RateLimitError("slow down", retry_after=1)
+            return {"success": True}
+
+        sync.cloud_sync.upload_file.side_effect = upload
+        stats = await sync.run()
+        assert "extra-3.rm" not in calls  # not uploaded again
+        assert stats["pages"] + stats["failed"] + stats["rate_limited"] == total
+        assert stats["skipped"] == 2  # page-uuid-2 and page-uuid-1 left out by the limit
+
+
+class TestResyncUploadsAgainOnce:
+    async def test_rescan_uploads_each_file_once_and_counts_add_up(self, test_config, temp_remarkable_dir, tmp_path):
+        from flask import Flask
+
+        from app.sync.initial_sync import PagePlanner
+        from app.sync.queue import SyncQueue
+        from app.web.shared import prepare_resync
+
+        folder = temp_remarkable_dir
+        test_config.remarkable.source_directory = str(folder)
+        test_config.sync.sync_all_notebooks = True
+        manifest = UploadManifest(tmp_path / "m.sqlite3", "host")
+        handler = ReMarkableEventHandler(MagicMock(), test_config)
+        scan_for_changes(folder, handler, manifest)  # first run: baseline
+        files = [*(folder / NB).glob("*.rm"), folder / f"{NB}.metadata", folder / f"{NB}.content"]
+        for f in files:
+            manifest.record_upload(f, fingerprint_file(f))  # uploaded before it was deleted on the server
+        test_config.sync.excluded_notebooks = [NB]
+        assert scan_for_changes(folder, handler, manifest) == []
+        assert PagePlanner(test_config, manifest).count_pages_to_upload() == 0  # excluded
+
+        app = Flask("t")
+        app.config.update(AGENT_CONFIG=test_config, V2_MANIFEST=manifest)
+        with patch.object(type(test_config), "save"):
+            assert prepare_resync(app, NB) == len(files)
+
+        # Both paths now see every page as not uploaded
+        assert PagePlanner(test_config, manifest).count_pages_to_upload() == 2
+        changed = scan_for_changes(folder, handler, manifest)
+        assert {p.name for p, _u, _t in changed} == {f.name for f in files}
+
+        cloud_sync = MagicMock(authenticated=True)
+        cloud_sync.upload_file = AsyncMock(return_value={"success": True})
+        test_config.sync.cooldown_seconds = 0
+        queue = SyncQueue(test_config, cloud_sync, manifest=manifest, sleep=AsyncMock())
+        queue.metadata_sync = MagicMock()
+        queue.metadata_sync.run = AsyncMock(return_value={"success": True})
+        for path, uuid, file_type in changed:
+            await queue.add(path, uuid, file_type)
+        stats = await queue._run_once()
+        assert stats["uploaded"] == len(files)
+        uploaded = sorted(c.args[0].name for c in cloud_sync.upload_file.await_args_list)
+        assert uploaded == sorted(f.name for f in files)  # each exactly once
+        # Nothing left: a second rescan and an initial sync have nothing to send
+        assert scan_for_changes(folder, handler, manifest) == []
+        assert PagePlanner(test_config, manifest).count_pages_to_upload() == 0
+
+    def test_forget_notebook_only_touches_that_notebook(self, tmp_path):
+        source = tmp_path / "desktop"
+        (source / "abc").mkdir(parents=True)
+        (source / "abcd").mkdir()
+        names = ["abc/p.rm", "abc.metadata", "abc.content", "abcd/p.rm", "abcd.metadata", "abc.x/no.rm"]
+        manifest = UploadManifest(tmp_path / "m.sqlite3", "host")
+        other_host = UploadManifest(tmp_path / "m.sqlite3", "other")
+        for name in names:
+            f = source / name
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(name.encode())
+            manifest.record_upload(f, fingerprint_file(f))
+            other_host.record_upload(f, fingerprint_file(f))
+        assert manifest.forget_notebook(source, "abc") == 3
+        remaining = {n for n in names if manifest.get(source / n) is not None}
+        assert remaining == {"abcd/p.rm", "abcd.metadata", "abc.x/no.rm"}
+        assert all(other_host.get(source / n) is not None for n in names)

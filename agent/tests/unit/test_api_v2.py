@@ -609,8 +609,8 @@ class TestSyncStart:
         assert config.sync.max_pages_per_notebook == 2
         save_mock.assert_called()
         progress = _wait_progress(client, "running")
-        # All pages of the two notebooks (3 + 5); the limit shows as left_out_by_page_limit
-        assert progress["counts"]["pages_total"] == 8
+        # Pages this run will try: newest 2 of each notebook (limit 2)
+        assert progress["counts"]["pages_total"] == 4
         (job,) = fake_initial_sync.instances
         deadline = time.monotonic() + 5
         while job.selected == "unset" and time.monotonic() < deadline:
@@ -690,6 +690,35 @@ class TestSyncStart:
 
     def test_resume_without_watcher(self, client):
         assert post(client, "/api/v2/sync/resume").get_json() == {"ok": True}
+
+
+class TestPagesTotal:
+    def test_already_uploaded_pages_are_not_counted(self, client, config, library, fake_initial_sync):
+        manifest = UploadManifest.for_config(config)
+        for page in (library / "diary").glob("*.rm"):
+            manifest.record_upload(page, fingerprint_file(page))
+        assert post(client, "/api/v2/sync/start", {"notebook_uuids": ["diary", "meeting"]}).status_code == 202
+        # diary's 5 pages are already uploaded: only meeting's 3 remain
+        assert _wait_progress(client, "running")["counts"]["pages_total"] == 3
+        fake_initial_sync.instances[0].release.set()
+
+    def test_changed_page_counts_again(self, client, config, library, fake_initial_sync):
+        manifest = UploadManifest.for_config(config)
+        pages = sorted((library / "diary").glob("*.rm"))
+        for page in pages:
+            manifest.record_upload(page, fingerprint_file(page))
+        pages[0].write_bytes(b"edited since the upload")
+        assert post(client, "/api/v2/sync/start", {"notebook_uuids": ["diary"]}).status_code == 202
+        assert _wait_progress(client, "running")["counts"]["pages_total"] == 1
+        fake_initial_sync.instances[0].release.set()
+
+    def test_other_host_uploads_do_not_count(self, client, config, library, fake_initial_sync):
+        other = UploadManifest(UploadManifest.for_config(config).db_path, "rmirror.io")
+        for page in (library / "diary").glob("*.rm"):
+            other.record_upload(page, fingerprint_file(page))
+        assert post(client, "/api/v2/sync/start", {"notebook_uuids": ["diary"]}).status_code == 202
+        assert _wait_progress(client, "running")["counts"]["pages_total"] == 5
+        fake_initial_sync.instances[0].release.set()
 
 
 class TestProgressMapping:
@@ -1198,3 +1227,55 @@ class TestBridgeTicket:
             with self._clerk():
                 client.get(path, base_url=BASE_URL)
         assert path.split("ticket=")[1] not in caplog.text
+
+
+class TestResyncForgetsUploads:
+    def _upload_all(self, config, library, uuid):
+        manifest = UploadManifest.for_config(config)
+        files = [*(library / uuid).glob("*.rm"), library / f"{uuid}.metadata", library / f"{uuid}.content"]
+        for f in files:
+            manifest.record_upload(f, fingerprint_file(f))
+        return manifest, files
+
+    def test_resync_clears_manifest_and_synced_pages(self, client, config, library, agent, backend):
+        manifest, files = self._upload_all(config, library, "diary")
+        other, _ = self._upload_all(config, library, "meeting")
+        config.sync.excluded_notebooks = ["diary"]
+        config.sync.selected_notebooks = ["meeting"]
+        watcher = MagicMock(running=True)
+        watcher.rescan = AsyncMock(return_value=0)
+        agent.file_watcher = watcher
+
+        assert post(client, "/api/v2/deleted-notebooks/diary", {"action": "resync"}).get_json() == {"ok": True}
+
+        assert all(manifest.get(f) is None for f in files)
+        assert manifest.get(next((library / "meeting").glob("*.rm"))) is not None  # others untouched
+        assert config.sync.excluded_notebooks == []
+        assert "diary" in config.sync.selected_notebooks
+        by_uuid = {nb["uuid"]: nb for nb in get(client, "/api/v2/notebooks").get_json()["notebooks"]}
+        assert by_uuid["diary"]["synced_pages"] == 0
+        assert by_uuid["meeting"]["synced_pages"] == 3
+        # Uploaded now, not at the next periodic rescan
+        deadline = time.monotonic() + 5
+        while not watcher.rescan.await_count and time.monotonic() < deadline:
+            time.sleep(0.01)
+        watcher.rescan.assert_awaited_once_with(reason="resync")
+
+    def test_dismiss_leaves_manifest_alone(self, client, config, library, agent):
+        manifest, files = self._upload_all(config, library, "diary")
+        config.sync.excluded_notebooks = ["diary"]
+        watcher = MagicMock(running=True)
+        watcher.rescan = AsyncMock(return_value=0)
+        agent.file_watcher = watcher
+        post(client, "/api/v2/deleted-notebooks/diary", {"action": "dismiss"})
+        assert all(manifest.get(f) is not None and not manifest.get(f).is_baseline for f in files)
+        assert config.sync.excluded_notebooks == ["diary"]
+        watcher.rescan.assert_not_awaited()
+
+    def test_legacy_route_forgets_too(self, config, cloud_sync, agent_loop, library, save_mock):
+        manifest, files = self._upload_all(config, library, "diary")
+        config.sync.excluded_notebooks = ["diary"]
+        legacy = create_app(config, cloud_sync, agent=None, agent_loop=agent_loop).test_client()
+        resp = legacy.post("/api/deleted-notebooks/diary/action", json={"action": "resync"}, base_url=BASE_URL)
+        assert resp.status_code == 200
+        assert all(manifest.get(f) is None for f in files)
