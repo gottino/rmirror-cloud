@@ -1,4 +1,33 @@
-# Building the rMirror macOS Installer
+# Building the rMirror macOS app
+
+## rMirror for Mac 2.0 (Swift app + Python core)
+
+The 2.0 app lives in `agent/macos/` and is built by one script. Full instructions (options, signing, notarization,
+Sparkle, CI): [`macos/README.md`](macos/README.md). Design: [`docs/native-app-architecture.md`](docs/native-app-architecture.md).
+
+```bash
+cd agent/macos
+CODESIGN_IDENTITY="Developer ID Application: <name> (<team id>)" ./scripts/build_app.sh
+```
+
+This builds the core with PyInstaller (`rmirror-core.spec`), the Swift app (universal), assembles `rMirror.app`, signs,
+notarizes and staples a DMG. Output: `build/app/rMirror.app` and `build/dist/rMirror-<version>-<arch>.dmg`. Use
+`--unsigned` for a local test build. Run it outside iCloud: the script refuses iCloud locations, and the main checkout
+under `~/Documents` is in iCloud, so use a worktree elsewhere or set `BUILD_DIR`.
+
+Status: nothing built by this script has been released. The two CI workflows (`build-mac-app.yml`,
+`build-mac-app-intel.yml`) are manual and have not been run yet; the Intel build has never been run. Sparkle has no key
+or feed yet.
+
+---
+
+## Legacy 1.x build (frozen)
+
+Everything below describes the legacy PyInstaller menu-bar app (rumps + Flask page in the browser), which still builds
+but is frozen and will be removed in a follow-up. Note that `build_macos.sh` reads the same `app/__version__.py`, so a
+legacy build from this branch is labelled 2.0.0.
+
+### Building the legacy installer
 
 `build_macos.sh` builds `dist/rMirror.app` and `dist/rMirror-<version>.dmg`. The
 version comes from `app/__version__.py` (also read by `rmirror.spec`); keep

@@ -1,5 +1,7 @@
 # Initial Sync Feature
 
+> **Legacy 1.x note.** The steps below use the legacy web UI at localhost:5555 (frozen). In rMirror for Mac 2.0 the first sync is a guided screen in the native app (`macos/README.md`); the sync logic described here is the same core code.
+
 ## Overview
 
 The Initial Sync feature allows users to upload all selected notebooks to the rMirror Cloud backend. This is useful for first-time setup, catching up after being offline, or re-syncing after changing notebook selections.

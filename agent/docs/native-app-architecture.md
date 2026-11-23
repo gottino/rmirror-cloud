@@ -40,12 +40,12 @@ Package.swift
 Sources/RMirrorKit/        library, no UI, unit-tested
   API/                     LocalAPIClient, request/response models, errors
   Core/                    CoreSupervisor, CoreLocator, launch token
-  Model/                   AppState store (ObservableObject), onboarding stage logic
+  Model/                   AppStore (ObservableObject), Stage (which screen), NotebookList (search, grouping, selection maths)
   Copy/                    every user-facing string, as functions of codes and counts
 Sources/RMirrorApp/        executable
   App/                     main, AppDelegate, StatusItemController, WindowCoordinator, LoginItem, Updater
   Onboarding/              sign-in, missing reMarkable app, permission, first sync, progress
-  Main/                    main window, notebook list, activity
+  Main/                    main window: status, allowance, notebook list, save-and-sync footer
   Settings/                settings window, developer options
   Theme/                   colours, type, shared controls
 Tests/RMirrorKitTests/
@@ -55,15 +55,17 @@ scripts/                   build_app.sh (build, assemble, sign, notarize), smoke
 
 ## Onboarding stage logic (single source of truth, in `RMirrorKit/Model`)
 
-Derived from `GET /api/v2/state`, first match wins:
+Derived from the supervisor status and `GET /api/v2/state` in `Stage.derive`, first match wins:
 
-1. core not running / not ready → `starting` (or `coreFailed` after repeated crashes, `portInUse` on exit code 3)
-2. `auth.signed_in == false` or `sign_in_required` → `signIn`
-3. `folder.state == missing` → `remarkableMissing`
-4. `folder.state == unreadable` → `permission`
-5. `first_sync.completed == false` and no sync running → `firstSync`
-6. `sync.state == running` and first sync not completed → `firstSyncProgress`
-7. otherwise → `ready` (main window)
+1. core failed → `coreProblem(failure)` (port in use, cannot launch, never ready, crash loop)
+2. core not running, or no state yet → `starting`
+3. `auth.sign_in_required` → `signIn(.expired)`
+4. `auth.state == checking` → `starting` ("Checking your sign-in…"); `offline` carries on as signed in
+5. not signed in → `signIn(.signedOut)`
+6. `folder.state == missing` → `remarkableMissing`; `unreadable` → `permission`
+7. guided first sync started in this session: running → `firstSyncProgress`, done → `firstSyncResult` (until dismissed)
+8. `first_sync.completed == false` → `firstSync` (or `firstSyncProgress` if a sync is already running)
+9. otherwise → `ready` (main window)
 
 ## Supervisor rules
 
