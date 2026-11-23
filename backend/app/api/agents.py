@@ -123,7 +123,16 @@ async def agent_heartbeat(
     }
 
 
-@router.get("/status")
+class AgentStatusResponse(BaseModel):
+    """Response of GET /agents/status."""
+
+    has_agent_connected: bool
+    first_connected_at: str | None
+    last_activity_at: str | None
+    onboarding_state: str | None
+
+
+@router.get("/status", response_model=AgentStatusResponse)
 async def get_agent_status(
     current_user: Annotated[User, Depends(get_clerk_active_user)],
     db: Session = Depends(get_db),
@@ -132,9 +141,11 @@ async def get_agent_status(
     Get current agent connection status.
 
     ``last_activity_at`` is the newest ``last_synced_at`` of the user's
-    notebooks: the last time the Mac app uploaded or synced anything. There is
-    no stored heartbeat, so an app that runs but has nothing new to upload
-    looks the same as one that stopped.
+    notebooks: the last time the Mac app synced anything, including
+    notebook metadata only (POST /sync/metadata bumps it before any page is
+    uploaded). Soft-deleted notebooks still count. There is no stored
+    heartbeat, so an app that runs but has nothing new to sync looks the
+    same as one that stopped.
 
     Args:
         current_user: Current authenticated user
@@ -148,14 +159,14 @@ async def get_agent_status(
         select(func.max(Notebook.last_synced_at)).where(Notebook.user_id == current_user.id)
     ).scalar()
 
-    return {
-        "has_agent_connected": has_connected,
-        "first_connected_at": current_user.agent_first_connected_at.isoformat()
+    return AgentStatusResponse(
+        has_agent_connected=has_connected,
+        first_connected_at=current_user.agent_first_connected_at.isoformat()
         if current_user.agent_first_connected_at
         else None,
-        "last_activity_at": _utc_iso(last_activity),
-        "onboarding_state": current_user.onboarding_state,
-    }
+        last_activity_at=_utc_iso(last_activity),
+        onboarding_state=current_user.onboarding_state,
+    )
 
 
 def _utc_iso(value: datetime | None) -> str | None:
