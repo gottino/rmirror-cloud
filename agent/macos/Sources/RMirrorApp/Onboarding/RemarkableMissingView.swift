@@ -20,7 +20,7 @@ struct RemarkableMissingView: View {
             .rmCard()
         } actions: {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
-                Button(OnboardingCopy.getRemarkableApp) { OnboardingSystem.open(Self.downloadURL) }
+                Button(OnboardingCopy.getRemarkableApp) { OnboardingSystem.openInBrowser(Self.downloadURL) }
                     .buttonStyle(.rmPrimary)
                     .keyboardShortcut(.defaultAction)
                 OnboardingWaitingLine(text: OnboardingCopy.waitingForRemarkable)

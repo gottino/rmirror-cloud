@@ -30,6 +30,10 @@ final class SettingsCopyTests: XCTestCase {
     func testServerURLValidation() {
         XCTAssertTrue(SettingsCopy.isValidServerURL("https://rmirror.example.com/api/v1"))
         XCTAssertTrue(SettingsCopy.isValidServerURL(" http://localhost:8000 "))
+        XCTAssertTrue(SettingsCopy.isValidServerURL("http://127.0.0.1:8000/api/v1"))
+        XCTAssertTrue(SettingsCopy.isValidServerURL("http://[::1]:8000/api/v1"))
+        XCTAssertFalse(SettingsCopy.isValidServerURL("http://rmirror.example.com/api/v1"))
+        XCTAssertFalse(SettingsCopy.isValidServerURL("file:///tmp/api"))
         XCTAssertFalse(SettingsCopy.isValidServerURL("ftp://example.com"))
         XCTAssertFalse(SettingsCopy.isValidServerURL("example.com"))
         XCTAssertFalse(SettingsCopy.isValidServerURL(""))

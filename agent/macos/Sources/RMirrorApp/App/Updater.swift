@@ -65,7 +65,7 @@ final class Updater: NSObject {
                 alert.addButton(withTitle: "Download")
                 alert.addButton(withTitle: "Later")
                 NSApp.activate(ignoringOtherApps: true)
-                if alert.runModal() == .alertFirstButtonReturn, let link = result.downloadURL, let url = URL(string: link) {
+                if alert.runModal() == .alertFirstButtonReturn, let url = SafeURL.browserURL(from: result.downloadURL) {
                     NSWorkspace.shared.open(url)
                 }
             } else if result != nil {

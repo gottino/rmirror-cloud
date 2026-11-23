@@ -173,8 +173,24 @@ struct OnboardingBusyLabel: View {
 
 /// System actions the onboarding screens need. Nothing here talks to the core.
 enum OnboardingSystem {
-    static func open(_ string: String) {
+    /// Opens a web address in the browser, only if `SafeURL` allows it.
+    static func openInBrowser(_ url: URL) {
+        guard let safe = SafeURL.browserURL(url) else {
+            NSLog("rMirror: refused to open a web address that is not https or this Mac")
+            return
+        }
+        NSWorkspace.shared.open(safe)
+    }
+
+    static func openInBrowser(_ string: String) {
         guard let url = URL(string: string) else { return }
+        openInBrowser(url)
+    }
+
+    /// Opens one of the app's own System Settings links. Only for constants such as
+    /// `PermissionView.settingsURL`; never for anything the core or the network supplied.
+    static func openSystemSettings(_ constant: StaticString) {
+        guard let url = URL(string: "\(constant)"), url.scheme == "x-apple.systempreferences" else { return }
         NSWorkspace.shared.open(url)
     }
 

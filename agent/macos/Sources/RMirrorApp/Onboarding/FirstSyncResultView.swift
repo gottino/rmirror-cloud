@@ -9,12 +9,8 @@ struct FirstSyncResultView: View {
 
     private var isSuccess: Bool { progress.outcome == .success }
 
-    /// The website's notebook list, if the core knows where the website is.
-    private var dashboardURL: String? {
-        guard let base = store.state?.environment.dashboardURL, !base.isEmpty else { return nil }
-        let trimmed = base.hasSuffix("/") ? String(base.dropLast()) : base
-        return trimmed + "/dashboard"
-    }
+    /// The website's notebook list, if the core knows where the website is (and `SafeURL` allows it).
+    private var dashboardURL: URL? { MainStatus.dashboardURL(store.state) }
 
     /// The notebooks the first sync used (the saved selection), for "Try again".
     private var selectedNotebookUUIDs: [String] {
@@ -57,7 +53,7 @@ struct FirstSyncResultView: View {
     private var buttons: some View {
         HStack(spacing: Theme.Space.m) {
             if let dashboardURL {
-                Button(OnboardingCopy.openOnWeb) { OnboardingSystem.open(dashboardURL) }
+                Button(OnboardingCopy.openOnWeb) { OnboardingSystem.openInBrowser(dashboardURL) }
                     .buttonStyle(.rmPrimary)
                     .keyboardShortcut(.defaultAction)
                 if offersRetry { retryButton }

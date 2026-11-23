@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         store = AppStore(dependencies: .init(
             makeAPI: { LocalAPIClient(port: $0.port, appToken: $0.appToken) },
-            openURL: { NSWorkspace.shared.open($0) },
+            openURL: { OnboardingSystem.openInBrowser($0) },
             restartCore: { [weak self] in self?.supervisor?.restart() }
         ))
 

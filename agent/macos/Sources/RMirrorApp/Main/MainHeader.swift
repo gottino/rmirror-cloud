@@ -13,8 +13,6 @@ struct MainHeader: View {
     let tone: StatusPill.Tone
     let webURL: URL?
 
-    @Environment(\.openURL) private var openURL
-
     var body: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
             VStack(alignment: .leading, spacing: 6) {
@@ -29,7 +27,7 @@ struct MainHeader: View {
             Spacer(minLength: Theme.Space.m)
             if let webURL {
                 Button {
-                    openURL(webURL)
+                    OnboardingSystem.openInBrowser(webURL)
                 } label: {
                     HStack(spacing: 4) {
                         Text(MainCopy.openOnWeb)

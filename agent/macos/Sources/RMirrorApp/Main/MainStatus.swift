@@ -38,10 +38,8 @@ enum MainStatus {
         progress.outcome == .partial || progress.outcome == .failed
     }
 
-    /// "https://rmirror.io" -> "https://rmirror.io/dashboard"
+    /// "https://rmirror.io" -> "https://rmirror.io/dashboard"; nil unless `SafeURL` allows it.
     static func dashboardURL(_ state: AppState?) -> URL? {
-        guard var base = state?.environment.dashboardURL, !base.isEmpty else { return nil }
-        while base.hasSuffix("/") { base.removeLast() }
-        return URL(string: base + "/dashboard")
+        SafeURL.dashboardURL(base: state?.environment.dashboardURL)
     }
 }

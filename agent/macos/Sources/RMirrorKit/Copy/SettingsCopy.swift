@@ -50,7 +50,7 @@ public enum SettingsCopy {
         public static let custom = "Custom"
         public static let urlLabel = "API URL"
         public static let urlPlaceholder = "https://example.com/api/v1"
-        public static let urlInvalid = "Enter a web address that starts with http:// or https://."
+        public static let urlInvalid = "Enter a web address that starts with https://. Plain http:// works only for a server on this Mac (localhost)."
         public static let apply = "Apply"
         public static let needsSignIn = "Sign in again to use this server."
 
@@ -72,11 +72,8 @@ public enum SettingsCopy {
 
     public static var allStrings: [String] { generalStrings + Developer.allStrings }
 
-    /// Accepts only http(s) URLs with a host.
+    /// A custom server must be https, or plain http only to this Mac (`SafeURL`); the core enforces the same.
     public static func isValidServerURL(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https", let host = url.host, !host.isEmpty else { return false }
-        return true
+        SafeURL.isAllowedServerURL(text)
     }
 }
