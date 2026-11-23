@@ -6,11 +6,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth.clerk import get_clerk_active_user
 from app.config import get_settings
 from app.database import get_db
+from app.models.notebook import Notebook
 from app.models.user import OnboardingState, User
 from app.utils.umami import track_event
 
@@ -124,27 +126,45 @@ async def agent_heartbeat(
 @router.get("/status")
 async def get_agent_status(
     current_user: Annotated[User, Depends(get_clerk_active_user)],
+    db: Session = Depends(get_db),
 ):
     """
     Get current agent connection status.
 
+    ``last_activity_at`` is the newest ``last_synced_at`` of the user's
+    notebooks: the last time the Mac app uploaded or synced anything. There is
+    no stored heartbeat, so an app that runs but has nothing new to upload
+    looks the same as one that stopped.
+
     Args:
         current_user: Current authenticated user
+        db: Database session
 
     Returns:
         Agent connection status
     """
-    # For now, return basic status based on user data
-    # In future, we can check against stored agent records
     has_connected = current_user.agent_first_connected_at is not None
+    last_activity = db.execute(
+        select(func.max(Notebook.last_synced_at)).where(Notebook.user_id == current_user.id)
+    ).scalar()
 
     return {
         "has_agent_connected": has_connected,
         "first_connected_at": current_user.agent_first_connected_at.isoformat()
         if current_user.agent_first_connected_at
         else None,
+        "last_activity_at": _utc_iso(last_activity),
         "onboarding_state": current_user.onboarding_state,
     }
+
+
+def _utc_iso(value: datetime | None) -> str | None:
+    """ISO 8601 with an explicit UTC offset (columns store naive UTC)."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.isoformat() + "Z"
+    return value.isoformat()
 
 
 @router.get("/latest-version")
