@@ -104,7 +104,10 @@ public enum MainCopy {
 
     /// Shown, without blocking, when the pages to upload are more than the pages left this month.
     public static func overAllowance(remaining: Int) -> String {
-        "That's more than the \(SharedCopy.pages(remaining)) you have left this month. The rest is turned into text after your pages reset."
+        if remaining <= 0 {
+            return "You have no pages left this month. These pages are turned into text after your pages reset."
+        }
+        return "That's more than the \(SharedCopy.pages(remaining)) you have left this month. The rest is turned into text after your pages reset."
     }
 
     public static let removalNote = "Unticked notebooks stop syncing. Pages already in rMirror stay there."
@@ -148,7 +151,7 @@ public enum MainCopy {
             loading, emptyTitle, emptyBody, noMatches("garden"), noMatchesBody,
             changeSummary(added: 2, removed: 0, pagesToUpload: 31), changeSummary(added: 0, removed: 1, pagesToUpload: 0),
             changeSummary(added: 1, removed: 2, pagesToUpload: 1),
-            overAllowance(remaining: 12), overAllowance(remaining: 1),
+            overAllowance(remaining: 12), overAllowance(remaining: 1), overAllowance(remaining: 0),
             removalNote, cancel, saveAndSync, save, saving, waitForSync,
             deletedTitle, deletedBody, syncAgain, keepRemoved, deletedWhen("yesterday"),
             syncAgainUploads(pages: 12), syncAgainUploads(pages: 1), syncAgainUploads(pages: nil),

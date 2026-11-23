@@ -115,7 +115,8 @@ public final class AppStore: ObservableObject {
         guidedSyncActive: Bool = false,
         problem: ActionProblem? = nil,
         isWaitingForSignIn: Bool = false,
-        suggestionUnreachable: Bool = false
+        suggestionUnreachable: Bool = false,
+        deletedNotebooks: [DeletedNotebook] = []
     ) -> AppStore {
         let store = AppStore(dependencies: Dependencies(makeAPI: { _ in api }, openURL: { _ in }, restartCore: {}))
         store.coreStatus = core
@@ -129,6 +130,7 @@ public final class AppStore: ObservableObject {
         store.problem = problem
         store.isWaitingForSignIn = isWaitingForSignIn
         store.suggestionUnreachable = suggestionUnreachable
+        store.deletedNotebooks = deletedNotebooks
         store.recomputeStage()
         return store
     }

@@ -6,6 +6,8 @@ import SwiftUI
 struct MainView: View {
     @EnvironmentObject private var store: AppStore
     @StateObject private var browser = MainBrowserModel()
+    /// Screenshot renderer only: ticks to show as an unsaved change.
+    var previewDraft: Set<String>?
 
     /// A sync that finished with problems while this window was showing; cleared on dismiss or the next sync.
     @State private var finishedSync: SyncProgress?
@@ -47,6 +49,7 @@ struct MainView: View {
         .animation(.easeInOut(duration: 0.15), value: browser.diff.isEmpty)
         .task {
             browser.update(store.notebooks)
+            if let previewDraft { browser.replaceDraft(previewDraft) }
             lastSyncState = store.state?.sync.state
             await store.reloadNotebooks()
             await store.loadDeletedNotebooks()

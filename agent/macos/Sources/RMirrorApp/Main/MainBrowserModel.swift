@@ -48,6 +48,8 @@ final class MainBrowserModel: ObservableObject {
     func selectAllVisible() { setDraft(NotebookList.selectingAll(visibleIDs, in: draft)) }
     func selectNoneVisible() { setDraft(NotebookList.selectingNone(visibleIDs, in: draft)) }
     func cancel() { setDraft(saved) }
+    /// Screenshot renderer only: start with a pending change so the footer shows.
+    func replaceDraft(_ next: Set<String>) { setDraft(NotebookList.reconciling(draft: next, with: notebooks)) }
 
     /// After a successful save: treat the draft as saved until the reloaded notebooks confirm it.
     func markSaved() {

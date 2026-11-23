@@ -14,12 +14,17 @@ struct FirstSyncView: View {
     @State private var query = ""
     /// The search field has keyboard focus: Return then must not start the upload.
     @FocusState private var searchFocused: Bool
+    /// Screenshot renderer only: ticks to start with.
+    var previewSelection: Set<String>?
 
     // While the suggestion is not `.ok`, the store looks again every few seconds (`AppStore.refresh()`),
     // so this view needs no polling of its own.
     var body: some View {
         content
-            .onAppear(perform: seedSelection)
+            .onAppear {
+                seedSelection()
+                if let previewSelection { selection = previewSelection }
+            }
             .onChange(of: store.suggestion) { _ in seedSelection() }
     }
 

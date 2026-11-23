@@ -55,6 +55,8 @@ final class MainCopyTests: XCTestCase {
     func testOverAllowanceAndRowLabel() {
         XCTAssertEqual(MainCopy.overAllowance(remaining: 12),
                        "That's more than the 12 pages you have left this month. The rest is turned into text after your pages reset.")
+        XCTAssertEqual(MainCopy.overAllowance(remaining: 0),
+                       "You have no pages left this month. These pages are turned into text after your pages reset.")
         XCTAssertEqual(MainCopy.rowAccessibilityLabel(name: "Meeting Notes", pages: 12, selected: true),
                        "Meeting Notes, 12 pages, selected")
     }

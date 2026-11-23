@@ -16,6 +16,8 @@ enum ScreenRenderer {
     }
 
     private static let mainSize = CGSize(width: 760, height: 620)
+    /// The main window's minimum content size (`WindowCoordinator`).
+    private static let mainMinimumSize = CGSize(width: 640, height: 520)
     private static let settingsSize = CGSize(width: 520, height: 460)
 
     static func run(outputDirectory: String) -> Int32 {
@@ -119,14 +121,54 @@ enum ScreenRenderer {
     private static func screens() -> [Screen] {
         func main(_ name: String, core: CoreStatus = .running(CoreConnection(port: 5555, appToken: "preview")),
                   state: AppState?, suggestion: FirstRunSuggestion? = nil,
-                  notebooks: [NotebookEntry] = [], guided: Bool = false, waiting: Bool = false) -> Screen {
+                  notebooks: [NotebookEntry] = [], guided: Bool = false, waiting: Bool = false,
+                  unreachable: Bool = false, deleted: [DeletedNotebook] = []) -> Screen {
             Screen(name: name, size: mainSize) {
-                let store = AppStore.preview(state: state, core: core, notebooks: notebooks,
+                // The main window reloads the deleted notebooks from the API when it appears.
+                let api = MockLocalAPI(state: state ?? Fixtures.readyState)
+                api.deletedNotebooksResult = .success(deleted)
+                let store = AppStore.preview(state: state, core: core, api: api, notebooks: notebooks,
                                              suggestion: suggestion, settings: Fixtures.settings,
-                                             guidedSyncActive: guided, isWaitingForSignIn: waiting)
+                                             guidedSyncActive: guided, isWaitingForSignIn: waiting,
+                                             suggestionUnreachable: unreachable, deletedNotebooks: deleted)
                 return AnyView(RootView().environmentObject(store))
             }
         }
+        /// The main window with an unsaved change, so the footer shows.
+        func mainWithFooter(_ name: String, size: CGSize, state: AppState, draft: Set<String>) -> Screen {
+            Screen(name: name, size: size) {
+                let store = AppStore.preview(state: state, notebooks: Fixtures.readyNotebooks.notebooks,
+                                             settings: Fixtures.settings)
+                return AnyView(MainView(previewDraft: draft).environmentObject(store).rmScreen())
+            }
+        }
+        /// The first-sync screen with notebooks ticked (the suggestion is empty when no pages are left).
+        func firstSyncTicked(_ name: String, suggestion: FirstRunSuggestion, ticked: Set<String>) -> Screen {
+            Screen(name: name, size: mainSize) {
+                let entries = Fixtures.threeNotebookSuggestion.notebooks.map {
+                    NotebookEntry(uuid: $0.uuid, name: $0.name, pageCount: $0.pageCount)
+                }
+                let api = MockLocalAPI(state: Fixtures.firstSyncPendingState,
+                                       notebooks: NotebooksResponse(folderState: .ok, syncAll: false, notebooks: entries),
+                                       suggestion: suggestion)
+                var state = Fixtures.firstSyncPendingState
+                state.quota = QuotaInfo(used: 200, limit: 200, remaining: 0,
+                                        resetAt: Fixtures.now.addingTimeInterval(8 * 86_400), fetchedAt: Fixtures.now)
+                let store = AppStore.preview(state: state, api: api, notebooks: entries, suggestion: suggestion,
+                                             settings: Fixtures.settings)
+                return AnyView(FirstSyncView(previewSelection: ticked).environmentObject(store).rmScreen())
+            }
+        }
+        let savedPlusTwo = NotebookList.savedSelection(Fixtures.readyNotebooks.notebooks).union(["nb-roadmap", "nb-ideas"])
+        var stoppedQuota = Fixtures.quotaExhaustedState
+        stoppedQuota.firstSync = FirstSyncInfo(completed: true)
+        stoppedQuota.sync = SyncProgress(
+            state: .done, outcome: .stoppedQuota,
+            counts: SyncCounts(uploaded: 12, failed: 0, leftOutByPageLimit: 0, willRetry: 0,
+                               notebooksDone: 1, notebooksTotal: 3, pagesTotal: 23),
+            startedAt: Fixtures.now.addingTimeInterval(-300), finishedAt: Fixtures.now.addingTimeInterval(-60))
+        var quotaNotPaused = Fixtures.quotaExhaustedState
+        quotaNotPaused.queue = QueueInfo(pending: 0, running: true, pausedReason: nil)
         let quotaGone = FirstRunSuggestion(
             notebooks: [], totalPages: 0,
             quota: SuggestionQuota(limit: 200, remaining: 0), reason: .quotaExhausted)
@@ -142,10 +184,20 @@ enum ScreenRenderer {
             main("permission", state: Fixtures.folderUnreadableState),
             main("first-sync", state: Fixtures.firstSyncPendingState, suggestion: Fixtures.threeNotebookSuggestion),
             main("first-sync-quota", state: Fixtures.firstSyncPendingState, suggestion: quotaGone),
+            firstSyncTicked("first-sync-quota-ticked", suggestion: quotaGone,
+                            ticked: Set(Fixtures.threeNotebookSuggestion.notebooks.map(\.uuid))),
             main("first-sync-progress", state: Fixtures.firstSyncRunningState, guided: true),
             main("first-sync-result", state: Fixtures.syncDonePartialState, guided: true),
             main("ready", state: Fixtures.readyState, notebooks: Fixtures.readyNotebooks.notebooks),
             main("ready-quota", state: Fixtures.quotaExhaustedState, notebooks: Fixtures.readyNotebooks.notebooks),
+            main("ready-quota-not-paused", state: quotaNotPaused, notebooks: Fixtures.readyNotebooks.notebooks),
+            main("ready-deleted", state: Fixtures.readyState, notebooks: Fixtures.readyNotebooks.notebooks,
+                 deleted: Fixtures.deletedNotebooks),
+            mainWithFooter("ready-footer", size: mainSize, state: Fixtures.readyState, draft: savedPlusTwo),
+            mainWithFooter("ready-quota-footer-min-size", size: mainMinimumSize,
+                           state: Fixtures.quotaExhaustedState, draft: savedPlusTwo),
+            main("first-sync-unreachable", state: Fixtures.firstSyncPendingState, unreachable: true),
+            main("first-sync-result-stopped-quota", state: stoppedQuota, guided: true),
             Screen(name: "settings", size: settingsSize) {
                 let store = AppStore.preview(state: Fixtures.readyState, settings: Fixtures.settings)
                 return AnyView(SettingsView().environmentObject(store))
