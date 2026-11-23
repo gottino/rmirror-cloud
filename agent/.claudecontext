@@ -61,7 +61,7 @@ agent/
 
 ### 1. Agent (`app/main.py`)
 
-Main entry point with two operational modes:
+Main entry point with three operational modes:
 
 **Foreground Mode** (for development):
 ```bash
@@ -79,6 +79,17 @@ poetry run python -m app.main
 - Runs as macOS menu bar app (rumps); asyncio runs in a background thread
 - Logs to `~/.config/rmirror/agent.log` (also printed to the terminal in foreground mode)
 - Menu bar icon with status, open web UI, check for updates, settings, quit
+
+**Headless Mode** (rMirror for Mac 2.0 core, child process of the Swift app):
+```bash
+RMIRROR_APP_TOKEN=<64 hex chars> poetry run python -m app.main --headless
+```
+- Contract: `docs/local-api.md` (process rules, `/api/v2/*`), decisions: `docs/native-app-architecture.md`
+- Never imports rumps, never opens a browser; binds `127.0.0.1:<web.port>` itself (`Agent.bind_web_server`, threaded werkzeug) and prints `RMIRROR_CORE_READY port=<port> api=2` once listening
+- Exit codes: 0 clean (SIGTERM, SIGINT or stdin EOF = the app is gone), 3 port in use, 4 missing/short `RMIRROR_APP_TOKEN`, 1 anything else
+- Keeps a quota cache (`app/sync/quota_cache.py`) refreshed on the agent loop (sign-in, after upload batches, every 5 min) so `GET /api/v2/state` never calls the cloud
+- Built by `rmirror-core.spec` (onedir console executable `rmirror-core`, no rumps, no `app/tray`); `rmirror.spec` still builds the legacy menu-bar app
+- Manual runs: use a temp `RMIRROR_CONFIG_PATH`, a non-default port, `HOME=<temp dir>` (logs go to `~/.config/rmirror`) and `PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring` so the real keychain sign-in is not used
 
 ### 2. File Watcher (`app/watcher/`)
 
@@ -115,8 +126,10 @@ POST {api}/processing/metadata/update
 Flask web server for configuration:
 - Runs on `localhost:5555`
 - Shows sync status, settings
-- Clerk sign-in flow (`/auth/bridge`, `/auth/callback`) for backend authentication
+- Clerk sign-in flow (`/auth/bridge`, `/auth/callback`) for backend authentication; in headless mode a successful callback renders `auth_headless.html` (opens `rmirror://signed-in`) instead of redirecting to `/`
 - Runs in background thread (non-blocking)
+- `routes.py`: legacy page and `/api/*` routes; `routes_v2.py`: local API v2 for the native app (`X-RMirror-App-Token` required when an app token is set); `shared.py`: state and helpers both use (initial-sync job, loop helpers, environment presets)
+- Password sign-in (`POST /auth/login`) is gone (issue #47); old `email`/`password`/`use_clerk_auth` config keys are ignored and no longer saved
 
 ### 5. Menu Bar App (`app/tray/`)
 
@@ -282,10 +295,11 @@ def on_my_item(self, sender: rumps.MenuItem) -> None:
 
 4. **Config File Location**:
    - Preferred `~/.config/rmirror/config.yaml`; `~/.rmirror/config.yaml` and `./config.yaml` are fallbacks
-   - Missing file = defaults + `RMIRROR_*` env vars; `rmirror-agent init` writes one (config.example.yaml is a template, and its `api.url`/email/password entries are stale)
+   - `Config.save()` writes back to the file `Config.load()` read (so `--config` / `RMIRROR_CONFIG_PATH` are respected); the upload manifest stays next to the default config path
+   - Missing file = defaults + `RMIRROR_*` env vars; `rmirror-agent init` writes one (config.example.yaml is a template)
 
 5. **Token Expiration**:
-   - Agent tokens expire after 30 days; there is no refresh, `CloudSync.authenticate()` raises `CloudSyncError` on 401 and the user signs in again via the web UI
+   - Agent tokens expire after 30 days; there is no refresh, `CloudSync.authenticate()` raises `AuthenticationRequiredError` on 401 (and with no stored token) and the user signs in again via the web UI
 
 6. **reMarkable File Format**:
    - `.rm` files are binary (not human-readable)
@@ -310,6 +324,8 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 - **Initial Sync Feature**: `INITIAL_SYNC_FEATURE.md`
 
 ## Recent Major Changes
+
+- **2026-11-23**: Headless core for rMirror for Mac 2.0 (`--headless`, `/api/v2/*`, `rmirror-core.spec`), password sign-in fallback removed (issue #47), unreadable reMarkable folder (no Full Disk Access) no longer starts the watcher
 
 - **2026-01-20**: Released v1.4.1 with deleted pages fix + release automation
   - Rebuilt, signed, notarized agent to include the deleted pages fix from Jan 12

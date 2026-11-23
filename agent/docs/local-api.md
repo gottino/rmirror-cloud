@@ -19,7 +19,7 @@ The app starts the core as a plain child process:
 | Mode | `--headless`: no menu bar (rumps is never imported), no browser launch, no console prompts. Web server and sync loop only. |
 | Environment | `RMIRROR_APP_TOKEN` (required in headless mode, 32+ random bytes, hex) and optional `RMIRROR_CONFIG_PATH`. |
 | Listen address | `127.0.0.1` on `config.web.port` (default 5555). The port must stay fixed because the dashboard sign-in callback targets it. |
-| Ready signal | One line on stdout once the server accepts connections: `RMIRROR_CORE_READY port=<port> api=2`. The app also polls `GET /health`. |
+| Ready signal | One line on stdout once the server accepts connections: `RMIRROR_CORE_READY port=<port> api=2`. This is the only readiness signal: the app never treats an answer on the port as proof that its own core is ready, because another process could be listening there. |
 | Parent watch | The core reads stdin on a background thread. EOF means the app is gone: shut down cleanly and exit 0 within 5 seconds. The app keeps the write end open for its whole life and never writes to it. |
 | Stop | `SIGTERM` → clean shutdown (existing `Agent.shutdown()`), exit 0. |
 | Exit codes | `0` clean stop · `3` port already in use (another rMirror is running) · `4` missing or too-short `RMIRROR_APP_TOKEN` · `1` anything else. |
@@ -73,7 +73,9 @@ upload batch, and at most every 5 minutes).
   | `unreadable` (path exists but listing it raises a permission error: macOS privacy protection).
   The core re-checks on every call; this is what makes the permission screen clear itself.
 - `watcher.state`: `idle` | `starting` | `running`.
-- `queue.paused_reason`: `null` | `sign_in` | `quota` | `rate_limited` | `offline`. Map the existing reasons onto these.
+- `queue.paused_reason`: `null` | `sign_in` | `quota` | `rate_limited` | `offline`. `sign_in` and `quota` are the
+  queue's pauses; `rate_limited` (waiting for Retry-After) and `offline` (waiting to retry a network or 5xx error)
+  are shown while the worker waits and clear by themselves.
 - `quota`: `null` when signed out or never fetched. `limit` `-1` means unlimited, then `remaining` is `null`.
 - `first_sync.completed`: true once any page has been uploaded for the current API host (decide from the upload
   manifest; do not add a new config location).
@@ -127,7 +129,7 @@ Body `{"notebook_uuids": ["…"], "page_limit": null}`. Both optional.
 - With `notebook_uuids`: save them as the selection (`sync_all` false), then start the initial sync. One request,
   no separate save step.
 - Without: sync the current selection.
-- `page_limit`: integer ≥ 1 or `null` for no limit; persisted as the existing page-limit setting.
+- `page_limit`: integer ≥ 1 sets and persists the page limit for this and later syncs. Omitted (or `null`): keep the limit already saved. To remove a limit use `PUT /api/v2/settings` with `"page_limit": null`.
 - Reuses the existing initial-sync job. `202 {"ok": true}` on start; `409 sync_already_running`; `401 not_signed_in`.
 
 ### `GET /api/v2/sync/progress`
@@ -146,10 +148,17 @@ Body `{"notebook_uuids": ["…"], "page_limit": null}`. Both optional.
 - `state`: `idle` | `running` | `done`.
 - `outcome` (when `done`): `success` | `partial` (some pages failed) | `stopped_quota` | `stopped_sign_in` | `failed`.
 - `will_retry`: pages deferred because the cloud asked to slow down. `pages_total` may be `null` if unknown.
+- Every key of `counts` is always present (zeros while idle; `pages_total` `null` while idle or when the sync
+  was not started through `/api/v2/sync/start`).
+- `outcome` mapping: `stopped_quota` / `stopped_sign_in` when the content sync ran out of quota or lost its
+  sign-in; otherwise `success` when no page failed (rate-limited pages count as `will_retry`, not as failed),
+  `failed` when pages failed and none was uploaded (or the job itself crashed), `partial` otherwise.
 
 ### `POST /api/v2/sync/resume`
 
 Resume a paused queue (what legacy "Sync Now" does). `{"ok": true}`.
+
+All "ok" style responses are exactly `{"ok": true}` (plus `needs_sign_in` for `PUT /api/v2/settings`).
 
 ### `GET /api/v2/settings` · `PUT /api/v2/settings`
 
@@ -163,6 +172,7 @@ Resume a paused queue (what legacy "Sync Now" does). `{"ok": true}`.
 ```
 
 `PUT` accepts any subset of `page_limit`, `source_directory`, `environment` (`{"name": "custom", "api_url": "…"}`).
+It always returns `{"ok": true, "needs_sign_in": true|false}` (`true` when no sign-in is stored for the current host).
 Changing the environment keeps the existing behaviour (per-host sign-in, per-host manifest) and returns
 `{"ok": true, "needs_sign_in": true|false}`.
 
@@ -172,7 +182,9 @@ Removes the stored sign-in for the current host and stops the watcher. `{"ok": t
 
 ### `GET /api/v2/deleted-notebooks` · `POST /api/v2/deleted-notebooks/<uuid>`
 
-Same data as the legacy routes. `POST` body `{"action": "resync" | "dismiss"}`.
+Same data as the legacy routes, reshaped:
+`{"deleted_notebooks": [{"uuid": "…", "name": "…", "deleted_at": "<iso or null>"}]}` (empty list when signed out).
+`POST` body `{"action": "resync" | "dismiss"}` returns `{"ok": true}`.
 
 ### `GET /api/v2/update-check`
 

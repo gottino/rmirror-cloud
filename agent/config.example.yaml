@@ -6,9 +6,8 @@ api:
   # API URL (use http://localhost:8000/v1 for local development)
   url: "https://rmirror.cloud/v1"
 
-  # Your rMirror Cloud credentials
-  email: "your@email.com"
-  password: "your-password"
+  # Sign in through the web UI (http://localhost:5555); the sign-in is kept in the
+  # macOS Keychain, never in this file
 
   # JWT token (auto-populated after first login, leave empty)
   token: null
