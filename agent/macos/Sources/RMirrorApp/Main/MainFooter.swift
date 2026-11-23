@@ -7,9 +7,11 @@ struct MainFooter: View {
     let quota: QuotaInfo?
     let isSaving: Bool
     let isSyncRunning: Bool
-    /// False while the search field has focus: Return must not start an upload and Esc must only
-    /// clear the search, so the buttons give up their Return / Esc shortcuts meanwhile.
-    var takesReturnAndEscape = true
+    /// False while the search field or the notebook list has the keyboard: Return must not start an
+    /// upload there (in the list it ticks the highlighted row), so the save button gives it up meanwhile.
+    var takesReturn = true
+    /// False while the search field has focus: Esc must only clear the search.
+    var takesEscape = true
     let onCancel: () -> Void
     let onSave: () -> Void
 
@@ -52,7 +54,7 @@ struct MainFooter: View {
 
             Button(MainCopy.cancel, action: onCancel)
                 .buttonStyle(.rmSecondary)
-                .keyboardShortcut(takesReturnAndEscape ? .cancelAction : nil)
+                .keyboardShortcut(takesEscape ? .cancelAction : nil)
                 .disabled(isSaving)
             Button(action: onSave) {
                 HStack(spacing: 6) {
@@ -61,7 +63,7 @@ struct MainFooter: View {
                 }
             }
             .buttonStyle(.rmPrimary)
-            .keyboardShortcut(takesReturnAndEscape ? .defaultAction : nil)
+            .keyboardShortcut(takesReturn ? .defaultAction : nil)
             .disabled(isSaving || (isSyncRunning && !diff.onlyRemoves))
         }
         .padding(.horizontal, Theme.Space.l)

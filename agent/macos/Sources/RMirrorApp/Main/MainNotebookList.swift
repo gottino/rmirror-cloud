@@ -1,8 +1,7 @@
 import RMirrorKit
 import SwiftUI
 
-/// The core of the window: search, select all/none, and the grouped notebook rows.
-/// Rows are built lazily, so a library of thousands of notebooks stays quick.
+/// The core of the window: the view switch, search, list actions and the notebook rows.
 struct MainNotebookSection: View {
     @ObservedObject var browser: MainBrowserModel
     /// Owned by `MainView`, which also hands it to the footer (see `WindowRules.defaultButtonsTakeKeys`).
@@ -17,39 +16,58 @@ struct MainNotebookSection: View {
             if browser.hasNotebooks {
                 toolbar
                     .padding(.horizontal, Theme.Space.l)
-                    .padding(.vertical, Theme.Space.m)
+                    .padding(.top, Theme.Space.m)
+                    .padding(.bottom, Theme.Space.s)
                 Rectangle().fill(Theme.border).frame(height: 1)
             }
             content
         }
     }
 
+    /// Three lines: title and search; the intro; the view switch with its own actions on the left and
+    /// "Select all / Select none" on the right. The view's actions are either "Expand all / Collapse all"
+    /// (Folders, not while searching) or "Synced only" (Recent), never both, so the line fits at the
+    /// window's narrowest without a menu.
     private var toolbar: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: Theme.Space.m) {
                 Text(MainCopy.listTitle).font(Theme.Font.heading)
                 Spacer(minLength: Theme.Space.m)
                 MainSearchField(text: $browser.query, focused: searchFocused)
                     .frame(maxWidth: 260)
             }
+            Text(browser.view == .folders ? MainCopy.listIntroFolders : MainCopy.listIntro)
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Theme.Space.m) {
-                Text(MainCopy.listIntro)
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: Theme.Space.m)
-                Button(browser.isSearching ? MainCopy.selectAllMatching : MainCopy.selectAll) { browser.selectAllVisible() }
-                    .buttonStyle(.rmLink)
-                    .disabled(browser.allVisibleSelected)
-                    .opacity(browser.allVisibleSelected ? 0.45 : 1)
-                Button(browser.isSearching ? MainCopy.selectNoneMatching : MainCopy.selectNone) { browser.selectNoneVisible() }
-                    .buttonStyle(.rmLink)
-                    .disabled(browser.noVisibleSelected)
-                    .opacity(browser.noVisibleSelected ? 0.45 : 1)
+                Picker(MainCopy.viewPickerLabel, selection: Binding(get: { browser.view }, set: { browser.setView($0) })) {
+                    Text(MainCopy.viewFolders).tag(NotebookListView.folders)
+                    Text(MainCopy.viewRecent).tag(NotebookListView.recent)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityLabel(MainCopy.viewPickerLabel)
+                if browser.view == .folders {
+                    if !browser.isSearching {
+                        quietLink(MainCopy.expandAll, enabled: browser.canExpandAll) { browser.expandAll() }
+                        quietLink(MainCopy.collapseAll, enabled: browser.canCollapseAll) { browser.collapseAll() }
+                    }
+                } else {
+                    MainFilterToggle(title: MainCopy.syncedOnly, help: MainCopy.syncedOnlyHelp, isOn: browser.syncedOnly) {
+                        browser.setSyncedOnly(!browser.syncedOnly)
+                    }
+                }
+                Spacer(minLength: Theme.Space.s)
+                quietLink(showsShownWording ? MainCopy.selectAllMatching : MainCopy.selectAll,
+                          enabled: !browser.allVisibleSelected) { browser.selectAllVisible() }
+                quietLink(showsShownWording ? MainCopy.selectNoneMatching : MainCopy.selectNone,
+                          enabled: !browser.noVisibleSelected) { browser.selectNoneVisible() }
             }
+            .frame(minHeight: 28)
             .fixedSize(horizontal: false, vertical: true)
-            .font(Theme.Font.caption)
         }
         .background(
             // Cmd-F focuses the search field.
@@ -60,6 +78,20 @@ struct MainNotebookSection: View {
         )
     }
 
+    /// "Select all shown" whenever the list shows only some notebooks (a search, or Recent with "Synced only").
+    private var showsShownWording: Bool {
+        browser.isSearching || (browser.view == .recent && browser.syncedOnly)
+    }
+
+    private func quietLink(_ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.rmLink)
+            .lineLimit(1)
+            .fixedSize()
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.45)
+    }
+
     @ViewBuilder
     private var content: some View {
         if !loaded && !browser.hasNotebooks {
@@ -67,35 +99,42 @@ struct MainNotebookSection: View {
         } else if !browser.hasNotebooks && deleted.isEmpty {
             MainEmptyState(systemImage: "book.closed", title: MainCopy.emptyTitle, message: MainCopy.emptyBody)
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    if !deleted.isEmpty && !browser.isSearching {
-                        MainDeletedSection(notebooks: deleted, pageCounts: browser.pageCounts,
-                                           resolving: resolvingDeleted, onResolve: onResolveDeleted)
-                            .padding(.horizontal, Theme.Space.l)
-                            .padding(.vertical, Theme.Space.m)
-                    }
-                    if browser.groups.isEmpty && browser.isSearching {
-                        MainNoMatches(query: browser.query) { browser.query = "" }
-                    }
-                    ForEach(browser.groups) { group in
-                        Section {
-                            ForEach(group.notebooks) { notebook in
-                                MainNotebookRow(
-                                    notebook: notebook,
-                                    isSelected: browser.isSelected(notebook.uuid),
-                                    isSaved: browser.isSaved(notebook.uuid),
-                                    onToggle: { browser.toggle(notebook.uuid) }
-                                )
-                            }
-                        } header: {
-                            MainGroupHeader(title: group.folder ?? MainCopy.topLevelGroup, count: group.notebooks.count)
-                        }
-                    }
-                }
-                .padding(.bottom, Theme.Space.m)
-            }
+            MainTreeList(browser: browser, searchFocused: searchFocused, deleted: deleted,
+                         resolvingDeleted: resolvingDeleted, onResolveDeleted: onResolveDeleted)
         }
+    }
+}
+
+/// A small on/off chip with a tick box, for list filters. The box shape and the words carry the state.
+struct MainFilterToggle: View {
+    let title: String
+    let help: String
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 13))
+                    .foregroundStyle(isOn ? Theme.accent : Theme.textSecondary)
+                Text(title)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(Capsule().fill(isOn ? Theme.accentTint : Theme.surface))
+            .overlay(Capsule().strokeBorder(Theme.border))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help(help)
+        .accessibilityLabel(title)
+        .accessibilityValue(isOn ? MainCopy.selected : MainCopy.notSelected)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
@@ -130,134 +169,6 @@ struct MainSearchField: View {
         .frame(height: 28)
         .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.surface))
         .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Theme.border))
-    }
-}
-
-/// Pinned heading for one folder. Opaque so rows scroll underneath it cleanly.
-struct MainGroupHeader: View {
-    let title: String
-    let count: Int
-
-    var body: some View {
-        HStack(spacing: Theme.Space.s) {
-            Text(title)
-                .font(Theme.Font.label)
-                .foregroundStyle(Theme.text)
-                .lineLimit(1)
-            Text(SharedCopy.notebooks(count))
-                .font(Theme.Font.caption)
-                .foregroundStyle(Theme.textSecondary)
-                .monospacedDigit()
-            Spacer()
-        }
-        .padding(.horizontal, Theme.Space.l)
-        .padding(.top, Theme.Space.m)
-        .padding(.bottom, 6)
-        .background(Theme.background)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(MainCopy.groupAccessibility(folder: title, count: count))
-        .accessibilityAddTraits(.isHeader)
-    }
-}
-
-/// One notebook: checkbox, name, sub-folder, sync state and page count. The whole row toggles.
-struct MainNotebookRow: View {
-    let notebook: NotebookEntry
-    let isSelected: Bool
-    let isSaved: Bool
-    let onToggle: () -> Void
-
-    var body: some View {
-        Button(action: onToggle) {
-            HStack(spacing: Theme.Space.m) {
-                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 15))
-                    .foregroundStyle(isSelected ? Theme.accent : Theme.textSecondary)
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(notebook.name)
-                        .font(Theme.Font.body)
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if let subfolder {
-                        Text(subfolder)
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.textSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                .layoutPriority(1)
-                Spacer(minLength: Theme.Space.s)
-                if showsIndicator {
-                    MainSyncIndicatorLabel(indicator: indicator)
-                }
-                Text(SharedCopy.pages(notebook.pageCount))
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .monospacedDigit()
-                    .frame(minWidth: 64, alignment: .trailing)
-            }
-            .padding(.horizontal, Theme.Space.l)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .background(isSelected ? Theme.accentTint.opacity(0.5) : Color.clear)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(Theme.border.opacity(0.7)).frame(height: 0.5).padding(.leading, Theme.Space.l + 30)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(MainRowButtonStyle())
-        .accessibilityLabel(MainCopy.rowAccessibilityLabel(name: notebook.name, pages: notebook.pageCount, selected: isSelected))
-        .accessibilityValue(MainCopy.rowAccessibilityValue(folder: notebook.folderPath.isEmpty ? nil : notebook.folderPath.joined(separator: " / "),
-                                                           indicator: MainCopy.syncIndicator(indicator)))
-        .accessibilityHint(MainCopy.rowAccessibilityHint)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-
-    private var subfolder: String? { NotebookList.subfolderPath(notebook) }
-    private var indicator: SyncIndicator { NotebookList.syncIndicator(notebook) }
-
-    /// "Not synced yet" on every unticked notebook would be noise in a long list, so the sync state is
-    /// shown for notebooks that are (or are about to be) synced, and for any that already have pages in rMirror.
-    private var showsIndicator: Bool { isSelected || isSaved || notebook.syncedPages > 0 }
-}
-
-struct MainSyncIndicatorLabel: View {
-    let indicator: SyncIndicator
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(symbolColor)
-                .accessibilityHidden(true)
-            Text(MainCopy.syncIndicator(indicator))
-                .font(Theme.Font.caption)
-                .foregroundStyle(Theme.textSecondary)
-                .monospacedDigit()
-                .lineLimit(1)
-        }
-    }
-
-    private var symbol: String {
-        switch indicator {
-        case .complete: return "checkmark.circle.fill"
-        case .partly: return "circle.lefthalf.filled"
-        case .notSynced, .empty: return "circle.dashed"
-        }
-    }
-
-    private var symbolColor: Color {
-        if case .complete = indicator { return Theme.success }
-        return Theme.textSecondary
-    }
-}
-
-struct MainRowButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(configuration.isPressed ? Theme.surfaceSunken : Color.clear)
     }
 }
 

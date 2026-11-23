@@ -5,7 +5,7 @@ import SwiftUI
 /// and the notebook list with one place to save a changed choice.
 struct MainView: View {
     @EnvironmentObject private var store: AppStore
-    @StateObject private var browser = MainBrowserModel()
+    @StateObject private var browser: MainBrowserModel
     /// Screenshot renderer only: ticks to show as an unsaved change.
     var previewDraft: Set<String>?
 
@@ -16,6 +16,16 @@ struct MainView: View {
     @State private var resolvingDeleted: Set<String> = []
     /// The notebook search field has keyboard focus: Return and Esc then belong to it, not to the footer.
     @FocusState private var searchFocused: Bool
+
+    /// - Parameters:
+    ///   - previewDraft: screenshot renderer only, ticks to show as an unsaved change.
+    ///   - previewList: screenshot renderer only, how the list starts; nothing is remembered then.
+    init(previewDraft: Set<String>? = nil, previewList: MainListPreview? = nil) {
+        self.previewDraft = previewDraft
+        _browser = StateObject(wrappedValue: ScreenRenderer.isRendering
+            ? MainBrowserModel(defaults: nil, preview: previewList ?? MainListPreview(), now: { Fixtures.now })
+            : MainBrowserModel())
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,7 +49,9 @@ struct MainView: View {
                     quota: store.state?.quota,
                     isSaving: isSaving,
                     isSyncRunning: isSyncRunning,
-                    takesReturnAndEscape: WindowRules.defaultButtonsTakeKeys(searchFieldFocused: searchFocused),
+                    takesReturn: WindowRules.defaultButtonTakesReturn(searchFieldFocused: searchFocused,
+                                                                      listHasKeyboard: browser.listHasKeyboard),
+                    takesEscape: WindowRules.defaultButtonsTakeKeys(searchFieldFocused: searchFocused),
                     onCancel: { browser.cancel() },
                     onSave: { Task { await save() } }
                 )
@@ -48,13 +60,14 @@ struct MainView: View {
         }
         .animation(.easeInOut(duration: 0.15), value: browser.diff.isEmpty)
         .task {
-            browser.update(store.notebooks)
+            browser.update(store.notebooks, folders: store.folders)
             if let previewDraft { browser.replaceDraft(previewDraft) }
             lastSyncState = store.state?.sync.state
             await store.reloadNotebooks()
             await store.loadDeletedNotebooks()
         }
-        .onChange(of: store.notebooks) { browser.update($0) }
+        .onChange(of: store.notebooks) { browser.update($0, folders: store.folders) }
+        .onChange(of: store.folders) { browser.update(store.notebooks, folders: $0) }
         .onChange(of: store.state?.sync.state) { syncStateChanged(to: $0) }
     }
 
