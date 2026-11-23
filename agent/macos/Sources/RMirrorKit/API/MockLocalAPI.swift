@@ -5,7 +5,7 @@ import Foundation
 public final class MockLocalAPI: LocalAPI, @unchecked Sendable {
     public enum Call: Equatable, Sendable {
         case state, notebooks, firstRunSuggestion(max: Int), syncProgress, resumeSync, settings, signOut
-        case updateCheck, deletedNotebooks, health
+        case updateCheck, deletedNotebooks, health, beginSignIn
         case setSelection(syncAll: Bool, selectedNotebooks: [String])
         case startSync(notebookUUIDs: [String]?, pageLimit: Int?)
         case updateSettings(SettingsUpdate)
@@ -118,6 +118,9 @@ public final class MockLocalAPI: LocalAPI, @unchecked Sendable {
     public func updateSettings(_ update: SettingsUpdate) async throws -> SettingsUpdateResult {
         record(.updateSettings(update)); return try updateSettingsResult.get()
     }
+    public var beginSignInResult: Result<URL, LocalAPIError> =
+        .success(URL(string: "http://127.0.0.1:5555/auth/bridge?ticket=sample")!)
+    public func beginSignIn() async throws -> URL { record(.beginSignIn); return try beginSignInResult.get() }
     public func signOut() async throws { record(.signOut); try actionResult.get() }
     public func deletedNotebooks() async throws -> [DeletedNotebook] {
         record(.deletedNotebooks); return try deletedNotebooksResult.get()

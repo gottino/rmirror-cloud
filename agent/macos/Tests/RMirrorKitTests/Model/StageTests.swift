@@ -79,8 +79,8 @@ final class AppStoreTests: XCTestCase {
         let store = makeStore(MockLocalAPI(state: Fixtures.signedOutState)) { opened = $0 }
         store.coreStatusChanged(.running(connection))
         await store.refresh()
-        store.beginSignIn()
-        XCTAssertEqual(opened?.absoluteString, "http://127.0.0.1:5555/auth/bridge")
+        await store.beginSignIn()
+        XCTAssertEqual(opened?.absoluteString, "http://127.0.0.1:5555/auth/bridge?ticket=sample")
         XCTAssertTrue(store.isWaitingForSignIn)
     }
 

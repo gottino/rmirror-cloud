@@ -214,8 +214,24 @@ final class LocalAPITests: XCTestCase {
         XCTAssertEqual(req.url?.path, "/health")
     }
 
-    func testSignInURL() {
-        XCTAssertEqual(client().signInURL.absoluteString, "http://127.0.0.1:5555/auth/bridge")
+    func testBeginSignInReturnsTheOneTimeLink() async throws {
+        stub(#"{"url": "http://127.0.0.1:5555/auth/bridge?ticket=abc"}"#)
+        let url = try await client().beginSignIn()
+        XCTAssertEqual(url.absoluteString, "http://127.0.0.1:5555/auth/bridge?ticket=abc")
+        let req = try XCTUnwrap(StubURLProtocol.requests.last)
+        XCTAssertEqual(req.httpMethod, "POST")
+        XCTAssertEqual(req.url?.path, "/api/v2/auth/begin")
+        XCTAssertNotNil(req.value(forHTTPHeaderField: "X-RMirror-App-Token"))
+    }
+
+    func testBeginSignInRefusesALinkThatIsNotThisCore() async {
+        for link in ["https://example.com/auth/bridge?ticket=abc", "http://127.0.0.1:9999/auth/bridge?ticket=abc",
+                     "http://127.0.0.1:5555/other", "file:///etc/passwd", "http://localhost:5555/auth/bridge?ticket=abc"] {
+            stub("{\"url\": \"\(link)\"}")
+            do { _ = try await client().beginSignIn(); XCTFail("accepted \(link)") } catch {
+                guard case LocalAPIError.decoding = error else { return XCTFail("got \(error)") }
+            }
+        }
     }
 
     // MARK: Errors

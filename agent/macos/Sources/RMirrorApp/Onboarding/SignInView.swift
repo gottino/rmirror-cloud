@@ -22,7 +22,7 @@ struct SignInView: View {
             OnboardingProblemLine(problem: store.problem)
         } actions: {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Button(OnboardingCopy.signInButton) { store.beginSignIn() }
+                Button(OnboardingCopy.signInButton) { Task { await store.beginSignIn() } }
                     .buttonStyle(.rmPrimary)
                     .keyboardShortcut(.defaultAction)
                 Text(OnboardingCopy.signInHint)
@@ -37,7 +37,7 @@ struct SignInView: View {
             OnboardingWaitingLine(text: OnboardingCopy.connectingMessage)
         } actions: {
             HStack(spacing: Theme.Space.l) {
-                Button(OnboardingCopy.openSignInAgain) { store.beginSignIn() }
+                Button(OnboardingCopy.openSignInAgain) { Task { await store.beginSignIn() } }
                     .buttonStyle(.rmLink)
                 Button(OnboardingCopy.cancel) { store.cancelSignIn() }
                     .buttonStyle(.rmLink)

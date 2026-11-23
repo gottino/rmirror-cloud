@@ -196,14 +196,19 @@ public final class AppStore: ObservableObject {
 
     public func dismissProblem() { problem = nil }
 
-    /// Opens the browser for sign-in. The core finishes the exchange; polling notices the result.
-    public func beginSignIn() {
-        // 127.0.0.1, not "localhost": the name can resolve to an address the core is not listening on.
-        guard let connection, let url = URL(string: "http://127.0.0.1:\(connection.port)/auth/bridge") else { return }
-        isWaitingForSignIn = true
-        problem = nil
-        dependencies.openURL(url)
-        startPolling()
+    /// Opens the browser for sign-in. The core hands out a one-time link, finishes the exchange
+    /// itself, and polling notices the result.
+    public func beginSignIn() async {
+        guard let api else { problem = .coreUnreachable; return }
+        do {
+            let url = try await api.beginSignIn()
+            problem = nil
+            isWaitingForSignIn = true
+            dependencies.openURL(url)
+            startPolling()
+        } catch {
+            problem = ActionProblem(error)
+        }
     }
 
     public func cancelSignIn() { isWaitingForSignIn = false }

@@ -647,3 +647,7 @@ struct APIErrorEnvelope: Decodable {
     }
     var error: Body
 }
+
+struct BeginSignInResponse: Codable, Equatable, Sendable {
+    var url: String
+}

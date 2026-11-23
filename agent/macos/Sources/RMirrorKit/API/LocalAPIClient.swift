@@ -13,6 +13,8 @@ public protocol LocalAPI: Sendable {
     func resumeSync() async throws
     func settings() async throws -> AppSettings
     func updateSettings(_ update: SettingsUpdate) async throws -> SettingsUpdateResult
+    /// Asks the core for a one-time sign-in link to open in the browser.
+    func beginSignIn() async throws -> URL
     func signOut() async throws
     func deletedNotebooks() async throws -> [DeletedNotebook]
     func resolveDeletedNotebook(uuid: String, action: DeletedNotebookAction) async throws
@@ -41,7 +43,6 @@ public final class LocalAPIClient: LocalAPI, @unchecked Sendable {
     private let encoder = LocalAPICoding.makeEncoder()
 
     /// Where the user signs in (opened in the default browser).
-    public var signInURL: URL { URL(string: "http://127.0.0.1:\(port)/auth/bridge")! }
 
     public init(port: Int, appToken: String, session: URLSession? = nil) {
         self.port = port
@@ -104,6 +105,16 @@ public final class LocalAPIClient: LocalAPI, @unchecked Sendable {
 
     public func updateSettings(_ update: SettingsUpdate) async throws -> SettingsUpdateResult {
         try await send("PUT", "/api/v2/settings", body: update, timeout: 15)
+    }
+
+    public func beginSignIn() async throws -> URL {
+        let response: BeginSignInResponse = try await send("POST", "/api/v2/auth/begin", body: Optional<EmptyBody>.none, timeout: 15)
+        // Only ever open a link back to this Mac's own core.
+        guard let url = URL(string: response.url), url.scheme == "http", url.host == "127.0.0.1", url.port == port,
+              url.path == "/auth/bridge" else {
+            throw LocalAPIError.decoding("unexpected sign-in link")
+        }
+        return url
     }
 
     public func signOut() async throws {
