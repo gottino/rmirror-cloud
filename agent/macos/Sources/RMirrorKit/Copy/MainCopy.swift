@@ -1,0 +1,199 @@
+import Foundation
+
+/// Wording for the main window (the notebook list after onboarding). Shared wording such as the status
+/// line, the allowance, sync progress and results lives in `SharedCopy`; this file only holds what is
+/// specific to this window. Plain language, sentence case, no exclamation marks or em dashes.
+public enum MainCopy {
+    // MARK: Header
+
+    public static let openOnWeb = "Open on the web"
+    public static let settings = "Settings"
+    public static let settingsHelp = "Open rMirror settings"
+    public static let accountFallback = "Your rMirror account"
+    public static func signedInAs(_ email: String) -> String { "Signed in as \(email)" }
+
+    // MARK: Allowance
+
+    public static let allowanceExhaustedTitle = "You've used this month's pages"
+
+    /// The banner under the title, true to what the core reports: uploads paused for the allowance,
+    /// or still uploading and waiting to be turned into text. `resetDay` is "1 December" when known.
+    public static func allowanceExhaustedLines(uploadsPaused: Bool, resetDay: String?) -> [String] {
+        if uploadsPaused {
+            if let resetDay { return ["Uploads are paused until your pages reset on \(resetDay)."] }
+            return ["Uploads are paused until your pages reset."]
+        }
+        let body = "New pages still upload. They are turned into text after your pages reset."
+        if let resetDay { return [body, "Resets \(resetDay)"] }
+        return [body]
+    }
+    public static func allowanceUsedAccessibility(used: Int, limit: Int) -> String {
+        "\(used) of \(SharedCopy.pages(limit)) used"
+    }
+
+    // MARK: Sync strips
+
+    public static let syncingTitle = "Syncing your notebooks"
+    public static let dismiss = "Dismiss"
+    public static let tryAgain = "Try again"
+    public static let pausedTitle = "Uploads are paused"
+    public static let pausedBody = "New pages are waiting to upload. Try again to continue."
+
+    // MARK: Notebook list
+
+    public static let listTitle = "Notebooks to sync"
+    public static let listIntro = "Ticked notebooks stay in sync. New pages upload on their own."
+    public static let searchPlaceholder = "Search notebooks"
+    public static let clearSearch = "Clear search"
+    public static let selectAll = "Select all"
+    public static let selectNone = "Select none"
+    public static let selectAllMatching = "Select all shown"
+    public static let selectNoneMatching = "Select none shown"
+    /// Heading for notebooks that are not in a folder.
+    public static let topLevelGroup = "Notebooks"
+
+    /// The intro line in the "Folders" view: ticking a folder is a shortcut, not a standing rule.
+    public static let listIntroFolders = "Ticked notebooks stay in sync. Ticking a folder ticks the notebooks in it now, not ones added later."
+    public static let viewPickerLabel = "Show notebooks"
+    public static let viewFolders = "Folders"
+    public static let viewRecent = "Recent"
+    public static let expandAll = "Expand all"
+    public static let collapseAll = "Collapse all"
+    public static let syncedOnly = "Synced only"
+    public static let syncedOnlyHelp = "Show only notebooks that are ticked or already have pages in rMirror"
+    public static let noSyncedTitle = "No synced notebooks yet"
+    public static let noSyncedBody = "Tick a notebook and save to start syncing it."
+    public static let showAllNotebooks = "Show all notebooks"
+    public static let listAccessibilityLabel = "Notebooks"
+
+    /// Right-hand text on a folder row: "2 of 5 selected", counting every notebook below it.
+    public static func folderSummary(selected: Int, total: Int) -> String { "\(selected) of \(total) selected" }
+    public static let emptyFolder = "Empty"
+    public static let tickFolder = "Tick all in this folder"
+    public static let untickFolder = "Untick all in this folder"
+
+    /// VoiceOver label for a folder row: "Work, folder, 2 of 5 selected, expanded".
+    public static func folderAccessibilityLabel(name: String, selected: Int, total: Int, expanded: Bool) -> String {
+        if total == 0 { return "\(name), folder, empty" }
+        return "\(name), folder, \(folderSummary(selected: selected, total: total)), \(expanded ? "expanded" : "collapsed")"
+    }
+    public static let folderAccessibilityHint = "Opens or closes the folder"
+
+    /// VoiceOver value for a notebook in the Recent view: "Changed 3 days ago".
+    public static func changedAccessibility(_ relative: String) -> String { "Changed \(relative)" }
+
+    public static func groupAccessibility(folder: String, count: Int) -> String {
+        "\(folder), \(SharedCopy.notebooks(count))"
+    }
+
+    public static func syncIndicator(_ indicator: SyncIndicator) -> String {
+        switch indicator {
+        case .empty: return "No pages yet"
+        case .notSynced: return "Not synced yet"
+        case .partly(let synced, let total): return "\(synced) of \(SharedCopy.pages(total)) synced"
+        case .complete(let total): return "\(total) of \(SharedCopy.pages(total)) synced"
+        }
+    }
+
+    public static let selected = "selected"
+    public static let notSelected = "not selected"
+
+    /// VoiceOver label for a row: "Meeting Notes, 12 pages, selected".
+    public static func rowAccessibilityLabel(name: String, pages: Int, selected: Bool) -> String {
+        "\(name), \(SharedCopy.pages(pages)), \(selected ? Self.selected : notSelected)"
+    }
+
+    /// VoiceOver value for a row: where it is and how much has synced.
+    public static func rowAccessibilityValue(folder: String?, indicator: String) -> String {
+        guard let folder else { return indicator }
+        return "In \(folder). \(indicator)"
+    }
+
+    public static let rowAccessibilityHint = "Ticks or unticks the notebook"
+
+    // MARK: Empty and loading states
+
+    public static let loading = "Looking for your notebooks…"
+    public static let emptyTitle = "No notebooks yet"
+    public static let emptyBody = "Notebooks appear here once the reMarkable app on this Mac has them. Open the reMarkable app and let it finish syncing."
+    public static func noMatches(_ query: String) -> String { "No notebooks match \u{201C}\(query)\u{201D}" }
+    public static let noMatchesBody = "Check the spelling, or search for a folder name."
+
+    // MARK: Pending change
+
+    /// "2 notebooks added · 31 pages to upload", "1 notebook removed", "1 notebook added · 2 removed · 4 pages to upload".
+    /// `pagesToUpload` counts every ticked notebook's pages not uploaded yet (the sync covers the whole
+    /// selection), so it can include pages of notebooks that were ticked before.
+    public static func changeSummary(added: Int, removed: Int, pagesToUpload: Int) -> String {
+        var parts: [String] = []
+        if added > 0 { parts.append("\(SharedCopy.notebooks(added)) added") }
+        if removed > 0 { parts.append(added > 0 ? "\(removed) removed" : "\(SharedCopy.notebooks(removed)) removed") }
+        if added > 0 && pagesToUpload > 0 { parts.append("\(SharedCopy.pages(pagesToUpload)) to upload") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Shown, without blocking, when the pages to upload are more than the pages left this month.
+    public static func overAllowance(remaining: Int) -> String {
+        if remaining <= 0 {
+            return "You have no pages left this month. These pages are turned into text after your pages reset."
+        }
+        return "That's more than the \(SharedCopy.pages(remaining)) you have left this month. The rest is turned into text after your pages reset."
+    }
+
+    public static let removalNote = "Unticked notebooks stop syncing. Pages already in rMirror stay there."
+    public static let cancel = "Cancel"
+    public static let saveAndSync = "Save and sync"
+    public static let save = "Save"
+    public static let saving = "Saving…"
+    public static let waitForSync = "You can sync these once the current sync finishes."
+
+    // MARK: Removed on the web
+
+    public static let deletedTitle = "Removed on the web"
+    public static let deletedBody = "You deleted these notebooks on the rMirror website. Sync one again to bring it back, or keep it removed and rMirror leaves it alone."
+    public static let syncAgain = "Sync again"
+    /// Under a notebook removed on the web: what "Sync again" uploads.
+    public static func syncAgainUploads(pages: Int?) -> String {
+        guard let pages else { return "Sync again uploads the whole notebook again." }
+        return "Sync again uploads \(SharedCopy.pages(pages))."
+    }
+    public static let keepRemoved = "Keep removed"
+    public static func deletedWhen(_ relative: String) -> String { "Removed \(relative)" }
+
+    // MARK: Checks
+
+    /// Every string above, with representative arguments, for wording checks.
+    public static var allStrings: [String] {
+        [
+            openOnWeb, settings, settingsHelp, accountFallback, signedInAs("sample@example.com"),
+            allowanceExhaustedTitle, allowanceUsedAccessibility(used: 24, limit: 200),
+            syncingTitle, dismiss, tryAgain, pausedTitle, pausedBody,
+            listTitle, listIntro, searchPlaceholder, clearSearch, selectAll, selectNone,
+            selectAllMatching, selectNoneMatching, topLevelGroup,
+            listIntroFolders, viewPickerLabel, viewFolders, viewRecent, expandAll, collapseAll,
+            syncedOnly, syncedOnlyHelp, noSyncedTitle, noSyncedBody, showAllNotebooks, listAccessibilityLabel,
+            folderSummary(selected: 2, total: 5), emptyFolder, tickFolder, untickFolder,
+            folderAccessibilityLabel(name: "Work", selected: 2, total: 5, expanded: true),
+            folderAccessibilityLabel(name: "Home", selected: 0, total: 3, expanded: false),
+            folderAccessibilityLabel(name: "Templates", selected: 0, total: 0, expanded: false),
+            folderAccessibilityHint, changedAccessibility("3 days ago"),
+            groupAccessibility(folder: "Work", count: 4),
+            syncIndicator(.empty), syncIndicator(.notSynced(total: 12)),
+            syncIndicator(.partly(synced: 4, total: 12)), syncIndicator(.complete(total: 12)),
+            selected, notSelected,
+            rowAccessibilityLabel(name: "Meeting Notes", pages: 12, selected: true),
+            rowAccessibilityLabel(name: "Quick Notes", pages: 1, selected: false),
+            rowAccessibilityValue(folder: "Work / 2026", indicator: syncIndicator(.complete(total: 12))),
+            rowAccessibilityHint,
+            loading, emptyTitle, emptyBody, noMatches("garden"), noMatchesBody,
+            changeSummary(added: 2, removed: 0, pagesToUpload: 31), changeSummary(added: 0, removed: 1, pagesToUpload: 0),
+            changeSummary(added: 1, removed: 2, pagesToUpload: 1),
+            overAllowance(remaining: 12), overAllowance(remaining: 1), overAllowance(remaining: 0),
+            removalNote, cancel, saveAndSync, save, saving, waitForSync,
+            deletedTitle, deletedBody, syncAgain, keepRemoved, deletedWhen("yesterday"),
+            syncAgainUploads(pages: 12), syncAgainUploads(pages: 1), syncAgainUploads(pages: nil),
+        ] + allowanceExhaustedLines(uploadsPaused: true, resetDay: "1 December")
+          + allowanceExhaustedLines(uploadsPaused: true, resetDay: nil)
+          + allowanceExhaustedLines(uploadsPaused: false, resetDay: "1 December")
+    }
+}

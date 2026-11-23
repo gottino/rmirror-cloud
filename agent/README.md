@@ -1,317 +1,87 @@
-# rMirror Mac Agent
+# rMirror for Mac
 
-Python background service that automatically syncs reMarkable tablet files to the rMirror Cloud.
+Syncs your reMarkable notebooks to rMirror Cloud. Version 2.0 is a native Mac app (Swift) that runs the existing
+Python sync code as a hidden helper process ("the core").
 
-## Features
+Status: 2.0 is on the branch `claude/agent-native-app` in draft PRs and has not been released. The released app is
+1.7.0 (the legacy mode, below). Sparkle updates have no key or feed yet and the Intel build has never been run.
 
-- **Automatic File Watching** - Monitors your reMarkable Desktop app folder for changes
-- **Cloud Sync** - Uploads notebooks to rMirror Cloud backend
-- **Web UI** - Localhost configuration interface (http://localhost:5555)
-- **System Tray** - Menu bar icon for quick access and status
-- **Auto-Start** - Runs automatically on Mac startup (via launchd)
+## What rMirror for Mac 2.0 does
 
-## Architecture
+- Opens a normal window. First run is a guided flow:
+  1. Sign in (opens your browser, then returns to the app).
+  2. If the reMarkable desktop app's folder is missing, it says so and waits for the app.
+  3. If macOS blocks access to that folder, a permission step walks through turning on Full Disk Access for rMirror
+     in System Settings, with a "Reopen rMirror" button.
+  4. A guided first sync: rMirror suggests recent notebooks, you can choose others, then it uploads them.
+- After that it lives in the menu bar. The menu bar item shows the sync status and offers "Open rMirror",
+  "Settings...", "Check for Updates..." and "Quit rMirror". The Dock icon shows only while a window is open.
+- The main window lists your notebooks with a sync indicator, lets you tick which ones stay in sync and search them, shows this month's page allowance, and has an "Open on the web" link.
+- Settings: open rMirror at login, account (sign out), limit pages per notebook, the reMarkable folder, and
+  "Developer options" for self-hosters (server: rMirror Cloud, Staging or a custom API URL; changing it needs a new
+  sign-in).
+- Needs macOS 13 or later.
 
-```
-┌─────────────────────────────────────┐
-│   reMarkable Desktop App Folder     │
-│   (~/.local/share/remarkable/...)   │
-└────────────┬────────────────────────┘
-             │
-             │ File System Events
-             ▼
-┌─────────────────────────────────────┐
-│      File Watcher (watchdog)        │
-│  - Monitors .rm, .metadata, .content│
-│  - Filters relevant file types      │
-└────────────┬────────────────────────┘
-             │
-             │ New/Modified Files
-             ▼
-┌─────────────────────────────────────┐
-│         Sync Queue                  │
-│  - Deduplicates events              │
-│  - Batches uploads                  │
-└────────────┬────────────────────────┘
-             │
-             │ HTTPS
-             ▼
-┌─────────────────────────────────────┐
-│    rMirror Cloud Backend API        │
-│         (FastAPI)                   │
-└─────────────────────────────────────┘
+All wording the user sees comes from the Swift app. The core only returns codes and numbers.
 
-         ┌───────────────┐
-         │  Web UI       │◄── User Configuration
-         │  (Flask)      │    http://localhost:5555
-         │  Port 5555    │
-         └───────────────┘
-
-         ┌───────────────┐
-         │  System Tray  │◄── Status & Quick Actions
-         │  (rumps)      │
-         └───────────────┘
-```
-
-## Project Structure
+## How it fits together
 
 ```
-agent/
-├── pyproject.toml          # Poetry dependencies
-├── app/
-│   ├── main.py            # Entry point
-│   ├── config.py          # Configuration management
-│   ├── watcher/
-│   │   ├── file_watcher.py   # File watching logic
-│   │   └── event_handler.py  # Event handling
-│   ├── sync/
-│   │   ├── cloud_sync.py     # Upload to backend API
-│   │   └── queue.py          # Sync queue management
-│   ├── web/
-│   │   ├── app.py            # Flask web server
-│   │   ├── routes.py         # API routes
-│   │   └── templates/        # HTML templates
-│   └── tray/
-│       └── app.py            # System tray menu bar app
-├── scripts/
-│   ├── install.sh         # Installation script
-│   └── uninstall.sh       # Uninstallation script
-└── resources/
-    ├── icon.png           # App icon
-    └── com.rmirror.agent.plist  # launchd configuration
+rMirror.app (Swift)                       agent/macos/
+  windows, menu bar item, updates
+  └─ Contents/Resources/core/rmirror-core  (Python, started as a child process)    agent/app/
+       file watcher, sync queue, upload to the cloud, local API on 127.0.0.1:5555
 ```
 
-## Installation
+The app starts the core with a per-launch token, polls the core's local API (`/api/v2`), and treats the core as ready
+only when it prints its ready line. If the app quits or crashes, the core exits when its stdin closes. The sign-in
+token is stored in the macOS Keychain; settings and logs stay in `~/.config/rmirror/`.
 
-### Prerequisites
+Details: [`docs/native-app-architecture.md`](docs/native-app-architecture.md) (decisions),
+[`docs/local-api.md`](docs/local-api.md) (contract between the two processes),
+[`macos/README.md`](macos/README.md) (develop, run, package), [`macos/docs/sparkle.md`](macos/docs/sparkle.md) (updates).
 
-- macOS 11.0 (Big Sur) or later
-- Python 3.11 or later
-- reMarkable Desktop app installed and configured
-- rMirror Cloud account
+## Develop
 
-### Quick Install
+Swift app (from `agent/macos`):
 
 ```bash
-cd rmirror-cloud/agent
-./install.sh
+swift build
+swift test
 ```
 
-The installer will:
-1. Check Python version and dependencies
-2. Install the rmirror-agent package
-3. Initialize configuration file
-4. Set up auto-start on login (LaunchAgent)
-5. Start the agent in menu bar mode
+To run the app against the core from source, set `RMIRROR_CORE_CMD`, `RMIRROR_CORE_ARGS` and `RMIRROR_CORE_CWD` as
+described in [`macos/README.md`](macos/README.md). `.build/debug/RMirrorApp --render-screens <dir>` writes a PNG of
+every screen from fixture data.
 
-### Manual Installation
+Core (from `agent`):
 
 ```bash
-cd rmirror-cloud/agent
-
-# Install the package
-pip install --user -e .
-
-# Initialize configuration
-rmirror-agent init
-
-# Edit the configuration file
-nano ~/.config/rmirror/config.yaml
-
-# Run the agent
-rmirror-agent
+poetry install
+poetry run pytest
+RMIRROR_APP_TOKEN=<64 hex chars> poetry run python -m app.main --headless
 ```
+
+Package (signed, notarized DMG; run outside iCloud): `macos/scripts/build_app.sh`, see [`BUILD.md`](BUILD.md).
 
 ## Configuration
 
-Edit `~/.config/rmirror/config.yaml`:
+The core reads `~/.config/rmirror/config.yaml` (also `~/.rmirror/config.yaml`, `./config.yaml`; override with
+`--config` or `RMIRROR_CONFIG_PATH`). Most people never edit it: the app changes the folder, page limit and server.
+`config.example.yaml` lists the keys. There are no credentials in the file; the sign-in is kept in the Keychain. Password
+sign-in no longer exists.
 
-```yaml
-# rMirror Cloud API
-api:
-  url: "https://rmirror.io/api/v1"  # or http://localhost:8000/v1 for dev
-  # No credentials here: sign in through the web UI (http://localhost:5555);
-  # the sign-in is kept in the macOS Keychain
+Logs: `~/.config/rmirror/agent.log`.
 
-# reMarkable Desktop app sync folder
-remarkable:
-  source_directory: "~/.local/share/remarkable/xochitl"
-  watch_enabled: true
+## Legacy 1.x mode (frozen)
 
-# Web UI
-web:
-  enabled: true
-  port: 5555
-  host: "127.0.0.1"
-
-# System Tray
-tray:
-  enabled: true
-  show_notifications: true
-
-# Sync settings
-sync:
-  auto_sync: true
-  batch_size: 10
-  retry_attempts: 3
-  sync_interval: 60  # seconds
-```
-
-## Usage
-
-### Web UI
-
-Access the web interface at http://localhost:5555
-
-Features:
-- View sync status and recent uploads
-- Configure API credentials
-- Set reMarkable folder location
-- View sync logs
-- Manually trigger sync
-- Pause/resume automatic syncing
-
-### System Tray
-
-Click the menu bar icon for:
-- **Sync Status** - See current sync state
-- **Sync Now** - Trigger immediate sync
-- **Open Web UI** - Launch configuration interface
-- **Pause/Resume** - Control automatic syncing
-- **Quit** - Stop the agent
-
-### Command Line
-
-```bash
-# Start agent
-poetry run python -m app.main
-
-# Start with custom config
-poetry run python -m app.main --config /path/to/config.yaml
-
-# Start in foreground (debug mode)
-poetry run python -m app.main --foreground
-
-# Check status
-poetry run python -m app.main --status
-```
-
-## Auto-Start on Login
-
-The agent uses macOS launchd to start automatically on login.
-
-### Enable Auto-Start
-
-```bash
-# Load launchd service
-launchctl load ~/Library/LaunchAgents/com.rmirror.agent.plist
-
-# Start now
-launchctl start com.rmirror.agent
-```
-
-### Disable Auto-Start
-
-```bash
-# Stop agent
-launchctl stop com.rmirror.agent
-
-# Unload launchd service
-launchctl unload ~/Library/LaunchAgents/com.rmirror.agent.plist
-```
-
-## Development
-
-### Running in Development Mode
-
-```bash
-# Start with hot reload
-poetry run python -m app.main --foreground --debug
-
-# Run tests
-poetry run pytest
-
-# Type checking
-poetry run mypy app/
-
-# Linting
-poetry run ruff check app/
-```
-
-### Project Dependencies
-
-- **watchdog** - File system monitoring
-- **httpx** - Async HTTP client for API calls
-- **Flask** - Web UI server
-- **rumps** - macOS menu bar integration
-- **pyyaml** - Configuration file parsing
-- **pydantic** - Configuration validation
-
-## Troubleshooting
-
-### Agent not starting
-
-1. Check launchd logs: `tail -f ~/Library/Logs/rmirror-agent.log`
-2. Verify Python version: `python3 --version`
-3. Check service status: `launchctl list | grep rmirror`
-
-### Files not syncing
-
-1. Verify reMarkable folder path in config
-2. Check API credentials in web UI
-3. View sync logs in web UI
-4. Test API connection: `curl http://localhost:5555/api/status`
-
-### Web UI not accessible
-
-1. Check if port 5555 is already in use: `lsof -i :5555`
-2. Verify `web.enabled: true` in config
-3. Check firewall settings
-
-## Usage
-
-### Viewing Logs
-
-The agent logs all activity to `~/.config/rmirror/agent.log`:
-
-```bash
-# View real-time logs
-tail -f ~/.config/rmirror/agent.log
-
-# View last 50 lines
-tail -n 50 ~/.config/rmirror/agent.log
-
-# Search logs
-grep "OCR extracted text" ~/.config/rmirror/agent.log
-```
-
-### Command Line Interface
-
-```bash
-# Check status
-rmirror-agent status
-
-# Run in foreground (for debugging)
-rmirror-agent --foreground
-
-# Run with debug logging
-rmirror-agent --debug
-
-# Show help
-rmirror-agent --help
-```
-
-## Uninstallation
-
-```bash
-cd rmirror-cloud/agent
-./uninstall.sh
-```
-
-This will:
-1. Stop and remove the LaunchAgent
-2. Uninstall the Python package
-3. Configuration files in `~/.config/rmirror` are preserved (remove manually if desired)
+The 1.x app is a menu-bar program (rumps) with a Flask page at `http://localhost:5555` that you open in a browser.
+It still builds (`build_macos.sh`, `rmirror.spec`) and runs (`poetry run python -m app.main`, add `--foreground
+--debug` for a terminal), but it is frozen: no new features, and it will be removed in a follow-up after 2.0 is
+hand-tested. Its menu has Status, Open Web UI, Check for Updates, Settings and Quit. `install.sh`, `uninstall.sh`,
+`launch-rmirror.sh` and `launch-rmirror.bat` belong to this mode; they are not part of 2.0 and have not been
+re-checked for it. The docs `STANDALONE_APP.md`, `INITIAL_SYNC_FEATURE.md` and `test_initial_sync_manual.md` describe
+the legacy UI.
 
 ## License
 

@@ -1,5 +1,7 @@
 # Testing Initial Sync
 
+> **Legacy 1.x note.** The steps below use the legacy web UI at localhost:5555 (frozen). In rMirror for Mac 2.0 the first sync is a guided screen in the native app (`macos/README.md`); the sync logic described here is the same core code.
+
 The initial sync feature allows you to upload all notebooks when the agent first starts or needs to catch up after being offline.
 
 ## How to use:

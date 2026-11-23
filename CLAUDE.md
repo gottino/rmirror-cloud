@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **rMirror Cloud** is an open-source cloud service for reMarkable tablet integration with AI-powered handwriting recognition. The system consists of three main components:
 
 - **Backend (FastAPI)**: REST API, OCR processing, integration syncs, quota management
-- **Agent (Python)**: macOS background service that monitors reMarkable sync folder and uploads to backend
+- **Agent (Mac app)**: two parts. A native Swift app (`agent/macos/`, "rMirror for Mac 2.0": windows, menu bar item, updates) runs the Python core (`agent/app/`, started with `--headless`) as a hidden child process. The core monitors the reMarkable sync folder and uploads to the backend. The legacy 1.x menu-bar mode (rumps + Flask page in the browser) still builds but is frozen and will be removed in a follow-up. Not released yet: see Current Status
 - **Dashboard (Next.js)**: Web interface for viewing notebooks and managing integrations
 
 ## Multi-Instance Workflow (Important!)
@@ -48,7 +48,7 @@ Start from repository root when doing:
 
 - **backend/**: API endpoints, database migrations, OCR processing, Notion sync, quota logic
 - **dashboard/**: UI components, pages, Clerk auth, quota display
-- **agent/**: File watching, cloud sync, Flask web UI, macOS menu bar
+- **agent/**: File watching, cloud sync, the local API (`/api/v2`), and the Swift app in `agent/macos/` (also work done from an agent session); legacy Flask UI and rumps menu bar (frozen)
 
 **Don't** change directories during a session - open a new session in the target folder instead.
 
@@ -78,17 +78,38 @@ poetry run pytest -v                               # Verbose output
 
 ```bash
 cd agent
-
 poetry install
 
-# Development (foreground mode with logs)
-poetry run python -m app.main --foreground --debug
+# Core, headless (what the Swift app runs); RMIRROR_APP_TOKEN is required (64 hex chars)
+RMIRROR_APP_TOKEN=<64 hex chars> poetry run python -m app.main --headless
 
-# Build macOS .app bundle
-./build_macos.sh
+# Swift app (rMirror for Mac 2.0)
+cd macos
+swift build          # debug build: .build/debug/RMirrorApp
+swift test           # RMirrorKit unit tests (live-core tests are skipped)
 
-# Web UI accessible at localhost:5555
+# Run the app in development against the core from source (outside a .app bundle
+# there is no bundled core; the app adds RMIRROR_APP_TOKEN itself)
+cd .. && poetry install --no-root && cd macos
+RMIRROR_CORE_CMD="$(cd .. && poetry env info -e)" \
+RMIRROR_CORE_ARGS="-m app.main --headless" \
+RMIRROR_CORE_CWD="$(cd .. && pwd)" \
+.build/debug/RMirrorApp
+
+# Render every screen from fixture data (light and dark) to PNGs, no core needed
+.build/debug/RMirrorApp --render-screens <dir>
+
+# Package: rMirror.app + DMG (signed, notarized unless --unsigned / --skip-notarize).
+# Must run outside iCloud: the main checkout under ~/Documents is in iCloud, so use a
+# worktree elsewhere or set BUILD_DIR. Details: agent/macos/README.md
+CODESIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" agent/macos/scripts/build_app.sh
+
+# Legacy 1.x menu-bar mode (frozen, removed in a follow-up)
+poetry run python -m app.main --foreground --debug   # web UI at localhost:5555
+./build_macos.sh                                     # legacy .app bundle (PyInstaller)
 ```
+
+The core from source uses your real `~/.config/rmirror` and login keychain. Full detail: `agent/macos/README.md`.
 
 ### Dashboard (Next.js)
 
@@ -152,6 +173,8 @@ This project uses domain-specific `.claudecontext` files for focused sessions:
 **Quota System**: Separate `subscriptions` and `quota_usage` tables (`app/services/quota_service.py`). Free tier: 30 pages/month, beta users on the free tier: 200, pro: 500, enterprise: unlimited. Enforced at backend before OCR. Graceful degradation: accepts uploads when exhausted, skips OCR, pages set to `PENDING_QUOTA` status (capped at 100 pending pages per user, then uploads get HTTP 429).
 
 **Metadata vs Content Sync**: Two sync types - `NOTEBOOK` (full content with OCR) and `NOTEBOOK_METADATA` (lightweight, updates only Notion properties). Content syncs go through `sync_queue` (`item_type` `page_text` or `todo`). Metadata sync is not a queue item: `POST /processing/metadata/update` builds a `NOTEBOOK_METADATA` item and syncs it inline through `UnifiedSyncManager`, skipped when quota is exhausted. Metadata syncs 50-100x faster (~100ms vs ~5s).
+
+**Mac app (2.0)**: two processes (design: `agent/docs/native-app-architecture.md`, contract: `agent/docs/local-api.md`). The Swift app starts the Python core as a plain child process from `Contents/Resources/core/`, so macOS attributes file access (Full Disk Access) to the app. It passes a per-launch app token in `RMIRROR_APP_TOKEN` and treats the core as ready only when the `RMIRROR_CORE_READY` line arrives on its stdout (a reply on the port is not proof). The core exits when stdin closes, so a crashed app leaves no orphan. In headless mode only `/health`, `/auth/bridge`, `/auth/callback`, `/auth/done` and `/api/v2/*` exist; sign-in starts from `POST /api/v2/auth/begin`. All user-facing wording lives in the Swift `Copy` files; the core returns codes and numbers.
 
 **Graceful Degradation**: When quota exhausted, uploads accepted, PDFs generated, OCR deferred. Pages show "OCR Pending" in dashboard. Retroactive processing when quota resets (newest pages first, `app/jobs/process_pending_pages.py`). The sync worker does this (`_process_pending_quota_pages`, a few users/pages per poll, one worker per user via a Postgres advisory lock); request code such as `reset_quota()` must never spawn background tasks.
 
@@ -249,7 +272,12 @@ This project uses domain-specific `.claudecontext` files for focused sessions:
 - **Token storage**: Uses system keychain (keyring library)
 - **Config location**: `~/.config/rmirror/config.yaml` (also read: `~/.rmirror/config.yaml`, `./config.yaml`; override with `--config` or `RMIRROR_CONFIG_PATH`). Logs go to `~/.config/rmirror/agent.log`
 - **reMarkable files**: `.rm` files are binary and uploaded as-is (the backend converts them, `backend/app/core/rm_converter.py`); the agent only reads the `.metadata` and `.content` JSON files (`app/remarkable/metadata_scanner.py`)
-- **Auth**: web UI sign-in redirects to the dashboard `/agent` bridge page (production Clerk keys) or renders `app/web/templates/auth_bridge.html` (dev keys), which exchanges the Clerk session for a 30-day agent JWT
+- **Auth**: sign-in redirects to the dashboard `/agent` bridge page (production Clerk keys) or renders `app/web/templates/auth_bridge.html` (dev keys), which exchanges the Clerk session for a 30-day agent JWT. Password sign-in is gone (issue #47). The 2.0 app starts sign-in with `POST /api/v2/auth/begin`
+- **Folder state**: the core reports the reMarkable folder as `missing` (no such folder: reMarkable app not installed or never synced) or `unreadable` (exists, macOS denies access: Full Disk Access). Do not conflate them; the app shows a different screen for each
+- **Packaging**: never put the Python payload in `Contents/Frameworks` (signing fails on the non-code files); it goes in `Contents/Resources/core/` with every Mach-O signed first. Never sign with `--deep`. Build outside iCloud: a `com.apple.FinderInfo` xattr breaks `codesign --verify --strict` (`build_app.sh` refuses iCloud locations)
+- **Legacy UI is frozen**: do not add features to `agent/app/web/templates/index.html` or the rumps menu
+- **Local API**: any new local route must be under `/api/v2` and token-protected. Update `agent/docs/local-api.md` before changing either side
+- **User-facing wording**: Swift `Copy` files only (banned-words tests apply); never return sentences from the core
 
 ### Dashboard
 
@@ -286,6 +314,8 @@ ls /var/www/rmirror-cloud/backend/.env   # staging: /var/www/rmirror-staging/bac
 
 **CI/CD**: Push to `main` deploys to **staging** (`staging.rmirror.io`, `deploy-staging.yml`, runs CI first and Playwright E2E afterwards). Production is deployed by running the "Deploy to Production" workflow by hand (`deploy-production.yml`; it requires green CI and a healthy staging, and ends in `backend/scripts/deploy.sh`). Staging and production share one server.
 
+**Mac app 2.0 workflows (untested until their first run)**: `build-mac-app.yml` (macos-15, arm64 core) and `build-mac-app-intel.yml` (macos-15-intel, x86_64 core) run `agent/macos/scripts/build_app.sh` on `workflow_dispatch` only and keep the DMG as a workflow artifact: no upload, no release. The `agent-macos-checks` job in `ci.yml` runs `swift build` and `swift test` on pull requests that change `agent/macos/`. The legacy `build-agent.yml` and `build-agent-intel.yml` are unchanged.
+
 **Dashboard builds run in GitHub Actions, never on the server**: `npm ci` + `next build` there ran the 4 GB box out of memory (2026-10-21). The deploy workflows build a Next.js standalone server (`NEXT_OUTPUT=standalone`), upload it, and `dashboard/deploy/install-release.sh` installs it under pm2 from `~/rmirror-releases/`, rolling back if it doesn't come up.
 
 ## Design System
@@ -313,7 +343,7 @@ All UI components (emails, dashboard, agent) use this consistent design system.
 - Legal compliance (terms/privacy acceptance)
 - Umami analytics (self-hosted, cookie-less)
 - Onboarding checklist + email drip campaign
-- Agent v1.6.0 with Intel build support, update check against `version.json`
+- Agent 1.7.0 (legacy menu-bar app, the released version) with Intel build support, update check against `version.json`
 - Quota system Phase 1 (30 pages/month free tier)
 - Graceful degradation (accept uploads when quota exhausted)
 - Retroactive OCR processing (newest pages first), run by the sync worker (PR #50)
@@ -329,7 +359,10 @@ All UI components (emails, dashboard, agent) use this consistent design system.
 - Production deployment on Hetzner
 
 **In Progress**:
-- None currently
+- rMirror for Mac 2.0 (branch `claude/agent-native-app`, draft PRs, nothing released; version file says 2.0.0):
+  - Python core: headless mode and local API v2 (gottino/rmirror-cloud#107)
+  - Swift app in `agent/macos/` (this PR): onboarding (sign-in, missing reMarkable app, Full Disk Access step, guided first sync), main window, settings with developer options, menu bar item, build script, two manual build workflows, Swift CI job
+  - Not done: no release or announcement (`agent_latest_version` unchanged); Sparkle has no key or feed, so the app uses the `version.json` check; the Intel build has never been run; legacy mode not yet removed; workflows and `build_app.sh` notarization not yet run in CI
 
 **Planned**:
 - Phase 2: Stripe integration for paid tiers (subscription columns exist, unused)
