@@ -7,7 +7,7 @@ import Image from 'next/image';
 import { validateCallbackUrl, buildAgentRedirectUrl } from '@/lib/agent-callback';
 import { ApiError, exchangeAgentToken } from '@/lib/api';
 
-const SIGN_IN_AGAIN = 'Open rMirror from your menu bar and choose Sign In again.';
+const SIGN_IN_AGAIN = 'Open rMirror from your menu bar and select Sign in again.';
 
 type BridgeState =
   | { phase: 'confirm' }
@@ -83,7 +83,7 @@ function AgentAuthBridgeInner() {
           <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-3">rMirror for Mac</h1>
           <p className="text-[var(--muted-foreground)]">
             This page connects rMirror on your Mac to your account.
-            Open rMirror from your menu bar and choose Sign In.
+            Open rMirror from your menu bar and select Sign in.
           </p>
         </div>
       </div>
@@ -99,7 +99,7 @@ function AgentAuthBridgeInner() {
           <h1 className="text-2xl font-semibold text-[var(--foreground)] mb-3">This link can&apos;t be used</h1>
           <p className="text-[var(--muted-foreground)]">
             This page only works with a sign-in link from rMirror on your Mac.
-            Open rMirror from your menu bar and choose Sign In again.
+            Open rMirror from your menu bar and select Sign in again.
           </p>
         </div>
       </div>
