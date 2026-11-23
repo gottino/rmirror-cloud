@@ -44,13 +44,26 @@ export interface NotebookUpload {
   name: string;
   uploadedPages: number;
   totalPages: number;
+  /** Uploaded pages waiting for next month's OCR allowance. */
+  pendingQuotaPages: number;
+  lastSyncedAt: string | null;
   /** All known pages of this notebook have reached the server. */
   complete: boolean;
 }
 
+/** Notebooks with pages already on the server when the sync step opened. */
+export type SyncBaseline = Map<number, { lastSyncedAt: string | null; uploadedPages: number }>;
+
+/** Consecutive failed tree fetches before the "can't reach" notice. */
+export const FETCH_FAILURES_BEFORE_NOTICE = 3;
+
 export type FirstSyncState =
-  /** No page has reached the server yet. */
-  | { phase: 'waiting'; showHelp: boolean }
+  /**
+   * Nothing new has reached the server since the step opened. `existing` is
+   * the newest notebook that was already there (re-running setup);
+   * `unreachable` means the server has not answered several polls in a row.
+   */
+  | { phase: 'waiting'; showHelp: boolean; unreachable: boolean; existing: NotebookUpload | null }
   /** Pages are arriving; `upload` is the notebook to show progress for. */
   | { phase: 'uploading'; upload: NotebookUpload }
   /** A notebook finished uploading: the wizard can move to `done`. */
@@ -77,14 +90,17 @@ function toUpload(node: NotebookTreeNode): NotebookUpload {
     name: node.visible_name,
     uploadedPages: uploaded,
     totalPages: total,
+    pendingQuotaPages: node.sync_progress?.pending_quota_pages ?? 0,
+    lastSyncedAt: node.last_synced_at,
     complete: total > 0 && uploaded >= total,
   };
 }
 
 /**
  * Notebooks that have at least one page on the server, newest first. A
- * notebook created by a metadata-only sync has pages in `not_synced` state
- * and does not count: nothing the user can read has arrived yet.
+ * notebook created by a metadata-only sync (POST /sync/metadata) has pages in
+ * `not_synced` state and does not count: nothing the user can read has
+ * arrived yet.
  */
 export function notebooksWithPages(tree: NotebookTreeNode[]): NotebookUpload[] {
   return flattenNotebooks(tree)
@@ -94,17 +110,57 @@ export function notebooksWithPages(tree: NotebookTreeNode[]): NotebookUpload[] {
 }
 
 /**
- * What the sync step shows, from the latest notebook tree and the time spent
- * waiting. The wizard advances to `done` on `arrived`; while `uploading`, the
- * user may also continue by hand (a page limit in the Mac app can leave a
- * notebook partly uploaded for good).
+ * The dashboard shows the wizard until a page has actually been uploaded
+ * (notebook rows from a metadata-only sync are not enough), or when the user
+ * asked for it with ?setup=1.
  */
-export function firstSyncState(tree: NotebookTreeNode[] | null, waitedMs: number): FirstSyncState {
+export function shouldShowSetupWizard(tree: NotebookTreeNode[], setupRequested: boolean): boolean {
+  return setupRequested || notebooksWithPages(tree).length === 0;
+}
+
+export function syncBaseline(tree: NotebookTreeNode[]): SyncBaseline {
+  return new Map(
+    notebooksWithPages(tree).map((u) => [u.id, { lastSyncedAt: u.lastSyncedAt, uploadedPages: u.uploadedPages }])
+  );
+}
+
+function isNewSinceBaseline(upload: NotebookUpload, baseline: SyncBaseline): boolean {
+  const before = baseline.get(upload.id);
+  if (!before) return true;
+  return before.lastSyncedAt !== upload.lastSyncedAt || upload.uploadedPages > before.uploadedPages;
+}
+
+export interface FirstSyncInput {
+  /** Latest notebook tree, null before the first successful fetch. */
+  tree: NotebookTreeNode[] | null;
+  /** Snapshot from the first successful fetch of this step. */
+  baseline: SyncBaseline | null;
+  waitedMs: number;
+  /** Consecutive failed fetches. */
+  fetchFailures: number;
+}
+
+/**
+ * What the sync step shows. Only notebooks that are new, or changed since the
+ * step opened, count as arriving, so re-running setup does not jump straight
+ * to `done`. The wizard advances on `arrived`; while `uploading`, the user may
+ * also continue by hand (a page limit in the Mac app can leave a notebook
+ * partly uploaded for good).
+ */
+export function firstSyncState({ tree, baseline, waitedMs, fetchFailures }: FirstSyncInput): FirstSyncState {
   const uploads = tree ? notebooksWithPages(tree) : [];
-  if (uploads.length === 0) {
-    return { phase: 'waiting', showHelp: waitedMs >= FIRST_SYNC_HELP_AFTER_MS };
+  const fresh = baseline ? uploads.filter((u) => isNewSinceBaseline(u, baseline)) : [];
+  if (fresh.length === 0) {
+    const unreachable = fetchFailures >= FETCH_FAILURES_BEFORE_NOTICE;
+    const existing = baseline && uploads.length > 0 ? uploads[0] : null;
+    return {
+      phase: 'waiting',
+      showHelp: !unreachable && !existing && waitedMs >= FIRST_SYNC_HELP_AFTER_MS,
+      unreachable,
+      existing,
+    };
   }
-  const complete = uploads.find((u) => u.complete);
+  const complete = fresh.find((u) => u.complete);
   if (complete) return { phase: 'arrived', upload: complete };
-  return { phase: 'uploading', upload: uploads[0] };
+  return { phase: 'uploading', upload: fresh[0] };
 }

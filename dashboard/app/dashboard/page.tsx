@@ -21,6 +21,7 @@ import { TermsAcceptanceModal } from '@/components/TermsAcceptanceModal';
 import { DeleteNotebookModal } from '@/components/DeleteNotebookModal';
 import { AgentStatusPanel } from '@/components/AgentStatusPanel';
 import { trackEvent } from '@/lib/analytics';
+import { shouldShowSetupWizard } from '@/lib/setupWizard';
 import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import { Skeleton } from '@/components/Skeleton';
 import { memo } from 'react';
@@ -247,11 +248,14 @@ function DashboardContent() {
     ? notebooksQuery.error.message || 'Failed to fetch notebooks'
     : null;
   const reloadNotebooks = notebooksQuery.reload;
+  // Until a page has actually been uploaded (a metadata-only sync creates
+  // notebook rows first), or on ?setup=1, the main area is the setup wizard
+  const showWizard = useMemo(() => shouldShowSetupWizard(tree, setupRequested), [tree, setupRequested]);
 
   const agentStatus = useAgentStatus({ enabled: !!effectiveIsSignedIn, pollMs: 60000 });
   // Quota comes from QuotaProvider, which already fetches and polls it
   const { quota } = useQuota();
-  const { data: onboarding, setData: setOnboarding } = useApiQuery<OnboardingProgress>(
+  const { data: onboarding, setData: setOnboarding, loading: onboardingLoading } = useApiQuery<OnboardingProgress>(
     signedInKey('onboarding-progress'),
     async (signal) => getOnboardingProgress(await authed(), signal)
   );
@@ -843,7 +847,7 @@ function DashboardContent() {
         </header>
         <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
           {/* Onboarding Checklist (only after first sync, trimmed to post-sync steps) */}
-          {onboarding && !onboarding.onboarding_dismissed && !isSearchMode && !setupRequested && notebooks.length > 0 && (
+          {onboarding && !onboarding.onboarding_dismissed && !isSearchMode && !showWizard && notebooks.length > 0 && (
             <div className="mb-6">
               <OnboardingChecklist
                 steps={getDefaultOnboardingSteps({
@@ -864,10 +868,14 @@ function DashboardContent() {
               onLoadMore={loadMoreSearchResults}
               loadingMore={searchLoadingMore}
             />
-          ) : notebooks.length === 0 || setupRequested ? (
+          ) : showWizard && onboardingLoading ? (
+            // Wait for onboarding progress so the wizard starts at the right step
+            <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4" aria-busy="true">
+              <Skeleton style={{ width: '280px', height: '32px' }} />
+              <Skeleton style={{ width: '360px', height: '200px' }} />
+            </div>
+          ) : showWizard ? (
             <SetupWizard
-              // Remount once onboarding progress loads so a refresh resumes at the right step
-              key={onboarding ? 'progress-loaded' : 'progress-pending'}
               getToken={getToken}
               onComplete={() => {
                 if (setupRequested) router.replace('/dashboard', { scroll: false });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import {
   Download,
@@ -32,7 +32,9 @@ import {
   firstSyncState,
   initialWizardStep,
   stepIndex,
+  syncBaseline,
   type NotebookUpload,
+  type SyncBaseline,
   type WizardProgress,
   type WizardStep,
 } from '@/lib/setupWizard';
@@ -105,9 +107,13 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
   const [step, setStep] = useState<WizardStep>(() => initialWizardStep(onboardingProgress));
   const [agentConnected, setAgentConnected] = useState(false);
   const [tree, setTree] = useState<NotebookTreeNode[] | null>(null);
-  const [syncStartedAt, setSyncStartedAt] = useState<number | null>(null);
+  const [baseline, setBaseline] = useState<SyncBaseline | null>(null);
+  const [fetchFailures, setFetchFailures] = useState(0);
+  // Set only when the sync step is entered, so an effect re-run cannot restart the help timer
+  const syncStartedAtRef = useRef<number>(Date.now());
   const [now, setNow] = useState(() => Date.now());
   const [arrived, setArrived] = useState<NotebookUpload | null>(null);
+  const downloadTrackedRef = useRef(false);
 
   const versionQuery = useApiQuery<AgentVersionInfo>('agent-version', (signal) => getLatestAgentVersion(signal));
   const macosUrl = versionQuery.data?.platforms.macos?.url;
@@ -144,22 +150,35 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
     };
   }, [step, getToken]);
 
+  // Entering the sync step: start the timer and forget the previous snapshot
+  useEffect(() => {
+    if (step !== 'sync') return;
+    syncStartedAtRef.current = Date.now();
+    setNow(syncStartedAtRef.current);
+    setTree(null);
+    setBaseline(null);
+    setFetchFailures(0);
+  }, [step]);
+
   // Sync screen: poll the notebook tree until the first notebook arrives
   useEffect(() => {
     if (step !== 'sync') return;
     let cancelled = false;
-    const started = Date.now();
-    setSyncStartedAt(started);
-    setNow(started);
 
     const checkNotebooks = async () => {
       try {
         const token = await getToken();
-        if (!token || cancelled) return;
+        if (cancelled) return;
+        if (!token) throw new Error('No session token');
         const data = await getNotebooksTree(token);
-        if (!cancelled) setTree(data.tree);
+        if (cancelled) return;
+        setTree(data.tree);
+        // What was already there when the step opened does not count as arriving
+        setBaseline((prev) => prev ?? syncBaseline(data.tree));
+        setFetchFailures(0);
       } catch {
         // Retry on the next poll
+        if (!cancelled) setFetchFailures((n) => n + 1);
       } finally {
         if (!cancelled) setNow(Date.now());
       }
@@ -173,7 +192,10 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
     };
   }, [step, getToken]);
 
-  const syncState = step === 'sync' ? firstSyncState(tree, syncStartedAt ? now - syncStartedAt : 0) : null;
+  const syncState =
+    step === 'sync'
+      ? firstSyncState({ tree, baseline, waitedMs: now - syncStartedAtRef.current, fetchFailures })
+      : null;
 
   const finishWith = useCallback((upload: NotebookUpload) => {
     setArrived(upload);
@@ -187,13 +209,15 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
   }, [arrivedUpload, finishWith]);
 
   const handleDownloadClick = useCallback(() => {
-    // The <a href> starts the download; this only records it and moves on
+    // The <a href> starts the download; this only records it (once) and moves on
     setStep('connect');
+    if (downloadTrackedRef.current) return;
+    downloadTrackedRef.current = true;
     trackEvent({ name: 'agent_downloaded' });
     void (async () => {
       const token = await getToken();
       if (token) await trackAgentDownload(token);
-    })();
+    })().catch((err) => console.error('Failed to record the download:', err));
   }, [getToken]);
 
   const onInstallScreen = step === 'download' || step === 'connect';
@@ -313,7 +337,7 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
                       <div>
                         <p className="font-medium" style={{ color: 'var(--warm-charcoal)' }}>Sign in</p>
                         <p className="text-sm" style={{ color: 'var(--warm-gray)' }}>
-                          Click &quot;Sign In&quot; in the rMirror window and sign in with this account in your browser.
+                          Click &quot;Sign in&quot; in the rMirror window and sign in with this account in your browser.
                         </p>
                       </div>
                     </li>
@@ -381,12 +405,47 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
               {syncState.phase === 'waiting' ? (
                 <div className="flex items-center justify-center gap-2" style={{ color: 'var(--warm-gray)' }}>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span className="text-sm">Waiting for your first notebook…</span>
+                  <span className="text-sm">
+                    {syncState.unreachable
+                      ? "Can't reach rMirror right now. We'll keep trying."
+                      : syncState.existing
+                        ? 'Waiting for new notebooks…'
+                        : 'Waiting for your first notebook…'}
+                  </span>
                 </div>
               ) : (
                 <UploadProgress upload={syncState.upload} />
               )}
             </div>
+
+            {syncState.phase === 'waiting' && syncState.existing && (
+              <div className="rounded-xl p-5 mb-6 text-left" style={{ background: '#e8f0ea', border: '1px solid var(--sage-green)' }}>
+                <p className="font-medium mb-1" style={{ color: 'var(--warm-charcoal)' }}>
+                  Your notebooks are already here
+                </p>
+                <p className="text-sm mb-3" style={{ color: 'var(--warm-gray)' }}>
+                  rMirror has already synced notebooks to your account. Anything new you sync from your Mac appears
+                  next to them.
+                </p>
+                <div className="flex flex-wrap gap-4 items-center">
+                  <button
+                    onClick={onComplete}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:scale-105"
+                    style={{ background: 'var(--terracotta)', color: 'white' }}
+                  >
+                    Go to all notebooks
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                  <Link
+                    href={`/notebooks/${syncState.existing.id}`}
+                    className="text-sm underline hover:opacity-80"
+                    style={{ color: 'var(--terracotta)' }}
+                  >
+                    Open {syncState.existing.name}
+                  </Link>
+                </div>
+              </div>
+            )}
 
             {syncState.phase === 'waiting' && syncState.showHelp && (
               <div
@@ -450,9 +509,11 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
               You&apos;re All Set!
             </h2>
             <p className="text-base mb-8" style={{ color: 'var(--warm-gray)' }}>
-              <strong style={{ color: 'var(--warm-charcoal)' }}>{arrived.name}</strong> has arrived. Its handwriting
-              is turned into text in the background; this takes a minute or two. rMirror keeps running in your menu
-              bar, so you don&apos;t need to keep this page open.
+              <strong style={{ color: 'var(--warm-charcoal)' }}>{arrived.name}</strong> has arrived.{' '}
+              {arrived.pendingQuotaPages > 0
+                ? `${arrived.pendingQuotaPages === arrived.uploadedPages ? 'Its pages' : `${arrived.pendingQuotaPages} of its pages`} will be turned into text when your monthly page allowance resets; you can already see the handwriting.`
+                : 'Its handwriting is turned into text in the background; this takes a minute or two.'}{' '}
+              rMirror keeps running in your menu bar, so you don&apos;t need to keep this page open.
             </p>
 
             <div className="flex flex-col gap-3 items-center">
