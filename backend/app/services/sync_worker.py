@@ -262,6 +262,7 @@ def handle_parent_gone(
             SyncQueue.target_name == queue_item.target_name,
             SyncQueue.notebook_uuid == queue_item.notebook_uuid,
             SyncQueue.status == 'pending',
+            SyncQueue.item_type == 'page_text',
         )
     }
     for record in resync:

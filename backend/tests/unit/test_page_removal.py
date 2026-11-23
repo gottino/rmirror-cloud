@@ -740,3 +740,57 @@ async def test_worker_purge_is_throttled(db, storage):
         await worker._purge_removed_pages()
     assert len(calls) == 1
 
+
+
+# --- review follow-ups ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_account_export_includes_removed_pages_still_stored(db, client, user, notebook, storage):
+    import io
+    import zipfile
+
+    from app.services.account_service import AccountService
+
+    assert _upload_content(client, {"pages": [P1, P3]}).status_code == 200
+    buffer = io.BytesIO()
+    await AccountService.write_data_export(user.id, db, storage, buffer)
+
+    with zipfile.ZipFile(buffer) as zf:
+        names = zf.namelist()
+        metadata = json.loads(zf.read("rmirror-export/metadata.json"))
+        [deleted_md] = [n for n in names if n.endswith(" - deleted pages.md")]
+        deleted_text = zf.read(deleted_md).decode()
+        [live_md] = [n for n in names if n.endswith(".md") and n != deleted_md]
+        live_text = zf.read(live_md).decode()
+
+    assert metadata["total_pages"] == 2
+    assert metadata["deleted_pages_awaiting_removal"] == 1
+    assert metadata["notebooks"][0]["deleted_pages_awaiting_removal"] == 1
+    assert "findme page 2" in deleted_text and "findme page 2" not in live_text
+    assert "findme page 1" in live_text and "findme page 1" not in deleted_text
+
+
+def test_pending_removal_row_is_not_taken_for_the_pages_text_sync(db, client, user, notebook):
+    from app.services.sync_queue import queue_sync
+
+    _enable(db, user.id)
+    assert _upload_content(client, {"pages": [P1, P3]}).status_code == 200
+    [removal] = _removal_rows(db)
+    page = _page(db, P2)
+
+    queued = queue_sync(
+        db=db,
+        user_id=user.id,
+        item_type="page_text",
+        item_id=str(page.id),
+        content_hash="new-text-hash",
+        target_name="notion",
+        page_uuid=P2,
+        notebook_uuid=NB_UUID,
+        page_number=2,
+    )
+
+    db.expire_all()
+    assert queued is not None and queued.id != removal.id and queued.item_type == "page_text"
+    assert db.get(SyncQueue, removal.id).content_hash != "new-text-hash"
