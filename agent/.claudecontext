@@ -135,13 +135,13 @@ poetry run python -m app.main
 
 **Headless Mode** (rMirror for Mac 2.0 core, child process of the Swift app):
 ```bash
-RMIRROR_APP_TOKEN=<64 hex chars> poetry run python -m app.main --headless
+(printf '%s\n' "$TOKEN"; sleep 600) | poetry run python -m app.main --headless   # TOKEN: 64 hex chars
 ```
 - Contract: `docs/local-api.md` (process rules, `/api/v2/*`), decisions: `docs/native-app-architecture.md`
 - Never imports rumps, never opens a browser; binds `127.0.0.1:<web.port>` and `[::1]:<web.port>` itself (`Agent.bind_web_server`, threaded werkzeug), prints `RMIRROR_CORE_READY port=<port> api=2` once listening, then nothing more on stdout
 - Serves only `/health`, `/auth/bridge`, `/auth/callback`, `/auth/done` and the token-guarded `/api/v2/*` (legacy routes are not registered: they take no token)
 - Sign-in starts with `POST /api/v2/auth/begin` (app token) → single-use `/auth/bridge?ticket=…` URL; headless `/auth/bridge` refuses (403) without a valid ticket (`BridgeTicketStore` in `app/web/shared.py`)
-- Exit codes: 0 clean (SIGTERM, SIGINT or stdin EOF = the app is gone; also no parent at launch), 3 port in use (either address), 4 missing/short `RMIRROR_APP_TOKEN`, 1 anything else
+- Exit codes: 0 clean (SIGTERM, SIGINT or stdin EOF after the token line = the app is gone), 3 port in use (either address), 4 no valid launch token (first line on stdin, 10 s timeout; `RMIRROR_APP_TOKEN` is ignored with a warning), 1 anything else
 - `Agent.auth_state` (checking / signed_in / signed_out / offline) with a background retry (5 s doubling to 60 s) when the cloud cannot be reached at launch
 - Changing the folder through v2 (`Agent.change_source_directory`) baselines the new folder's files before the watcher runs on it
 - Keeps a quota cache (`app/sync/quota_cache.py`) refreshed on the agent loop (sign-in, after upload batches, every 5 min) so `GET /api/v2/state` never calls the cloud

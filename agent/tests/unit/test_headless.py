@@ -22,7 +22,7 @@ import pytest
 
 from app import main
 from app.agent_loop import AgentLoop
-from app.main import Agent, read_app_token, watch_parent_stdin
+from app.main import Agent, read_token_line, valid_app_token, watch_parent_stdin
 
 AGENT_DIR = Path(__file__).resolve().parents[2]
 TOKEN = "f" * 64
@@ -39,71 +39,109 @@ def free_port() -> int:
 # ----------------------------------------------------------------------
 
 
-class TestAppToken:
-    @pytest.mark.parametrize("value, ok", [(None, False), ("", False), ("x" * 31, False), ("x" * 32, True)])
-    def test_read_app_token(self, value, ok):
-        env = {} if value is None else {"RMIRROR_APP_TOKEN": value}
-        assert (read_app_token(env) is not None) is ok
+@pytest.fixture
+def stdin_pipe():
+    """(reader, write_fd): the core's stdin; the test plays the app on write_fd."""
+    read_fd, write_fd = os.pipe()
+    reader = os.fdopen(read_fd, "rb", buffering=0)
+    state = {"write_fd": write_fd}
+    yield reader, state
+    reader.close()
+    if state["write_fd"] is not None:
+        try:
+            os.close(state["write_fd"])
+        except OSError:
+            pass
 
-    def test_run_headless_without_token_exits_4(self, monkeypatch):
-        monkeypatch.delenv("RMIRROR_APP_TOKEN", raising=False)
+
+def _close(state):
+    os.close(state["write_fd"])
+    state["write_fd"] = None
+
+
+class TestLaunchToken:
+    @pytest.mark.parametrize("value, ok", [(None, False), ("", False), ("x" * 31, False), ("x" * 32, True),
+                                           ("x" * 16 + " " + "x" * 16, False)])
+    def test_valid_app_token(self, value, ok):
+        assert (valid_app_token(value) is not None) is ok
+
+    def test_reads_exactly_one_line_and_leaves_the_rest(self, stdin_pipe):
+        reader, state = stdin_pipe
+        os.write(state["write_fd"], (TOKEN + "\nafter").encode())
+        assert read_token_line(reader, timeout=2) == TOKEN
+        # Nothing after the newline was consumed: the EOF watch still sees the rest
+        assert os.read(reader.fileno(), 100) == b"after"
+
+    def test_crlf_is_stripped(self, stdin_pipe):
+        reader, state = stdin_pipe
+        os.write(state["write_fd"], (TOKEN + "\r\n").encode())
+        assert read_token_line(reader, timeout=2) == TOKEN
+
+    def test_eof_before_a_full_line(self, stdin_pipe):
+        reader, state = stdin_pipe
+        os.write(state["write_fd"], TOKEN.encode())
+        _close(state)
+        assert read_token_line(reader, timeout=2) is None
+
+    def test_timeout(self, stdin_pipe):
+        reader, _ = stdin_pipe
+        started = time.monotonic()
+        assert read_token_line(reader, timeout=0.2) is None
+        assert time.monotonic() - started < 2
+
+    def test_overlong_line(self, stdin_pipe):
+        reader, state = stdin_pipe
+        os.write(state["write_fd"], b"x" * 300 + b"\n")
+        assert read_token_line(reader, timeout=2) is None
+
+    def test_missing_or_closed_stdin(self):
+        assert read_token_line(None) is None
+        assert read_token_line(MagicMock(closed=True)) is None
+
+    def test_short_line_exits_4(self, stdin_pipe):
+        reader, state = stdin_pipe
+        os.write(state["write_fd"], b"short\n")
         with patch.object(main, "setup_logging") as setup:
-            assert main.run_headless(None, False) == 4
+            assert main.run_headless(None, False, stdin=reader) == 4
         setup.assert_not_called()
 
+    def test_env_only_token_exits_4(self, stdin_pipe, monkeypatch):
+        reader, _ = stdin_pipe
+        monkeypatch.setenv("RMIRROR_APP_TOKEN", TOKEN)
+        monkeypatch.setattr(main, "TOKEN_READ_TIMEOUT_SECONDS", 0.2)
+        with patch.object(main, "setup_logging"):
+            assert main.run_headless(None, False, stdin=reader) == 4
 
-@pytest.fixture
-def open_stdin():
-    """A pipe whose write end stays open (the parent app is alive)."""
-    read_fd, write_fd = os.pipe()
-    with os.fdopen(read_fd, "rb") as reader:
-        yield reader
-    os.close(write_fd)
+    def test_no_line_in_time_exits_4(self, stdin_pipe, monkeypatch):
+        reader, _ = stdin_pipe
+        monkeypatch.setattr(main, "TOKEN_READ_TIMEOUT_SECONDS", 0.2)
+        started = time.monotonic()
+        with patch.object(main, "setup_logging"):
+            assert main.run_headless(None, False, stdin=reader) == 4
+        assert time.monotonic() - started < 3
+
+    def test_eof_without_token_exits_4(self, stdin_pipe):
+        reader, state = stdin_pipe
+        _close(state)
+        with patch.object(main, "setup_logging"):
+            assert main.run_headless(None, False, stdin=reader) == 4
 
 
 class TestPortInUse:
     @pytest.mark.parametrize("family, host", [(socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")])
-    def test_exit_3(self, monkeypatch, tmp_path, mock_keychain, open_stdin, family, host):
+    def test_exit_3(self, tmp_path, mock_keychain, stdin_pipe, family, host):
+        reader, state = stdin_pipe
         port = free_port()
         config_file = tmp_path / "config.yaml"
         config_file.write_text(f"web:\n  port: {port}\nremarkable:\n  source_directory: {tmp_path}\n")
-        monkeypatch.setenv("RMIRROR_APP_TOKEN", TOKEN)
+        os.write(state["write_fd"], (TOKEN + "\n").encode())
         with socket.socket(family) as taken:
             if family == socket.AF_INET6:
                 taken.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
             taken.bind((host, port))
             taken.listen(1)
             with patch.object(main, "setup_logging"):
-                assert main.run_headless(config_file, False, stdin=open_stdin) == 3
-
-    def test_token_is_removed_from_the_environment(self, monkeypatch, tmp_path, open_stdin):
-        monkeypatch.setenv("RMIRROR_APP_TOKEN", "short")
-        assert main.run_headless(None, False, stdin=open_stdin) == 4
-        assert "RMIRROR_APP_TOKEN" not in os.environ
-
-
-class TestParentAlreadyGone:
-    def test_none_or_closed(self):
-        assert main.parent_already_gone(None)
-        closed = MagicMock(closed=True)
-        assert main.parent_already_gone(closed)
-
-    def test_closed_pipe(self):
-        read_fd, write_fd = os.pipe()
-        os.close(write_fd)
-        with os.fdopen(read_fd, "rb") as reader:
-            assert main.parent_already_gone(reader)
-
-    def test_open_pipe(self, open_stdin):
-        assert not main.parent_already_gone(open_stdin)
-
-    def test_headless_exits_0_without_starting(self, monkeypatch):
-        monkeypatch.setenv("RMIRROR_APP_TOKEN", TOKEN)
-        read_fd, write_fd = os.pipe()
-        os.close(write_fd)
-        with os.fdopen(read_fd, "rb") as reader, patch.object(main, "setup_logging") as setup:
-            assert main.run_headless(None, False, stdin=reader) == 0
-        setup.assert_not_called()
+                assert main.run_headless(config_file, False, stdin=reader) == 3
 
 
 class TestParentWatch:
@@ -224,7 +262,6 @@ def headless_env(tmp_path):
         **os.environ,
         "HOME": str(home),
         "RMIRROR_CONFIG_PATH": str(config_file),
-        "RMIRROR_APP_TOKEN": TOKEN,
         "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring",
         "PYTHONPATH": os.pathsep.join([str(fake_modules), str(AGENT_DIR)]),
         "PYTHONUNBUFFERED": "1",
@@ -232,10 +269,11 @@ def headless_env(tmp_path):
     return {"env": env, "port": port, "home": home, "config": config_file}
 
 
-def _spawn(headless_env, **env_overrides):
+def _spawn(headless_env, token_line: bytes | None = (TOKEN + "\n").encode(), **env_overrides):
+    """Start the core like the app does: the launch token as the first line on stdin."""
     env = {**headless_env["env"], **env_overrides}
     env = {k: v for k, v in env.items() if v is not None}
-    return subprocess.Popen(
+    proc = subprocess.Popen(
         [sys.executable, "-m", "app.main", "--headless"],
         cwd=AGENT_DIR,
         env=env,
@@ -243,6 +281,10 @@ def _spawn(headless_env, **env_overrides):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+    if token_line is not None:
+        proc.stdin.write(token_line)
+        proc.stdin.flush()
+    return proc
 
 
 def _wait_ready(proc, timeout=30.0) -> str:
@@ -294,7 +336,10 @@ class TestHeadlessProcess:
             if proc.poll() is None:
                 proc.kill()
         # Only the temp HOME was written (log file), never a config next to it
-        assert (headless_env["home"] / ".config/rmirror/agent.log").exists()
+        log_file = headless_env["home"] / ".config/rmirror/agent.log"
+        assert log_file.exists()
+        # The launch token is never logged
+        assert TOKEN not in log_file.read_text()
         assert not (headless_env["home"] / ".config/rmirror/config.yaml").exists()
 
     def test_sigterm_exits_0(self, headless_env):
@@ -307,19 +352,42 @@ class TestHeadlessProcess:
             if proc.poll() is None:
                 proc.kill()
 
-    def test_closed_stdin_exits_0_without_starting(self, headless_env):
-        env = {**headless_env["env"]}
+    def test_closed_stdin_exits_4_without_starting(self, headless_env):
         proc = subprocess.Popen(
-            [sys.executable, "-m", "app.main", "--headless"], cwd=AGENT_DIR, env=env,
+            [sys.executable, "-m", "app.main", "--headless"], cwd=AGENT_DIR, env=headless_env["env"],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        assert proc.wait(timeout=30) == 0
-        assert b"RMIRROR_CORE_READY" not in proc.stdout.read()
-
-    def test_missing_token_exits_4(self, headless_env):
-        proc = _spawn(headless_env, RMIRROR_APP_TOKEN=None)
         assert proc.wait(timeout=30) == 4
         assert b"RMIRROR_CORE_READY" not in proc.stdout.read()
+
+    def test_env_token_only_exits_4(self, headless_env):
+        proc = _spawn(headless_env, token_line=None, RMIRROR_APP_TOKEN=TOKEN)
+        proc.stdin.close()  # the app is gone before sending a line
+        assert proc.wait(timeout=30) == 4
+        assert b"RMIRROR_CORE_READY" not in proc.stdout.read()
+
+    def test_short_token_line_exits_4(self, headless_env):
+        proc = _spawn(headless_env, token_line=b"short\n")
+        assert proc.wait(timeout=30) == 4
+        assert b"RMIRROR_CORE_READY" not in proc.stdout.read()
+
+    def test_env_token_is_ignored_with_a_warning(self, headless_env):
+        proc = _spawn(headless_env, RMIRROR_APP_TOKEN="e" * 64)
+        try:
+            port = headless_env["port"]
+            _wait_ready(proc)
+            base = f"http://127.0.0.1:{port}"
+            # Only the stdin token is accepted
+            assert httpx.get(f"{base}/api/v2/state", headers={"X-RMirror-App-Token": "e" * 64}).status_code == 401
+            assert httpx.get(f"{base}/api/v2/state", headers={"X-RMirror-App-Token": TOKEN}).status_code == 200
+            proc.stdin.close()
+            assert proc.wait(timeout=10) == 0
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+        log = (headless_env["home"] / ".config/rmirror/agent.log").read_text()
+        assert log.count("RMIRROR_APP_TOKEN is set but ignored") == 1
+        assert "e" * 64 not in log
 
     @pytest.mark.parametrize("family, host", [(socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")])
     def test_port_in_use_exits_3(self, headless_env, family, host):

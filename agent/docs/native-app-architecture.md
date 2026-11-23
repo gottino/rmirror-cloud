@@ -69,11 +69,12 @@ Derived from the supervisor status and `GET /api/v2/state` in `Stage.derive`, fi
 
 ## Supervisor rules
 
-- Launch with a fresh 32-byte token in `RMIRROR_APP_TOKEN`; keep the stdin pipe open.
+- Launch with a fresh 32-byte token written as the first line on the core's stdin (never in the environment or
+  arguments: other processes of the user can read those); keep the stdin pipe open.
 - Release builds only ever start the bundled `Contents/Resources/core/rmirror-core`; the `RMIRROR_CORE_CMD` /
   `_ARGS` / `_CWD` override exists in debug builds only.
 - The child's environment is an allowlist, not the app's environment: `HOME`, `PATH`, `TMPDIR`, `USER`, `LOGNAME`,
-  `LANG`, `LC_ALL`, `LC_CTYPE`, `SHELL`, `__CF_USER_TEXT_ENCODING`, plus the token and `PYTHONUNBUFFERED=1`
+  `LANG`, `LC_ALL`, `LC_CTYPE`, `SHELL`, `__CF_USER_TEXT_ENCODING`, plus `PYTHONUNBUFFERED=1`
   (debug builds also pass `RMIRROR_CONFIG_PATH` and `PYTHON_KEYRING_BACKEND`).
 - stderr is drained into a 4 KB in-memory tail. When the core exits unexpectedly or never becomes ready, the tail
   goes to `~/Library/Logs/rMirror/core-failures.log` (readable only by the user, bounded), never to the system
