@@ -6,14 +6,17 @@ import SwiftUI
 /// rMirror lives in the menu bar. While one of its windows is open it also shows a Dock icon
 /// and behaves like a normal app (Cmd-Tab, Dock click), so the window is easy to find again.
 /// When the last window closes it goes back to menu-bar-only.
+@MainActor
 final class WindowCoordinator: NSObject, NSWindowDelegate {
     enum WindowKind: String, CaseIterable { case main, settings }
 
     private var windows: [WindowKind: NSWindow] = [:]
     private let content: (WindowKind) -> AnyView
+    private let visibilityChanged: (Bool) -> Void
 
-    init(content: @escaping (WindowKind) -> AnyView) {
+    init(content: @escaping (WindowKind) -> AnyView, visibilityChanged: @escaping (Bool) -> Void = { _ in }) {
         self.content = content
+        self.visibilityChanged = visibilityChanged
     }
 
     func show(_ kind: WindowKind) {
@@ -23,6 +26,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        visibilityChanged(true)
     }
 
     var hasVisibleWindow: Bool { windows.values.contains { $0.isVisible } }
@@ -55,6 +59,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.hasVisibleWindow else { return }
             NSApp.setActivationPolicy(.accessory)
+            self.visibilityChanged(false)
         }
     }
 }
