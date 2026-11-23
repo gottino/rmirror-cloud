@@ -1,5 +1,7 @@
 # rMirror Agent - Standalone App Mode
 
+> **Legacy 1.x note.** This document describes the legacy 1.x menu-bar app (rumps + Flask page in the browser), which is frozen and will be removed. rMirror for Mac 2.0 is a native Swift app (`macos/`) with its own window; see `README.md`. The Windows and Linux claims below are not supported: the agent targets macOS only.
+
 The rMirror Agent can run as a standalone desktop application with minimal browser chrome, giving it a native app feel while keeping all the benefits of the web-based UI.
 
 ## Features

@@ -2,7 +2,25 @@
 
 ## What This Is
 
-This is the **macOS agent** for rMirror - a Python application that monitors the reMarkable sync folder and automatically uploads notebooks to the cloud backend.
+This is the **macOS agent** for rMirror. It is two parts:
+
+- **rMirror for Mac 2.0** (`macos/`): a native Swift app (AppKit + SwiftUI, Swift package, no Xcode project) with the windows, menu bar item and updates.
+- **The core** (`app/`): the Python application that monitors the reMarkable sync folder and uploads notebooks to the cloud backend. The Swift app runs it as a hidden child process in headless mode.
+
+Status: 2.0 is on branch `claude/agent-native-app` in draft PRs and is not released (released agent: 1.7.0). The legacy 1.x menu-bar mode (rumps + Flask page in the browser) still builds but is **frozen** and will be removed in a follow-up. Sparkle has no key or feed yet; the Intel build has never been run.
+
+Read first: `docs/native-app-architecture.md` (decisions), `docs/local-api.md` (contract between the two processes), `macos/README.md` (develop and package), `macos/docs/sparkle.md` (updates).
+
+## Rules for the 2.0 app
+
+- Never put the Python payload in `Contents/Frameworks` (signing fails); it lives in `Contents/Resources/core/`, each Mach-O signed first. Never sign with `--deep`.
+- Build outside iCloud (a `com.apple.FinderInfo` xattr breaks `codesign --verify --strict`; `build_app.sh` refuses iCloud locations).
+- The legacy UI is frozen: no features in `app/web/templates/index.html` or the rumps menu.
+- Any new local route goes under `/api/v2` and is token-protected. Update `docs/local-api.md` before changing either side.
+- Folder state: `missing` (folder does not exist) vs `unreadable` (exists, no Full Disk Access). Different screens.
+- Password sign-in is gone. Sign-in starts from `POST /api/v2/auth/begin`.
+- All user-facing wording lives in the Swift `*Copy` files; the core returns codes and numbers, never sentences.
+- Readiness is only the `RMIRROR_CORE_READY` line on the core's stdout; the core exits when stdin closes.
 
 ## Tech Stack
 
@@ -16,7 +34,42 @@ This is the **macOS agent** for rMirror - a Python application that monitors the
 - **keyring**: Secure credential storage in system keychain
 - **PyInstaller**: Packaging into standalone .app bundle (`build_macos.sh` also creates, signs and notarizes the .dmg)
 
-## Project Structure
+## Swift app (`macos/`)
+
+```
+macos/
+├── Package.swift
+├── Sources/
+│   ├── RMirrorKit/         # library, no UI, unit-tested
+│   │   ├── API/            # LocalAPIClient, models, enums, errors, MockLocalAPI (also holds the screen Fixtures)
+│   │   ├── Core/           # CoreSupervisor (+ CoreLocator): start, watch, restart, stop the core
+│   │   ├── Model/          # AppStore (state store), Stage (which screen to show), NotebookList
+│   │   └── Copy/           # MainCopy, OnboardingCopy, SettingsCopy, SharedCopy: every user-facing string
+│   └── RMirrorApp/         # executable
+│       ├── App/            # RMirrorMain, AppDelegate, StatusItemController, WindowCoordinator, RootView,
+│       │                   # LoginItem, Updater (Sparkle), ScreenRenderer (--render-screens)
+│       ├── Onboarding/     # sign-in, missing reMarkable app, permission, first sync, progress, core problem
+│       ├── Main/           # main window: header, notebook list, status, footer, notices
+│       ├── Settings/       # settings window incl. developer options
+│       └── Theme/
+├── Tests/RMirrorKitTests/  # API, Copy (banned-words tests), Core, Model, Live (needs a running core)
+├── Resources/Info.plist    # template
+├── scripts/                # build_app.sh (build, assemble, sign, notarize, DMG), smoke_core.sh
+├── docs/sparkle.md
+└── build/                  # gitignored build output
+```
+
+How the pieces fit: `CoreSupervisor` launches the core (bundled in `Contents/Resources/core/`, or from the `RMIRROR_CORE_CMD` / `RMIRROR_CORE_ARGS` / `RMIRROR_CORE_CWD` override in development) with a fresh `RMIRROR_APP_TOKEN` and keeps stdin open. `LocalAPIClient` polls `GET /api/v2/state`; `AppStore` holds the result and `Stage.derive(core:state:guidedSyncActive:)` is the single place that decides which screen shows. Views never decide this themselves. `WindowCoordinator` and `StatusItemController` (menu bar item with "Open rMirror") sit on an AppKit lifecycle; the app has a Dock icon only while a window is open.
+
+Commands: `swift build`, `swift test`, `.build/debug/RMirrorApp --render-screens <dir>`, `scripts/build_app.sh` (see `macos/README.md`; do not touch `macos/build/`).
+
+**Add a screen:**
+1. If it is a new state of the app, add a `Stage` case and its rule in `Stage.derive` (`RMirrorKit/Model/Stage.swift`), with a test.
+2. Write the view in `RMirrorApp/Onboarding/` (or `Main/`, `Settings/`) and route to it from `RootView`.
+3. Put every string in the right `*Copy` file (`OnboardingCopy`, `MainCopy`, `SettingsCopy`, `SharedCopy`) and run the Copy tests: they ban developer words (token, rate limit, callback, log, queue, quota, OCR, API, ...). Never put a string literal in a view.
+4. Add a fixture state (`Fixtures` in `RMirrorKit/API/MockLocalAPI.swift`) and a line in `ScreenRenderer.screens()`; render with `--render-screens` and look at light and dark.
+
+## Core project structure
 
 ```
 agent/
@@ -61,7 +114,7 @@ agent/
 
 ### 1. Agent (`app/main.py`)
 
-Main entry point with two operational modes:
+Main entry point with three operational modes:
 
 **Foreground Mode** (for development):
 ```bash
@@ -72,13 +125,28 @@ poetry run python -m app.main --foreground --debug
 - Web server and file watcher in background threads
 - Ctrl+C to stop
 
-**Menu Bar Mode** (production):
+**Menu Bar Mode** (legacy 1.x, frozen; the released 1.7.0 app):
 ```bash
 poetry run python -m app.main
 ```
 - Runs as macOS menu bar app (rumps); asyncio runs in a background thread
 - Logs to `~/.config/rmirror/agent.log` (also printed to the terminal in foreground mode)
 - Menu bar icon with status, open web UI, check for updates, settings, quit
+
+**Headless Mode** (rMirror for Mac 2.0 core, child process of the Swift app):
+```bash
+(printf '%s\n' "$TOKEN"; sleep 600) | poetry run python -m app.main --headless   # TOKEN: 64 hex chars
+```
+- Contract: `docs/local-api.md` (process rules, `/api/v2/*`), decisions: `docs/native-app-architecture.md`
+- Never imports rumps, never opens a browser; binds `127.0.0.1:<web.port>` and `[::1]:<web.port>` itself (`Agent.bind_web_server`, threaded werkzeug), prints `RMIRROR_CORE_READY port=<port> api=2` once listening, then nothing more on stdout
+- Serves only `/health`, `/auth/bridge`, `/auth/callback`, `/auth/done` and the token-guarded `/api/v2/*` (legacy routes are not registered: they take no token)
+- Sign-in starts with `POST /api/v2/auth/begin` (app token) → single-use `/auth/bridge?ticket=…` URL; headless `/auth/bridge` refuses (403) without a valid ticket (`BridgeTicketStore` in `app/web/shared.py`)
+- Exit codes: 0 clean (SIGTERM, SIGINT or stdin EOF after the token line = the app is gone), 3 port in use (either address), 4 no valid launch token (first line on stdin, 10 s timeout; `RMIRROR_APP_TOKEN` is ignored with a warning), 1 anything else
+- `Agent.auth_state` (checking / signed_in / signed_out / offline) with a background retry (5 s doubling to 60 s) when the cloud cannot be reached at launch
+- Changing the folder through v2 (`Agent.change_source_directory`) baselines the new folder's files before the watcher runs on it
+- Keeps a quota cache (`app/sync/quota_cache.py`) refreshed on the agent loop (sign-in, after upload batches, every 5 min) so `GET /api/v2/state` never calls the cloud
+- Built by `rmirror-core.spec` (onedir console executable `rmirror-core`, no rumps, no `app/tray`); `rmirror.spec` still builds the legacy menu-bar app
+- Manual runs: use a temp `RMIRROR_CONFIG_PATH`, a non-default port, `HOME=<temp dir>` (logs go to `~/.config/rmirror`) and `PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring` so the real keychain sign-in is not used
 
 ### 2. File Watcher (`app/watcher/`)
 
@@ -112,13 +180,19 @@ POST {api}/processing/metadata/update
 
 ### 4. Web UI (`app/web/`)
 
+The Flask page and legacy routes are the frozen 1.x UI. In headless mode only `/health`, the sign-in routes and `/api/v2/*` are registered.
+
 Flask web server for configuration:
 - Runs on `localhost:5555`
 - Shows sync status, settings
-- Clerk sign-in flow (`/auth/bridge`, `/auth/callback`) for backend authentication
+- Clerk sign-in flow (`/auth/bridge`, `/auth/callback`) for backend authentication; in headless mode a successful callback renders `auth_headless.html` (opens `rmirror://signed-in`) instead of redirecting to `/`
 - Runs in background thread (non-blocking)
+- `routes.py`: legacy page and `/api/*` routes; `routes_v2.py`: local API v2 for the native app (`X-RMirror-App-Token` required when an app token is set); `shared.py`: state and helpers both use (initial-sync job, loop helpers, environment presets)
+- Keychain account / manifest namespace: `config.keychain_account_for_url` (bare host for https:443 and http loopback, `host:port` otherwise)
+- Initial sync: rate-limited pages and pages not reached after a sign-in stop are left for the next rescan (`_defer`), counted as `rate_limited`; notebooks in `excluded_notebooks` are skipped
+- Password sign-in (`POST /auth/login`) is gone (issue #47); old `email`/`password`/`use_clerk_auth` config keys are ignored and no longer saved
 
-### 5. Menu Bar App (`app/tray/`)
+### 5. Menu Bar App (`app/tray/`, legacy, frozen)
 
 macOS menu bar integration using `rumps`:
 - Shows sync status icon
@@ -182,6 +256,8 @@ headers = {"Authorization": f"Bearer {token}"}
 ```
 
 ## Development Workflow
+
+The commands below are the core and the legacy 1.x app. For the Swift app and 2.0 packaging see `macos/README.md`.
 
 ### Running Locally
 
@@ -282,10 +358,11 @@ def on_my_item(self, sender: rumps.MenuItem) -> None:
 
 4. **Config File Location**:
    - Preferred `~/.config/rmirror/config.yaml`; `~/.rmirror/config.yaml` and `./config.yaml` are fallbacks
-   - Missing file = defaults + `RMIRROR_*` env vars; `rmirror-agent init` writes one (config.example.yaml is a template, and its `api.url`/email/password entries are stale)
+   - `Config.save()` writes back to the file `Config.load()` read (so `--config` / `RMIRROR_CONFIG_PATH` are respected); the upload manifest stays next to the default config path
+   - Missing file = defaults + `RMIRROR_*` env vars; `rmirror-agent init` writes one (config.example.yaml is a template)
 
 5. **Token Expiration**:
-   - Agent tokens expire after 30 days; there is no refresh, `CloudSync.authenticate()` raises `CloudSyncError` on 401 and the user signs in again via the web UI
+   - Agent tokens expire after 30 days; there is no refresh, `CloudSync.authenticate()` raises `AuthenticationRequiredError` on 401 (and with no stored token) and the user signs in again via the web UI
 
 6. **reMarkable File Format**:
    - `.rm` files are binary (not human-readable)
@@ -305,11 +382,16 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 
 - **Backend API**: `../backend/.claudecontext`
 - **System Architecture**: `../dev-context/architecture/system-overview.md`
-- **Build Instructions**: `BUILD.md`
-- **Standalone App**: `STANDALONE_APP.md`
+- **2.0 architecture and API**: `docs/native-app-architecture.md`, `docs/local-api.md`
+- **2.0 app (Swift)**: `macos/README.md`, `macos/docs/sparkle.md`
+- **Build Instructions**: `BUILD.md` (2.0 on top, legacy 1.x below)
+- **Standalone App (legacy 1.x)**: `STANDALONE_APP.md`
 - **Initial Sync Feature**: `INITIAL_SYNC_FEATURE.md`
 
 ## Recent Major Changes
+
+- **2026-11-23**: Swift app `macos/` (rMirror for Mac 2.0, in PR, unreleased); legacy menu-bar mode frozen
+- **2026-11-23**: Headless core for rMirror for Mac 2.0 (`--headless`, `/api/v2/*`, `rmirror-core.spec`), password sign-in fallback removed (issue #47), unreadable reMarkable folder (no Full Disk Access) no longer starts the watcher
 
 - **2026-01-20**: Released v1.4.1 with deleted pages fix + release automation
   - Rebuilt, signed, notarized agent to include the deleted pages fix from Jan 12
@@ -359,9 +441,11 @@ The agent is the bridge between reMarkable tablet and cloud. When working on fea
 - ✅ Update check (menu bar "Check for Updates", `/updates` page)
 
 **In Progress:**
+- 🚧 rMirror for Mac 2.0: Swift app and headless core in draft PRs, unreleased
 - 🚧 Sync status UI improvements
 
 **Planned:**
 - ⏳ Dashboard sync progress indicator
 - ⏳ Pause/resume sync
-- ⏳ Windows support (cross-platform agent)
+- ⏳ Removal of the legacy menu-bar mode (after hand-testing 2.0)
+- ⏳ Sparkle key and feed, first Intel build, first release of 2.0

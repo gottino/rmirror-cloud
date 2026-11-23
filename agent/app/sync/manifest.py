@@ -213,6 +213,56 @@ class UploadManifest:
         finally:
             conn.close()
 
+    def last_upload_at(self) -> str | None:
+        """When a file was last uploaded for the current API host (None: never)."""
+        rows = self._run(
+            "SELECT MAX(uploaded_at) FROM files WHERE api_host = ? AND uploaded_at IS NOT NULL",
+            (self.api_host,),
+        )
+        return rows[0][0] if rows else None
+
+    def uploaded_pages_by_notebook(self, source_dir: Union[str, Path]) -> dict[str, int]:
+        """Number of uploaded pages (.rm files) per notebook UUID under source_dir."""
+        root = _key(source_dir)
+        rows = self._run(
+            "SELECT path FROM files WHERE api_host = ? AND uploaded_at IS NOT NULL AND path LIKE ?",
+            (self.api_host, "%.rm"),
+        )
+        counts: dict[str, int] = {}
+        for (path,) in rows:
+            notebook_dir = os.path.dirname(path)
+            if os.path.dirname(notebook_dir) != root:
+                continue
+            uuid = os.path.basename(notebook_dir)
+            counts[uuid] = counts.get(uuid, 0) + 1
+        return counts
+
+    def forget_notebook(self, source_dir: Union[str, Path], notebook_uuid: str) -> int:
+        """Remove every entry (uploaded or baseline) of one notebook's files for the current host.
+
+        Its page directory (``<source>/<uuid>/...``) and its ``<uuid>.*`` files
+        (``.metadata``, ``.content``, ...). Afterwards they count as never seen, so the
+        next rescan uploads them (if the notebook is selected). Returns the rows removed.
+        """
+        root = _key(source_dir)
+        page_prefix = os.path.join(root, notebook_uuid) + os.sep
+        file_prefix = os.path.join(root, notebook_uuid) + "."
+        conn = self._connect()
+        try:
+            with conn:
+                cur = conn.execute(
+                    "DELETE FROM files WHERE api_host = ? AND ("
+                    "substr(path, 1, ?) = ? OR (substr(path, 1, ?) = ? AND instr(substr(path, ?), ?) = 0))",
+                    (
+                        self.api_host,
+                        len(page_prefix), page_prefix,
+                        len(file_prefix), file_prefix, len(file_prefix) + 1, os.sep,
+                    ),
+                )
+                return cur.rowcount
+        finally:
+            conn.close()
+
     def _touch(self, path: Union[str, Path], fingerprint: Fingerprint) -> None:
         """Refresh size/mtime of an entry whose content hash still matches."""
         self._run(

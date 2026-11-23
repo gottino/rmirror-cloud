@@ -198,6 +198,8 @@ poetry install
 
 See [agent/README.md](../agent/README.md) for detailed setup instructions.
 
+The agent is becoming a native Swift app (rMirror for Mac 2.0, not yet released) that runs the Python agent as a child process; see [agent/docs/native-app-architecture.md](../agent/docs/native-app-architecture.md).
+
 ### Dashboard (Web)
 
 The dashboard provides a web-based interface for managing notebooks, todos, and integrations.

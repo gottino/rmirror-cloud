@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for rMirror.app/Contents/Info.plist. scripts/build_app.sh replaces
+  __VERSION__, __BUILD_NUMBER__ and __COPYRIGHT_YEAR__, and adds the Sparkle keys
+  (SUFeedURL, SUPublicEDKey, SUEnableAutomaticChecks) only when SPARKLE_FEED_URL and
+  SPARKLE_PUBLIC_ED_KEY are both set. Without them Sparkle stays inactive (docs/sparkle.md).
+  The bundle id is the legacy app's, so existing users keep their permissions and sign-in.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleIdentifier</key>
+    <string>io.rmirror.agent</string>
+    <key>CFBundleName</key>
+    <string>rMirror</string>
+    <key>CFBundleDisplayName</key>
+    <string>rMirror</string>
+    <key>CFBundleExecutable</key>
+    <string>RMirrorApp</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleVersion</key>
+    <string>__BUILD_NUMBER__</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © __COPYRIGHT_YEAR__ rMirror Cloud. All rights reserved.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>io.rmirror.agent</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>rmirror</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

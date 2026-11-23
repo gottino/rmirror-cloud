@@ -88,7 +88,6 @@ class TestAuthentication:
     @pytest.mark.asyncio
     async def test_authenticate_401_expired_token_clerk_auth(self, test_config_with_token):
         """Test authentication failure with expired token using Clerk auth."""
-        test_config_with_token.api.use_clerk_auth = True
         sync = CloudSync(test_config_with_token)
 
         # Mock 401 response for expired token
@@ -109,62 +108,32 @@ class TestAuthentication:
         await sync.close()
 
     @pytest.mark.asyncio
-    async def test_authenticate_with_password(self, test_config, mock_keychain):
-        """Test authentication with email/password."""
-        test_config.api.use_clerk_auth = False
+    async def test_authenticate_without_token_requires_sign_in(self, test_config, mock_keychain):
+        """No stored sign-in: the only way in is the browser sign-in (no password fallback)."""
         sync = CloudSync(test_config)
 
-        # Mock successful login response
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {"access_token": "new-jwt-token"}
-
         with patch.object(httpx.AsyncClient, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
-
-            result = await sync.authenticate()
-
-            assert result is True
-            assert sync.authenticated is True
-            assert test_config.api._token == "new-jwt-token"
+            with pytest.raises(AuthenticationRequiredError):
+                await sync.authenticate()
+            mock_post.assert_not_called()
 
         await sync.close()
 
     @pytest.mark.asyncio
-    async def test_authenticate_invalid_credentials(self, test_config, mock_keychain):
-        """Test authentication with invalid credentials."""
-        test_config.api.use_clerk_auth = False
-        sync = CloudSync(test_config)
-
-        # Mock 401 response for invalid credentials
+    async def test_rejected_token_marks_sign_in_rejected(self, test_config_with_token):
+        sync = CloudSync(test_config_with_token)
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 401
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "401 Unauthorized",
-            request=MagicMock(),
-            response=mock_response
+            "401 Unauthorized", request=MagicMock(), response=mock_response
         )
-
-        with patch.object(httpx.AsyncClient, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
-
-            with pytest.raises(CloudSyncError, match="Invalid email or password"):
+        with patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_response
+            with pytest.raises(AuthenticationRequiredError):
                 await sync.authenticate()
-
-        await sync.close()
-
-    @pytest.mark.asyncio
-    async def test_authenticate_no_credentials(self, test_config, mock_keychain):
-        """Test authentication fails without credentials."""
-        test_config.api.use_clerk_auth = False
-        test_config.api.email = ""
-        test_config.api.password = ""
-        sync = CloudSync(test_config)
-
-        with pytest.raises(CloudSyncError, match="credentials not configured"):
-            await sync.authenticate()
-
+        assert sync.sign_in_rejected is True
+        sync.logout()
+        assert sync.sign_in_rejected is False
         await sync.close()
 
 
@@ -474,7 +443,6 @@ class TestUploadErrorClassification:
         assert exc_info.value.transient is True
 
     async def test_401_with_rejected_token_requires_sign_in(self, test_config_with_token, temp_remarkable_dir):
-        test_config_with_token.api.use_clerk_auth = True
         rm_file = next((temp_remarkable_dir / "test-notebook-uuid-1234").glob("*.rm"))
         sync = CloudSync(test_config_with_token)
         sync.authenticated = True

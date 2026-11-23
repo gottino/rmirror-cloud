@@ -153,3 +153,33 @@ jobs:
 
       - name: Unit tests
         run: cd agent && poetry run pytest tests/ -v --tb=short -x
+
+  # rMirror for Mac 2.0 (Swift package). Pull requests only, and only when
+  # agent/macos changed: the deploy workflows reuse this file and do not need it.
+  agent-macos-checks:
+    if: github.event_name == 'pull_request'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for agent/macos changes
+        id: changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if git diff --quiet "origin/$BASE_REF...HEAD" -- agent/macos; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "agent/macos unchanged: skipping Swift build and tests"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        if: steps.changes.outputs.changed == 'true'
+        run: cd agent/macos && swift --version && swift build
+
+      - name: Unit tests
+        if: steps.changes.outputs.changed == 'true'
+        run: cd agent/macos && swift test
