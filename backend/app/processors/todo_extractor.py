@@ -25,6 +25,44 @@ from app.services.sync_queue import enabled_todo_targets, queue_todo_sync
 logger = logging.getLogger(__name__)
 
 
+# The OCR prompt asks for a page's handwritten date as the first line:
+# "**Date: dd-mm-yyyy**" (European order). Accept the usual separators and
+# a two-digit year, and only near the top of the page.
+_PAGE_DATE_RE = re.compile(
+    r"^\**\s*date\s*:\s*\**\s*(\d{1,2})[-./](\d{1,2})[-./](\d{4}|\d{2})\b",
+    re.IGNORECASE,
+)
+_PAGE_DATE_MAX_LINES = 5
+
+
+def extract_page_date(text: Optional[str]) -> Optional[datetime]:
+    """The handwritten date of a page from its OCR text, or None.
+
+    Looks at the first few non-empty lines for the OCR's ``Date: dd-mm-yyyy``
+    line. An impossible date (31-02-2026) gives None.
+    """
+    if not text:
+        return None
+    seen = 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        match = _PAGE_DATE_RE.match(line)
+        if match:
+            day, month, year = (int(g) for g in match.groups())
+            if year < 100:
+                year += 2000
+            try:
+                return datetime(year, month, day)
+            except ValueError:
+                return None
+        seen += 1
+        if seen >= _PAGE_DATE_MAX_LINES:
+            return None
+    return None
+
+
 def extract_todos_from_text(
     text: str, notebook_id: int, page_number: int, page_id: Optional[int] = None
 ) -> List[TodoCandidate]:
@@ -143,6 +181,7 @@ def process_page_todos(
     page_number = notebook_page.page_number if notebook_page else 0
     notebook = page.notebook
 
+    page_date = extract_page_date(page.ocr_text)
     new_todos = extract_todos_from_text(
         text=page.ocr_text,
         notebook_id=page.notebook_id,
@@ -193,6 +232,7 @@ def process_page_todos(
                     completed=candidate.completed,
                     confidence=candidate.confidence,
                     source_file=notebook.visible_name if notebook else "",
+                    date_extracted=page_date,
                 )
             )
             changed += 1
@@ -215,6 +255,10 @@ def process_page_todos(
             dirty = True
         if todo.page_number != page_number:
             todo.page_number = page_number
+            dirty = True
+        # A page whose date line is gone keeps the date its todos had.
+        if page_date is not None and todo.date_extracted != page_date:
+            todo.date_extracted = page_date
             dirty = True
         if dirty:
             todo.updated_at = now

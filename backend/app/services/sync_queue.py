@@ -363,7 +363,9 @@ def queue_todo_sync(
     if target_names is None:
         target_names = enabled_todo_targets(db, todo.user_id)
 
-    content_hash = fingerprint_todo(todo.text, todo.completed, notebook_uuid, todo.page_number)
+    content_hash = fingerprint_todo(
+        todo.text, todo.completed, notebook_uuid, todo.page_number, todo.date_extracted
+    )
 
     queued_entries = []
     for target_name in target_names:
