@@ -27,6 +27,7 @@ from app.web.shared import (
     ENVIRONMENT_PRESETS,
     LOOP_ERRORS,
     QUICK_TIMEOUT_SECONDS,
+    BridgeTicketStore,
     InitialSyncJob,
     SyncAlreadyRunningError,
     api_base_url,
@@ -147,6 +148,7 @@ PLAIN_SIGN_IN_ERRORS = {
     "not_ready": "rMirror is starting up or shutting down. Please try again in a moment.",
     "cloud_unreachable": "rMirror could not reach the rMirror service. Check your internet connection and try again.",
     "unexpected": "Something went wrong while signing in. Please try again from the rMirror app.",
+    "start_again": "This sign-in link cannot be used. Open rMirror and select Sign in again.",
 }
 
 # Opened by the signed-in page so the app comes to the front (carries no data)
@@ -207,6 +209,8 @@ def register_routes(app: Flask) -> None:
     # Headless (native app) mode: sign-in pages in the browser use plain wording
     # and never send the user to this agent's legacy page
     headless = bool(app.config.get("HEADLESS"))
+    bridge_tickets = BridgeTicketStore()
+    app.config["BRIDGE_TICKETS"] = bridge_tickets
 
     def legacy_route(rule: str, **options: Any):
         """app.route for the legacy page and /api/* routes; not registered in headless mode.
@@ -456,6 +460,12 @@ def register_routes(app: Flask) -> None:
         (production, staging, dev) based on the configured API URL.
         """
         config: Config = app.config["AGENT_CONFIG"]
+
+        # Headless: only for a ticket the app got from POST /api/v2/auth/begin (app
+        # token required), used up here before any state is issued or the cloud is
+        # asked. A process without the app token cannot start a sign-in.
+        if headless and not bridge_tickets.consume(request.args.get("ticket")):
+            return _headless_auth_page(False, PLAIN_SIGN_IN_ERRORS["start_again"], 403)
 
         # Derive base URL from API URL (strip /api/v1 suffix)
         api_base = api_base_url(config.api.url)

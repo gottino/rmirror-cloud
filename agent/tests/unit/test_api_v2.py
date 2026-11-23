@@ -3,6 +3,7 @@ Local API v2 (docs/local-api.md): token enforcement, error codes and response sh
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import threading
@@ -918,12 +919,18 @@ class TestUpdateCheck:
 FORBIDDEN_WORDS = ("token", "callback", "state")
 
 
+def _bridge_url(client) -> str:
+    """The sign-in URL the app gets from POST /api/v2/auth/begin (path and query)."""
+    url = post(client, "/api/v2/auth/begin").get_json()["url"]
+    return url[len(f"http://127.0.0.1:{PORT}"):]
+
+
 class TestHeadlessSignIn:
     def _bridge_state(self, client):
         resp = MagicMock(status_code=200)
         resp.json.return_value = {"clerk_publishable_key": "pk_live_x"}
         with patch.object(routes.httpx, "get", return_value=resp):
-            location = client.get("/auth/bridge", base_url=BASE_URL).headers["Location"]
+            location = client.get(_bridge_url(client), base_url=BASE_URL).headers["Location"]
         from urllib.parse import parse_qs, urlparse
 
         callback = parse_qs(urlparse(location).query)["callback"][0]
@@ -969,7 +976,7 @@ class TestHeadlessSignIn:
 
     def test_bridge_failure_is_plain(self, client):
         with patch.object(routes.httpx, "get", side_effect=httpx.ConnectError("down")):
-            resp = client.get("/auth/bridge", base_url=BASE_URL)
+            resp = client.get(_bridge_url(client), base_url=BASE_URL)
         assert resp.status_code == 502
         body = resp.get_data(as_text=True).lower()
         assert "clerk" not in body[body.index("<body>"):]
@@ -1097,3 +1104,97 @@ class TestSuggestionCounts:
         data = get(client, "/api/v2/first-run/suggestion").get_json()
         assert data["quota"] == {"limit": 200, "remaining": 196}
         assert any(call.endswith("/quota/status") for call in backend.calls)
+
+
+class TestBridgeTicket:
+    def _clerk(self):
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"clerk_publishable_key": "pk_live_x"}
+        return patch.object(routes.httpx, "get", return_value=resp)
+
+    def test_begin_requires_app_token(self, client, app):
+        resp = client.post("/api/v2/auth/begin", base_url=BASE_URL)
+        assert resp.status_code == 401 and error_code(resp) == "bad_app_token"
+        assert app.config["BRIDGE_TICKETS"]._tickets == {}
+
+    def test_begin_returns_bridge_url(self, client):
+        data = post(client, "/api/v2/auth/begin").get_json()
+        assert set(data) == {"url"}
+        assert data["url"].startswith(f"http://127.0.0.1:{PORT}/auth/bridge?ticket=")
+        assert len(data["url"].split("ticket=")[1]) >= 43
+
+    @pytest.mark.parametrize("case", ["missing", "wrong", "used", "expired"])
+    def test_bridge_refuses_without_valid_ticket(self, client, app, case):
+        query = {}
+        if case == "wrong":
+            post(client, "/api/v2/auth/begin")
+            query = {"ticket": "x" * 43}
+        elif case == "used":
+            path = _bridge_url(client)
+            with self._clerk():
+                assert client.get(path, base_url=BASE_URL).status_code == 302
+            query = {"ticket": path.split("ticket=")[1]}
+        elif case == "expired":
+            query = {"ticket": _bridge_url(client).split("ticket=")[1]}
+        states_before = dict(app.config["AUTH_STATES"]._states)
+        clock = (
+            patch("app.web.shared.time.monotonic", return_value=time.monotonic() + 601)
+            if case == "expired"
+            else contextlib.nullcontext()
+        )
+        with self._clerk() as clerk, clock:
+            resp = client.get("/auth/bridge", query_string=query, base_url=BASE_URL)
+        assert resp.status_code == 403
+        body = resp.get_data(as_text=True)
+        assert "Open rMirror and select Sign in again." in body
+        assert app.config["AUTH_STATES"]._states == states_before  # no state issued
+        clerk.assert_not_called()  # the cloud was not asked
+
+    def test_ticket_is_single_use_and_bridge_works(self, client, app):
+        path = _bridge_url(client)
+        with self._clerk():
+            first = client.get(path, base_url=BASE_URL)
+            second = client.get(path, base_url=BASE_URL)
+        assert first.status_code == 302 and "callback=" in first.headers["Location"]
+        assert "ticket" not in first.headers["Location"]
+        assert len(app.config["AUTH_STATES"]._states) == 1
+        assert second.status_code == 403
+
+    def test_store_is_bounded(self, app):
+        from app.web.shared import MAX_BRIDGE_TICKETS
+
+        store = app.config["BRIDGE_TICKETS"]
+        first = store.issue()
+        for _ in range(MAX_BRIDGE_TICKETS):
+            store.issue()
+        assert len(store._tickets) == MAX_BRIDGE_TICKETS
+        assert store.consume(first) is False
+
+    def test_legacy_bridge_needs_no_ticket(self, config, cloud_sync, agent_loop):
+        legacy = create_app(config, cloud_sync, agent=None, agent_loop=agent_loop).test_client()
+        with self._clerk():
+            resp = legacy.get("/auth/bridge", base_url=BASE_URL)
+        assert resp.status_code == 302
+        assert legacy.post("/api/v2/auth/begin", base_url=BASE_URL).status_code == 200
+
+    def test_ticket_is_redacted_from_access_log(self):
+        import logging
+
+        from app.logging_config import RedactQuerySecretsFilter
+
+        record = logging.LogRecord(
+            "werkzeug", logging.INFO, __file__, 1,
+            '127.0.0.1 - - [x] "GET /auth/bridge?ticket=SECRETTICKET HTTP/1.1" 302 -', None, None,
+        )
+        RedactQuerySecretsFilter().filter(record)
+        assert "SECRETTICKET" not in record.getMessage()
+        assert "ticket=[REDACTED]" in record.getMessage()
+
+    def test_ticket_not_in_app_logs(self, client, caplog):
+        import logging
+
+        with caplog.at_level(logging.DEBUG):
+            path = _bridge_url(client)
+            with self._clerk():
+                client.get(path, base_url=BASE_URL)
+        assert path.split("ticket=")[1] not in caplog.text

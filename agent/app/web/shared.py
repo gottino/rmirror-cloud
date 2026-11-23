@@ -10,7 +10,9 @@ states (``AUTH_STATES``), so both route sets see the same state.
 import asyncio
 import hmac
 import logging
+import secrets
 import threading
+import time
 from collections.abc import Coroutine
 from datetime import UTC, datetime
 from typing import Any
@@ -57,6 +59,54 @@ def api_base_url(api_url: str) -> str:
         if api_url.endswith(suffix):
             return api_url[: -len(suffix)]
     return api_url
+
+
+# Headless sign-in: /auth/bridge only starts a sign-in for a ticket the app got
+# from POST /api/v2/auth/begin (which needs the app token)
+BRIDGE_TICKET_TTL_SECONDS = 600
+MAX_BRIDGE_TICKETS = 5
+
+
+class BridgeTicketStore:
+    """Single-use, short-lived tickets that open /auth/bridge in headless mode."""
+
+    def __init__(self, ttl_seconds: float = BRIDGE_TICKET_TTL_SECONDS, max_pending: int = MAX_BRIDGE_TICKETS):
+        self._ttl = ttl_seconds
+        self._max = max_pending
+        self._tickets: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def _prune(self, now: float) -> None:
+        for value, expires_at in list(self._tickets.items()):
+            if expires_at <= now:
+                del self._tickets[value]
+
+    def issue(self) -> str:
+        """A new ticket; the oldest outstanding one is dropped when the store is full."""
+        value = secrets.token_urlsafe(32)
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            while len(self._tickets) >= self._max:
+                del self._tickets[min(self._tickets, key=self._tickets.get)]
+            self._tickets[value] = now + self._ttl
+        return value
+
+    def consume(self, value: str | None) -> bool:
+        """True if value is an outstanding unexpired ticket; it is used up either way."""
+        if not value:
+            return False
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            match = None
+            for stored in self._tickets:
+                if hmac.compare_digest(stored.encode(), value.encode()):
+                    match = stored
+            if match is None:
+                return False
+            del self._tickets[match]
+            return True
 
 
 class InitialSyncJob:

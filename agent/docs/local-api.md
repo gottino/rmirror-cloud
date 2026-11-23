@@ -36,7 +36,8 @@ The app starts the core as a plain child process:
   code `invalid_request`). This is in addition to the existing Host/Origin checks (headless also accepts
   `Host: [::1]:<port>`).
 - `/health`, `/auth/bridge`, `/auth/callback` and `/auth/done` take no app token (the browser calls them). Their
-  existing protections (one-time state, callback validation) are unchanged.
+  existing protections (one-time state, callback validation) are unchanged; in headless mode `/auth/bridge` also
+  needs a single-use ticket from `POST /api/v2/auth/begin`.
 - JSON in, JSON out, UTF-8. Timestamps are ISO 8601 UTC strings or `null`.
 - Errors: non-2xx with
 
@@ -215,6 +216,12 @@ Changing the environment keeps the existing behaviour (per-host sign-in, per-hos
 
 Removes the stored sign-in for the current host and stops the watcher. `{"ok": true}`.
 
+### `POST /api/v2/auth/begin`
+
+Starts a browser sign-in. `200 {"url": "http://127.0.0.1:<port>/auth/bridge?ticket=<ticket>"}`. The ticket is 32
+random bytes (URL-safe), single use, valid 10 minutes; at most 5 are outstanding (a new one drops the oldest). It is
+redacted from the access log like `token=` and `state=`.
+
 ### `GET /api/v2/deleted-notebooks` · `POST /api/v2/deleted-notebooks/<uuid>`
 
 Same data as the legacy routes, reshaped:
@@ -229,17 +236,23 @@ Fallback when Sparkle is not configured. Same data as legacy `/api/updates/check
 
 ## Sign-in in headless mode
 
-1. The app opens `http://localhost:<port>/auth/bridge` in the default browser. Unchanged.
+1. The app calls `POST /api/v2/auth/begin` and opens the returned URL in the default browser. In headless mode
+   `/auth/bridge` only starts a sign-in for a valid ticket from that call; it uses the ticket up before it issues a
+   state or contacts the cloud. Without a ticket (or with a wrong, used or expired one) it answers `403` with a
+   plain "open rMirror and select Sign in again" page and issues no state. The legacy menu-bar mode is unchanged
+   (no ticket).
 2. The dashboard returns to `/auth/callback?state=…&token=…`. Validation and keychain storage unchanged.
 3. On success in headless mode the callback stores the sign-in and answers `303` to `/auth/done` (so the browser
    leaves the URL that carries the token). `/auth/done` takes no input and renders a small page ("You're signed
    in. You can close this tab.") that also tries to open `rmirror://signed-in` so the app comes to the front. It
    never redirects to `/`. On failure the callback renders a result page in place with plain wording, no technical
    terms and nothing from the request.
-   Note: a local process can still open `/auth/bridge` (and so learn a fresh one-time state) and call
-   `/auth/callback` with it. The callback only stores a token that the configured server accepts, and the server
-   can no longer be changed without the app token, so the most such a process can do is sign the core in to
-   **another account on the configured server**. Closing that needs a change to the sign-in flow (owner's decision).
+
+### What a local process without the app token can still do
+
+Call `GET /health`, and call `/auth/callback` with a state it cannot know (states are only issued by
+`/auth/bridge` for a ticket, and tickets only by `POST /api/v2/auth/begin` with the app token), which is refused.
+It cannot start a sign-in, read or change settings, or start a sync.
 4. The app notices `auth.signed_in` on its next state poll and moves on. The `rmirror://` link is a convenience,
    never a carrier of secrets.
 

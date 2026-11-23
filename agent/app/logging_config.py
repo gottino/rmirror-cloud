@@ -79,11 +79,11 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-_SECRET_QUERY_PARAM = re.compile(r"([?&](?:token|state)=)[^&\s\"]*", re.IGNORECASE)
+_SECRET_QUERY_PARAM = re.compile(r"([?&](?:token|state|ticket)=)[^&\s\"]*", re.IGNORECASE)
 
 
 class RedactQuerySecretsFilter(logging.Filter):
-    """Redact token= and state= query values from access log lines."""
+    """Redact token=, state= and ticket= query values from access log lines."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:

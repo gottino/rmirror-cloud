@@ -674,6 +674,16 @@ def register_v2_routes(app: Flask) -> None:
 
     # -- account ---------------------------------------------------------
 
+    @bp.post("/auth/begin")
+    def auth_begin():
+        """A single-use URL that opens the browser sign-in (/auth/bridge) for this core."""
+        tickets = current_app.config.get("BRIDGE_TICKETS")
+        if tickets is None:
+            raise ApiError("core_not_ready", 503, "sign-in routes not registered")
+        ticket = tickets.issue()
+        port = _config().web.port
+        return jsonify({"url": f"http://127.0.0.1:{port}/auth/bridge?ticket={ticket}"})
+
     @bp.post("/auth/sign-out")
     def sign_out():
         cloud_sync = _cloud_sync()
