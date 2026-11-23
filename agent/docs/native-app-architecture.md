@@ -32,6 +32,7 @@ rMirror.app  (Swift, universal)                      agent/macos/
 | 11 | All user-facing wording lives in Swift (`Copy`), core returns codes | Issue #47: no tokens, rate limits, callbacks or logs in front of users. |
 | 12 | Sparkle is a build-time option; without a public key the app uses the `version.json` check | Key and feed are the owner's to create at release time. |
 | 13 | Legacy menu-bar mode (`rumps`, Flask page) stays buildable and frozen in 2.0 | Removed in a follow-up after hand-testing. |
+| 14 | First contact with a server asks it what it has (`GET /sync/stored-pages`) instead of recording every existing file as "already there"; upload records are bound to the account; `first_sync.completed` comes only from upload records | The blind baseline silently dropped everything changed while rMirror was not syncing (server switch, reinstall, long gap), was taken while signed out, ignored the account, and the saved-selection shortcut called another server "done". Pages the server has in the same version are recorded as uploaded; with an explicit selection the selection's other pages upload through the queue; without one (`sync_all`, a fresh install) nothing uploads before the first-sync screens. A 1.x host with a saved selection still counts as first-synced. Lives in the shared sync layer (`app/sync/catch_up.py`), so legacy mode gets it too. See `local-api.md`, "First contact with a server". |
 
 ## Swift package layout (`agent/macos/`)
 
@@ -65,6 +66,8 @@ Derived from the supervisor status and `GET /api/v2/state` in `Stage.derive`, fi
 4. `auth.state == checking` → `starting` ("Checking your sign-in…"); `offline` carries on as signed in
 5. not signed in → `signIn(.signedOut)`
 6. `folder.state == missing` → `remarkableMissing`; `unreadable` → `permission`
+6a. `catch_up.state == pending` → `starting` (the core is asking the server what it already has; applies while
+    signed in or offline with a stored sign-in, folder `ok`)
 7. guided first sync started in this session: running → `firstSyncProgress`, done → `firstSyncResult` (until dismissed)
 8. `first_sync.completed == false` → `firstSync` (or `firstSyncProgress` if a sync is already running)
 9. otherwise → `ready` (main window)

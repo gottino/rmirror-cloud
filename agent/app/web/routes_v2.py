@@ -10,6 +10,8 @@ threads and hand coroutines to the agent loop through ``shared.run_on_loop``.
 """
 
 import logging
+import os
+import threading
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -27,6 +29,12 @@ from app.remarkable.library import (
     folder_state,
     scan_documents,
     scan_library,
+)
+from app.sync.catch_up import (
+    CATCH_UP_NOT_NEEDED,
+    CATCH_UP_PENDING,
+    catch_up_status,
+    dismiss_selection_notice,
 )
 from app.sync.cloud_sync import AuthenticationRequiredError, CloudSync, CloudSyncError
 from app.sync.first_run import suggest_first_sync
@@ -304,6 +312,93 @@ def _pages_to_sync(config: Config, selected_uuids: list[str] | None) -> int | No
         return None
 
 
+def _catch_up(signed_in: bool) -> dict:
+    """The catch_up object of the state (pending when the manifest cannot be read)."""
+    cloud_sync = _cloud_sync()
+    email = cloud_sync.user_email if (cloud_sync and signed_in) else None
+    try:
+        return catch_up_status(_manifest(), _config(), signed_in, email)
+    except Exception as e:  # sqlite trouble must not break the state poll
+        logger.warning(f"Could not read the catch-up state: {type(e).__name__}")
+        return {"state": CATCH_UP_PENDING, "unselected_on_server": 0}
+
+
+def _first_sync_completed(config: Config, catch_up: dict) -> bool:
+    """Page uploads recorded for this host and account (catch-up records included).
+
+    Hosts initialised by an earlier version (``not_needed``) keep the old rule
+    that a saved notebook selection counts, so existing users are not sent
+    through the first sync again. Never true while the catch-up is pending.
+    """
+    state = catch_up["state"]
+    if state == CATCH_UP_PENDING:
+        return False
+    if state == CATCH_UP_NOT_NEEDED and not config.sync.sync_all_notebooks and config.sync.selected_notebooks:
+        return True
+    try:
+        return _manifest().has_uploaded_pages()
+    except Exception as e:  # sqlite trouble must not break the state poll
+        logger.warning(f"Could not read the upload manifest: {type(e).__name__}")
+        return False
+
+
+# Page window per notebook (newest pages within the limit), cached by the
+# notebook's .content and page-directory stats: the notebook list is requested
+# often and must not re-read every .content each time
+_window_cache: dict[tuple[str, str], tuple[tuple, list[str]]] = {}
+_window_lock = threading.Lock()
+
+
+def _stat_key(path: Path) -> tuple | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_size, st.st_mtime_ns)
+
+
+def _page_window(planner: Any, source: Path, uuid: str, limit: int | None) -> list[str]:
+    key = (_stat_key(source / f"{uuid}.content"), _stat_key(source / uuid), limit)
+    cache_key = (str(source), uuid)
+    with _window_lock:
+        cached = _window_cache.get(cache_key)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+    within, _beyond = planner._limit_pages(uuid, log=False)
+    window = [os.path.abspath(str(page)) for page in within]
+    with _window_lock:
+        _window_cache[cache_key] = (key, window)
+    return window
+
+
+def _synced_pages(config: Config, uuids: list[str]) -> dict[str, int]:
+    """Per notebook: of the pages counted in page_count (newest within the page limit),
+    how many are recorded as uploaded for the current host. Never more than page_count."""
+    from app.sync.initial_sync import PagePlanner
+
+    try:
+        manifest = _manifest()
+        uploaded = manifest.uploaded_paths()
+    except Exception as e:
+        logger.warning(f"Could not read the upload manifest: {type(e).__name__}")
+        return {}
+    if not uploaded:
+        return {}
+    planner = PagePlanner(config, manifest)
+    result = {}
+    source = Path(config.remarkable.source_directory)
+    limit = config.sync.max_pages_per_notebook
+    for uuid in uuids:
+        if not (source / uuid).is_dir():
+            continue
+        try:
+            window = _page_window(planner, source, uuid, limit)
+        except OSError:
+            continue
+        result[uuid] = sum(1 for page in window if page in uploaded)
+    return result
+
+
 def _upload_page_count(config: Config, uuid: str) -> int:
     """Pages a sync of this notebook would upload: its .rm files, within the saved page limit."""
     count = count_page_files(config.remarkable.source_directory, uuid)
@@ -368,13 +463,6 @@ def register_v2_routes(app: Flask) -> None:
     """Register /api/v2/* on the app (token check, JSON errors, endpoints)."""
     bp = Blueprint("api_v2", __name__, url_prefix=V2_PREFIX)
 
-    # first_sync.completed for users upgrading from the menu-bar app: they saved a
-    # notebook selection there. Read once at start-up, before the app changes it.
-    sync_config = app.config["AGENT_CONFIG"].sync
-    app.config["V2_LEGACY_SELECTION_SAVED"] = (
-        not sync_config.sync_all_notebooks and bool(sync_config.selected_notebooks)
-    )
-
     @bp.errorhandler(ApiError)
     def _api_error(error: ApiError):
         return _error_response(error.code, error.status, error.detail)
@@ -404,6 +492,7 @@ def register_v2_routes(app: Flask) -> None:
         health = shared.watcher_health(current_app)
         watcher_state = getattr(agent, "watcher_state", "idle") if agent else "idle"
         last_upload = _upload_summary()
+        catch_up = _catch_up(signed_in)
 
         return jsonify({
             "api_version": API_VERSION,
@@ -427,10 +516,10 @@ def register_v2_routes(app: Flask) -> None:
             },
             "queue": queue,
             "quota": _quota_cache().snapshot(_host()) if signed_in else None,
-            "first_sync": {
-                "completed": last_upload is not None
-                or bool(current_app.config.get("V2_LEGACY_SELECTION_SAVED")),
-            },
+            # Uploads recorded for this host and account, including pages the
+            # catch-up found on the server; false while the catch-up is pending
+            "first_sync": {"completed": _first_sync_completed(config, catch_up)},
+            "catch_up": catch_up,
             "sync": _current_progress(),
             "last_upload_at": iso_utc(last_upload, naive_is_utc=True),
         })
@@ -446,14 +535,15 @@ def register_v2_routes(app: Flask) -> None:
         folders = []
         if state_value == FOLDER_OK:
             try:
-                synced = _manifest().uploaded_pages_by_notebook(source)
+                on_server = _manifest().server_notebooks()
             except Exception as e:
                 logger.warning(f"Could not read the upload manifest: {type(e).__name__}")
-                synced = {}
+                on_server = set()
             sync_all = config.sync.sync_all_notebooks
             selected = set(config.sync.selected_notebooks)
             # Notebooks deleted on the server are left out (deleted-notebooks -> resync)
             documents, library_folders = _syncable_library(config)
+            synced = _synced_pages(config, [doc.uuid for doc in documents])
             folders = [
                 {"uuid": f.uuid, "name": f.name, "parent_uuid": f.parent_uuid} for f in library_folders
             ]
@@ -469,6 +559,7 @@ def register_v2_routes(app: Flask) -> None:
                     "last_modified_at": iso_utc(doc.last_modified_at),
                     "selected": sync_all or doc.uuid in selected,
                     "synced_pages": synced.get(doc.uuid, 0),
+                    "on_server": doc.uuid in on_server,
                 })
         return jsonify({
             "folder_state": state_value,
@@ -491,6 +582,11 @@ def register_v2_routes(app: Flask) -> None:
         config = _config()
         _apply_selection(config, sync_all, selected)
         config.save()
+        return _ok()
+
+    @bp.post("/catch-up/dismiss")
+    def catch_up_dismiss():
+        dismiss_selection_notice(_manifest())
         return _ok()
 
     # -- first run -------------------------------------------------------

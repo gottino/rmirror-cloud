@@ -270,6 +270,7 @@ This project uses domain-specific `.claudecontext` files for focused sessions:
 - **Thread safety**: rumps runs on main thread, Flask/watchdog in background threads
 - **macOS permissions**: Needs Full Disk Access to read reMarkable folder
 - **Token storage**: Uses system keychain (keyring library)
+- **First contact with a server or account**: the core asks `GET /sync/stored-pages` what the server holds and records matching files as uploaded (`app/sync/catch_up.py`); only an explicit selection's remaining pages upload. Upload records (`upload_manifest.sqlite3`) are per server and bound to the signed-in account; never baseline or upload while signed out
 - **Config location**: `~/.config/rmirror/config.yaml` (also read: `~/.rmirror/config.yaml`, `./config.yaml`; override with `--config` or `RMIRROR_CONFIG_PATH`). Logs go to `~/.config/rmirror/agent.log`
 - **reMarkable files**: `.rm` files are binary and uploaded as-is (the backend converts them, `backend/app/core/rm_converter.py`); the agent only reads the `.metadata` and `.content` JSON files (`app/remarkable/metadata_scanner.py`)
 - **Auth**: sign-in redirects to the dashboard `/agent` bridge page (production Clerk keys) or renders `app/web/templates/auth_bridge.html` (dev keys), which exchanges the Clerk session for a 30-day agent JWT. Password sign-in is gone (issue #47). The 2.0 app starts sign-in with `POST /api/v2/auth/begin`

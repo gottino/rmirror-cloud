@@ -318,7 +318,7 @@ class TestState:
         data = get(client, "/api/v2/state").get_json()
         assert set(data) == {
             "api_version", "core_version", "auth", "environment", "folder", "watcher", "queue",
-            "quota", "first_sync", "sync", "last_upload_at",
+            "quota", "first_sync", "catch_up", "sync", "last_upload_at",
         }
         assert data["api_version"] == 2
         assert data["auth"] == {"state": "signed_in", "signed_in": True, "email": None, "sign_in_required": False}
@@ -334,6 +334,7 @@ class TestState:
         assert data["queue"] == {"pending": 0, "running": False, "paused_reason": None}
         assert data["quota"] is None
         assert data["first_sync"] == {"completed": False}
+        assert data["catch_up"] == {"state": "pending", "unselected_on_server": 0}
         assert data["sync"]["state"] == "idle"
         assert data["last_upload_at"] is None
 
@@ -392,6 +393,7 @@ class TestState:
     def test_first_sync_from_manifest(self, client, config, library):
         assert get(client, "/api/v2/state").get_json()["first_sync"]["completed"] is False
         manifest = UploadManifest.for_config(config)
+        manifest.mark_initialised()  # caught up with this host before
         page = next((library / "meeting").glob("*.rm"))
         manifest.record_baseline(page, fingerprint_file(page))
         assert get(client, "/api/v2/state").get_json()["first_sync"]["completed"] is False
@@ -1068,11 +1070,28 @@ class TestFirstSyncRule:
         client = self._app(config, cloud_sync, agent_loop)
         assert get(client, "/api/v2/state").get_json()["first_sync"]["completed"] is False
 
-    def test_legacy_selection_counts_as_completed(self, config, cloud_sync, agent_loop):
+    def test_saved_selection_counts_on_a_host_set_up_by_an_earlier_version(self, config, cloud_sync, agent_loop):
+        # 1.x users who saved a selection are not sent through the first sync again
         config.sync.sync_all_notebooks = False
         config.sync.selected_notebooks = ["diary"]
+        UploadManifest.for_config(config).mark_initialised()  # no catch_up meta: not_needed
         client = self._app(config, cloud_sync, agent_loop)
-        assert get(client, "/api/v2/state").get_json()["first_sync"]["completed"] is True
+        data = get(client, "/api/v2/state").get_json()
+        assert data["catch_up"]["state"] == "not_needed"
+        assert data["first_sync"]["completed"] is True
+
+    @pytest.mark.parametrize("catch_up_state", ["done", "unavailable", None])
+    def test_saved_selection_does_not_count_after_a_catch_up_or_while_pending(
+        self, config, cloud_sync, agent_loop, catch_up_state
+    ):
+        config.sync.sync_all_notebooks = False
+        config.sync.selected_notebooks = ["diary"]
+        manifest = UploadManifest.for_config(config)
+        if catch_up_state is not None:  # None: never caught up with (pending)
+            manifest.mark_initialised()
+            manifest.set_meta("catch_up", catch_up_state)
+        client = self._app(config, cloud_sync, agent_loop)
+        assert get(client, "/api/v2/state").get_json()["first_sync"]["completed"] is False
 
     def test_selection_saved_by_the_app_does_not_count(self, client, config, save_mock):
         put(client, "/api/v2/selection", {"sync_all": False, "selected_notebooks": ["diary"]})
