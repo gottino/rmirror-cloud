@@ -75,8 +75,9 @@ Derived from the supervisor status and `GET /api/v2/state` in `Stage.derive`, fi
 - The child's environment is an allowlist, not the app's environment: `HOME`, `PATH`, `TMPDIR`, `USER`, `LOGNAME`,
   `LANG`, `LC_ALL`, `LC_CTYPE`, `SHELL`, `__CF_USER_TEXT_ENCODING`, plus the token and `PYTHONUNBUFFERED=1`
   (debug builds also pass `RMIRROR_CONFIG_PATH` and `PYTHON_KEYRING_BACKEND`).
-- stderr is drained into a 4 KB in-memory tail, written to the system log (`NSLog`) when the core exits
-  unexpectedly or never becomes ready, and withheld if it contains the launch token.
+- stderr is drained into a 4 KB in-memory tail. When the core exits unexpectedly or never becomes ready, the tail
+  goes to `~/Library/Logs/rMirror/core-failures.log` (readable only by the user, bounded), never to the system
+  log, because a traceback can contain personal details. It is withheld entirely if it contains the launch token.
 - Ready only when the `RMIRROR_CORE_READY` line arrives on the child's stdout; time out at 90 s (the first launch
   of a freshly notarized core can be slow while macOS scans it). A reply on the port is never used as readiness, so the launch token cannot be sent to a different process listening there.
 - Unexpected exit: restart with backoff 1, 2, 5, 15, 30 s; after 5 failures in 2 minutes stop and show `coreFailed`.
