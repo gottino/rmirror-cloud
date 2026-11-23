@@ -56,6 +56,27 @@ Before you start: quit any running rMirror 1.x from its menu bar icon (both use 
 - The header is below the title bar, and nothing clips at the smallest window size.
 - Write on the tablet, let the reMarkable app sync. Expected: the page uploads by itself within a minute or two.
 
+### Notebook list: folders, Recent, keyboard
+
+Needs a core that sends `folders` and `parent_uuid` (with an older core the folders are worked out from the paths).
+
+- Folders view: the folders match the tablet, nested, folders first A to Z, empty folders dimmed with "Empty".
+  Clicking a folder row opens or closes it; clicking its box ticks every notebook below it (a dash when only some
+  are ticked); the footer numbers are the same as ticking those notebooks one by one.
+- Close and reopen the window, then quit and start rMirror again. Expected: the same folders are open, the same
+  view (Folders or Recent) and the same "Synced only" setting.
+- Search: the list goes flat with folder paths; clearing it brings back the outline with the same folders open.
+- Recent: newest change first, with "2 hours ago" style times. "Synced only" shows ticked or uploaded notebooks;
+  unticking one there does not make it vanish until the filter is switched off and on again.
+- Keyboard (not covered by tests): click a row, then Up/Down move the outline, Right opens a folder or steps into
+  it, Left closes it or steps out, Space ticks, Return ticks a notebook or opens a folder. While the list has the
+  keyboard, Return does not save; click elsewhere or Tab to "Save and sync". Down in the search field moves into
+  the list; Return and Esc in the search field still only belong to the field; Cmd-F goes back to the search.
+  In Recent, Left and Right do nothing. The highlighted row scrolls into view.
+- VoiceOver on a folder row reads e.g. "Work, folder, 2 of 5 selected, expanded"; the Actions rotor offers
+  "Tick all in this folder".
+- With full keyboard access on (System Settings > Keyboard), Tab reaches the list and a focus ring shows.
+
 ## 7. Settings
 
 - "Open rMirror when I log in" on, then restart the Mac. Expected: the menu bar icon is back after login without
