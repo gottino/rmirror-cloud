@@ -60,7 +60,7 @@ Before you start: quit any running rMirror 1.x from its menu bar icon (both use 
 
 Needs a core that sends `folders` and `parent_uuid` (with an older core the folders are worked out from the paths).
 
-- Folders view: the folders match the tablet, nested, folders first A to Z, empty folders dimmed with "Empty".
+- Folders view: the folders match the tablet, nested, folders first A to Z, folders with no notebooks in them (for example PDF-only folders) are not shown.
   Clicking a folder row opens or closes it; clicking its box ticks every notebook below it (a dash when only some
   are ticked); the footer numbers are the same as ticking those notebooks one by one.
 - Close and reopen the window, then quit and start rMirror again. Expected: the same folders are open, the same
