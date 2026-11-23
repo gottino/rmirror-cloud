@@ -68,7 +68,8 @@ GET /notebooks/{id}/export?format=markdown|pdf
 GET /pages/{page_id}/pdf
 
 // Mac app status (sidebar, setup wizard). last_activity_at = newest notebook
-// last_synced_at in UTC; there is no stored heartbeat
+// last_synced_at in UTC: the last time the Mac app synced anything, notebook
+// metadata included (not only page uploads); there is no stored heartbeat
 GET /agents/status
 
 // Quota and search

@@ -10,7 +10,7 @@ export const SETUP_WIZARD_HREF = '/dashboard?setup=1';
 
 /**
  * Sidebar footer showing the Mac app's state: a setup link when no app has
- * connected, otherwise the real time of the last upload (amber after a day).
+ * connected, otherwise when the Mac app last synced anything (amber after a day).
  */
 export function AgentStatusPanel({ status }: { status: AgentStatus }) {
   const activity = describeAgentActivity(status);
@@ -38,11 +38,11 @@ export function AgentStatusPanel({ status }: { status: AgentStatus }) {
       <div className="flex items-center space-x-2">
         <div className="w-2 h-2 rounded-full" style={{ backgroundColor: dotColor }} />
         <span style={{ fontSize: '0.875em', color: 'var(--foreground)', fontWeight: 500 }}>
-          {stale ? 'No recent uploads' : 'Mac app connected'}
+          {stale ? 'No recent activity' : 'Mac app connected'}
         </span>
       </div>
       <div style={{ fontSize: '0.75em', color: stale ? 'var(--warning-text)' : 'var(--warm-gray)' }}>
-        {activity.kind === 'active' ? activity.label : 'No uploads yet'}
+        {activity.kind === 'active' ? activity.label : 'No activity yet'}
       </div>
       {stale && (
         <div style={{ fontSize: '0.75em', color: 'var(--warning-text)' }}>

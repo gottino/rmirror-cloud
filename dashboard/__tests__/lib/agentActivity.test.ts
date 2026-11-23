@@ -40,20 +40,20 @@ describe('describeAgentActivity', () => {
     expect(describeAgentActivity(status({ has_agent_connected: false }))).toEqual({ kind: 'not-set-up' });
   });
 
-  it('says nothing was uploaded yet when connected without activity', () => {
-    expect(describeAgentActivity(status())).toEqual({ kind: 'no-uploads' });
+  it('says nothing was synced yet when connected without activity', () => {
+    expect(describeAgentActivity(status())).toEqual({ kind: 'no-activity' });
     // Older servers do not send the field at all
-    expect(describeAgentActivity(status({ last_activity_at: undefined }))).toEqual({ kind: 'no-uploads' });
+    expect(describeAgentActivity(status({ last_activity_at: undefined }))).toEqual({ kind: 'no-activity' });
   });
 
-  it('shows the real time of the last upload', () => {
+  it('shows the real time of the last activity', () => {
     expect(describeAgentActivity(status({ last_activity_at: '2026-11-23T10:00:00Z' }))).toEqual({
       kind: 'active',
-      label: 'Last upload 2h ago',
+      label: 'Last active 2h ago',
       stale: false,
     });
     expect(describeAgentActivity(status({ last_activity_at: '2026-11-23T11:59:40Z' }))).toMatchObject({
-      label: 'Last upload just now',
+      label: 'Last active just now',
     });
   });
 
@@ -62,16 +62,16 @@ describe('describeAgentActivity', () => {
     const justStale = new Date(NOW.getTime() - AGENT_STALE_AFTER_MS - 60_000).toISOString();
     expect(describeAgentActivity(status({ last_activity_at: justFresh }))).toMatchObject({ stale: false });
     expect(describeAgentActivity(status({ last_activity_at: justStale }))).toMatchObject({
-      label: 'Last upload 1d ago',
+      label: 'Last active 1d ago',
       stale: true,
     });
     expect(describeAgentActivity(status({ last_activity_at: '2026-11-16T12:00:00' }))).toMatchObject({
-      label: 'Last upload 7d ago',
+      label: 'Last active 7d ago',
       stale: true,
     });
   });
 
-  it('treats an unparsable timestamp as no uploads', () => {
-    expect(describeAgentActivity(status({ last_activity_at: 'not a date' }))).toEqual({ kind: 'no-uploads' });
+  it('treats an unparsable timestamp as no activity', () => {
+    expect(describeAgentActivity(status({ last_activity_at: 'not a date' }))).toEqual({ kind: 'no-activity' });
   });
 });

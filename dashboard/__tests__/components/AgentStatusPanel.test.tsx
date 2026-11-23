@@ -30,23 +30,23 @@ describe('AgentStatusPanel', () => {
     expect(screen.queryByText(/no agent/i)).not.toBeInTheDocument();
   });
 
-  it('shows the real last upload time, never a fixed text', () => {
+  it('shows the real last activity time, never a fixed text', () => {
     render(<AgentStatusPanel status={status({ last_activity_at: '2026-11-23T09:00:00Z' })} />);
     expect(screen.getByText('Mac app connected')).toBeInTheDocument();
-    expect(screen.getByText('Last upload 3h ago')).toBeInTheDocument();
+    expect(screen.getByText('Last active 3h ago')).toBeInTheDocument();
     expect(screen.queryByText(/a few moments ago/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/is rmirror running/i)).not.toBeInTheDocument();
   });
 
-  it('warns after a day without uploads', () => {
+  it('warns after a day without activity', () => {
     render(<AgentStatusPanel status={status({ last_activity_at: '2026-11-20T12:00:00Z' })} />);
-    expect(screen.getByText('No recent uploads')).toBeInTheDocument();
-    expect(screen.getByText('Last upload 3d ago')).toBeInTheDocument();
+    expect(screen.getByText('No recent activity')).toBeInTheDocument();
+    expect(screen.getByText('Last active 3d ago')).toBeInTheDocument();
     expect(screen.getByText(/is rmirror running on your mac/i)).toBeInTheDocument();
   });
 
-  it('says when nothing was uploaded yet', () => {
+  it('says when nothing was synced yet', () => {
     render(<AgentStatusPanel status={status()} />);
-    expect(screen.getByText('No uploads yet')).toBeInTheDocument();
+    expect(screen.getByText('No activity yet')).toBeInTheDocument();
   });
 });
