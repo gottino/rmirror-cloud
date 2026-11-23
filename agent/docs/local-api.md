@@ -99,22 +99,37 @@ upload batch, and at most every 5 minutes).
 
 ### `GET /api/v2/notebooks`
 
-Flat list; the app does grouping, search and sorting.
+The notebooks plus the folder tree; the app builds the tree from `folders` + each notebook's `parent_uuid`, and does
+search and sorting.
 
 ```json
 {
   "folder_state": "ok",
   "sync_all": false,
+  "folders": [
+    {"uuid": "f-work", "name": "Work", "parent_uuid": null},
+    {"uuid": "f-2026", "name": "2026", "parent_uuid": "f-work"}
+  ],
   "notebooks": [
-    {"uuid": "…", "name": "Meeting Notes", "folder_path": ["Work", "2026"], "document_type": "notebook",
+    {"uuid": "…", "name": "Meeting Notes", "folder_path": ["Work", "2026"], "parent_uuid": "f-2026",
+     "document_type": "notebook",
      "page_count": 12, "last_opened_at": "2026-11-20T10:00:00Z", "last_modified_at": "2026-11-20T10:05:00Z",
      "selected": true, "synced_pages": 12}
   ]
 }
 ```
 
-- Documents only (no folder entries, no trashed items, no PDFs/EPUBs, and no notebooks deleted on the server:
-  those come back through `deleted-notebooks` → `resync`). `folder_path` is the chain of parent folder names.
+- `notebooks` holds documents only (no trashed items, no PDFs/EPUBs, and no notebooks deleted on the server:
+  those come back through `deleted-notebooks` → `resync`; their folders are still listed). `folder_path` is the
+  chain of parent folder names, kept for older clients.
+- `folders`: every folder that is not in the trash, including empty ones. A folder is in the trash if it or any
+  ancestor has parent `"trash"` or `deleted: true`; it and the notebooks under it are left out. `parent_uuid` is
+  `null` for a top-level folder. A folder whose parent does not exist in the library, or whose parent chain loops
+  (A in B in A), is reported as top-level, never dropped. `name` is `"Untitled"` when the name is missing or empty.
+  Sorted by name (case-insensitive), then uuid.
+- Notebook `parent_uuid`: the uuid of the folder that directly contains it, `null` at the top level or when that
+  folder does not exist; always either `null` or a uuid in `folders`.
+- When `folder_state` is not `ok`, `folders` is `[]` like `notebooks`.
 - `page_count`: the pages a sync of that notebook uploads: its page files (including pages not listed in the
   notebook's page order), capped by the saved page limit. The suggestion uses the same number.
 - `synced_pages`: pages already recorded in the upload manifest for the current host (0 if unknown).

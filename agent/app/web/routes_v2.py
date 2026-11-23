@@ -26,6 +26,7 @@ from app.remarkable.library import (
     count_page_files,
     folder_state,
     scan_documents,
+    scan_library,
 )
 from app.sync.cloud_sync import AuthenticationRequiredError, CloudSync, CloudSyncError
 from app.sync.first_run import suggest_first_sync
@@ -273,6 +274,20 @@ def _scan_notebooks(source: str) -> list:
         return []
 
 
+def _syncable_library(config: Config) -> tuple[list, list]:
+    """(notebooks minus those deleted on the server with upload page counts, folders)."""
+    try:
+        library = scan_library(config.remarkable.source_directory)
+    except OSError as e:
+        logger.warning(f"Could not scan the reMarkable folder: {type(e).__name__}")
+        return [], []
+    excluded = set(config.sync.excluded_notebooks)
+    documents = [doc for doc in library.documents if doc.uuid not in excluded]
+    for doc in documents:
+        doc.page_count = _upload_page_count(config, doc.uuid)
+    return documents, library.folders
+
+
 def _pages_to_sync(config: Config, selected_uuids: list[str] | None) -> int | None:
     """Pages this initial sync will try to upload (pages_total).
 
@@ -428,6 +443,7 @@ def register_v2_routes(app: Flask) -> None:
         source = config.remarkable.source_directory
         state_value = folder_state(source)
         result = []
+        folders = []
         if state_value == FOLDER_OK:
             try:
                 synced = _manifest().uploaded_pages_by_notebook(source)
@@ -437,11 +453,16 @@ def register_v2_routes(app: Flask) -> None:
             sync_all = config.sync.sync_all_notebooks
             selected = set(config.sync.selected_notebooks)
             # Notebooks deleted on the server are left out (deleted-notebooks -> resync)
-            for doc in _syncable_documents(config):
+            documents, library_folders = _syncable_library(config)
+            folders = [
+                {"uuid": f.uuid, "name": f.name, "parent_uuid": f.parent_uuid} for f in library_folders
+            ]
+            for doc in documents:
                 result.append({
                     "uuid": doc.uuid,
                     "name": doc.name,
                     "folder_path": doc.folder_path,
+                    "parent_uuid": doc.parent_uuid,
                     "document_type": doc.document_type,
                     "page_count": doc.page_count,
                     "last_opened_at": iso_utc(doc.last_opened_at),
@@ -452,6 +473,7 @@ def register_v2_routes(app: Flask) -> None:
         return jsonify({
             "folder_state": state_value,
             "sync_all": config.sync.sync_all_notebooks,
+            "folders": folders,
             "notebooks": result,
         })
 

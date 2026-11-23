@@ -447,6 +447,8 @@ class TestNotebooks:
         meeting = by_uuid["meeting"]
         assert meeting["name"] == "Meeting Notes"
         assert meeting["folder_path"] == ["Work", "2026"]
+        assert meeting["parent_uuid"] == "y2026"
+        assert by_uuid["diary"]["parent_uuid"] is None
         assert meeting["document_type"] == "notebook"
         assert meeting["page_count"] == 3
         assert meeting["last_opened_at"].endswith("Z")
@@ -484,7 +486,25 @@ class TestNotebooks:
     def test_missing_folder(self, client, config, tmp_path):
         config.remarkable.source_directory = str(tmp_path / "nowhere")
         data = get(client, "/api/v2/notebooks").get_json()
-        assert data == {"folder_state": "missing", "sync_all": False, "notebooks": []}
+        assert data == {"folder_state": "missing", "sync_all": False, "folders": [], "notebooks": []}
+
+    def test_folders_tree(self, client, config, library):
+        _write_notebook(library, "empty", "Empty", doc_type="CollectionType")
+        _write_notebook(library, "gone", "Gone", parent="trash", doc_type="CollectionType")
+        _write_notebook(library, "orphan", "Orphan", parent="ghost", doc_type="CollectionType")
+        data = get(client, "/api/v2/notebooks").get_json()
+        assert data["folders"] == [
+            {"uuid": "y2026", "name": "2026", "parent_uuid": "work"},
+            {"uuid": "empty", "name": "Empty", "parent_uuid": None},
+            {"uuid": "orphan", "name": "Orphan", "parent_uuid": None},
+            {"uuid": "work", "name": "Work", "parent_uuid": None},
+        ]
+
+    def test_excluded_notebooks_keep_their_folders(self, client, config):
+        config.sync.excluded_notebooks = ["meeting"]
+        data = get(client, "/api/v2/notebooks").get_json()
+        assert "meeting" not in {nb["uuid"] for nb in data["notebooks"]}
+        assert {f["uuid"] for f in data["folders"]} == {"work", "y2026"}
 
     def test_put_selection(self, client, config, save_mock):
         resp = put(client, "/api/v2/selection", {"sync_all": False, "selected_notebooks": ["diary", "meeting"]})
