@@ -87,7 +87,8 @@ public final class AppStore: ObservableObject {
         suggestion: FirstRunSuggestion? = nil,
         settings: AppSettings? = nil,
         guidedSyncActive: Bool = false,
-        problem: ActionProblem? = nil
+        problem: ActionProblem? = nil,
+        isWaitingForSignIn: Bool = false
     ) -> AppStore {
         let store = AppStore(dependencies: Dependencies(makeAPI: { _ in api }, openURL: { _ in }, restartCore: {}))
         store.coreStatus = core
@@ -99,6 +100,7 @@ public final class AppStore: ObservableObject {
         store.settings = settings
         store.guidedSyncActive = guidedSyncActive
         store.problem = problem
+        store.isWaitingForSignIn = isWaitingForSignIn
         store.recomputeStage()
         return store
     }
@@ -159,7 +161,13 @@ public final class AppStore: ObservableObject {
             state = newState
             if newState.auth.signedIn { isWaitingForSignIn = false }
             recomputeStage()
-            if stage != previousStage { await loadForStage() }
+            if stage != previousStage {
+                await loadForStage()
+            } else if stage == .firstSync, suggestion?.reason != .ok {
+                // Still waiting for notebooks or for the allowance to be known: look again.
+                await loadSuggestion()
+                if suggestion?.reason == .ok { await reloadNotebooks() }
+            }
         } catch {
             // A missed poll is not worth showing; the supervisor reports a dead core.
         }
@@ -244,6 +252,7 @@ public final class AppStore: ObservableObject {
     /// Leaves the first-sync result screen for the main window.
     public func finishGuidedSync() {
         guidedSyncActive = false
+        problem = nil
         recomputeStage()
         Task { await self.loadForStage() }
     }

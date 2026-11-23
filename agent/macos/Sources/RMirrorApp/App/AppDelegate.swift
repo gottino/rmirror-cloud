@@ -38,6 +38,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             checkForUpdates: { [weak self] in self?.checkForUpdates() }
         )
 
+        // The main window's gear button asks for the settings window this way.
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("io.rmirror.openSettings"), object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.windows.show(.settings) }
+        }
+
         startCore()
 
         // Bring the window forward by itself whenever the user has something to do:
