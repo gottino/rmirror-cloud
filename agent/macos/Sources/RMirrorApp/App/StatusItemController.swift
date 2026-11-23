@@ -2,13 +2,17 @@ import AppKit
 import Combine
 import RMirrorKit
 
-/// The menu bar item: a status line and four commands (five while an update is waiting).
+/// The menu bar item: a status line and four commands (five while an update is waiting). While the
+/// reMarkable app is not running, a second line says so with "Open reMarkable" under it.
 /// No item duplicates another.
 @MainActor
 final class StatusItemController: NSObject {
     private let item: NSStatusItem
     private let statusLine = NSMenuItem(title: SharedCopy.statusLine(stage: .starting, state: nil), action: nil, keyEquivalent: "")
     private var updateItem: NSMenuItem!
+    private let remarkableLine = NSMenuItem(title: AppCopy.StatusMenu.remarkableNotRunning, action: nil, keyEquivalent: "")
+    private var openRemarkableItem: NSMenuItem!
+    private weak var store: AppStore?
     private var needsAttention = false
     private var updateAvailable = false
     private let openMain: () -> Void
@@ -21,6 +25,7 @@ final class StatusItemController: NSObject {
         self.openMain = openMain
         self.openSettings = openSettings
         self.checkForUpdates = checkForUpdates
+        self.store = store
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -32,6 +37,12 @@ final class StatusItemController: NSObject {
         let menu = NSMenu()
         statusLine.isEnabled = false
         menu.addItem(statusLine)
+        remarkableLine.isEnabled = false
+        remarkableLine.isHidden = true
+        menu.addItem(remarkableLine)
+        openRemarkableItem = command(AppCopy.StatusMenu.openRemarkable, #selector(openRemarkableAction))
+        openRemarkableItem.isHidden = true
+        menu.addItem(openRemarkableItem)
         menu.addItem(.separator())
         menu.addItem(command(AppCopy.StatusMenu.open, #selector(openMainAction), key: "o"))
         menu.addItem(command(AppCopy.StatusMenu.settings, #selector(openSettingsAction), key: ","))
@@ -44,10 +55,10 @@ final class StatusItemController: NSObject {
         menu.addItem(command(AppCopy.StatusMenu.quit, #selector(quitAction), key: "q"))
         item.menu = menu
 
-        store.$stage.combineLatest(store.$state)
+        store.$stage.combineLatest(store.$state, store.$remarkableAppRunning, store.$remarkableAppInstalled)
             .receive(on: RunLoop.main)
-            .sink { [weak self] stage, state in
-                self?.update(stage: stage, state: state)
+            .sink { [weak self] stage, state, running, installed in
+                self?.update(stage: stage, state: state, remarkableRunning: running, remarkableInstalled: installed)
             }
             .store(in: &cancellables)
     }
@@ -65,7 +76,7 @@ final class StatusItemController: NSObject {
         refreshIcon()
     }
 
-    private func update(stage: Stage, state: AppState?) {
+    private func update(stage: Stage, state: AppState?, remarkableRunning: Bool, remarkableInstalled: Bool) {
         let line = SharedCopy.statusLine(stage: stage, state: state)
         statusLine.title = line
         item.button?.toolTip = AppCopy.StatusMenu.tooltip(line)
@@ -76,6 +87,11 @@ final class StatusItemController: NSObject {
         case .coreProblem, .signIn, .remarkableMissing, .permission, .firstSync: needsAttention = true
         default: needsAttention = state?.queue.pausedReason == .signIn
         }
+        // The reMarkable app is not running, so new pages cannot arrive. Never opens a window.
+        let remarkableWarning = RemarkableApp.showsNotRunningWarning(stage: stage, appRunning: remarkableRunning)
+        remarkableLine.isHidden = !remarkableWarning
+        openRemarkableItem.isHidden = !(remarkableWarning && remarkableInstalled)
+        if remarkableWarning { needsAttention = true }
         refreshIcon()
     }
 
@@ -144,6 +160,7 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func openMainAction() { openMain() }
+    @objc private func openRemarkableAction() { store?.openRemarkableApp() }
     @objc private func openSettingsAction() { openSettings() }
     @objc private func checkForUpdatesAction() { checkForUpdates() }
     @objc private func quitAction() { NSApp.terminate(nil) }

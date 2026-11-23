@@ -111,6 +111,16 @@ struct MainView: View {
                     .buttonStyle(.rmSecondary)
             }
         }
+        if store.showsRemarkableAppWarning {
+            MainNotice(kind: .attention, systemImage: "exclamationmark.circle",
+                       title: MainCopy.remarkableNotRunningTitle,
+                       lines: [MainCopy.remarkableNotRunningBody]) {
+                if store.remarkableAppInstalled {
+                    Button(MainCopy.openRemarkable) { store.openRemarkableApp() }
+                        .buttonStyle(.rmSecondary)
+                }
+            }
+        }
         if let problem = store.problem {
             MainNotice(kind: .problem, systemImage: "exclamationmark.triangle",
                        lines: [SharedCopy.problem(problem)],

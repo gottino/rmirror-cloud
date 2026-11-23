@@ -127,7 +127,8 @@ enum ScreenRenderer {
         func main(_ name: String, core: CoreStatus = .running(CoreConnection(port: 5555, appToken: "preview")),
                   state: AppState?, suggestion: FirstRunSuggestion? = nil,
                   notebooks: [NotebookEntry] = [], guided: Bool = false, waiting: Bool = false,
-                  unreachable: Bool = false, deleted: [DeletedNotebook] = []) -> Screen {
+                  unreachable: Bool = false, deleted: [DeletedNotebook] = [],
+                  remarkableRunning: Bool = true) -> Screen {
             Screen(name: name, size: mainSize) {
                 // The main window reloads the notebooks and the deleted notebooks from the API when it appears.
                 let api = MockLocalAPI(state: state ?? Fixtures.readyState,
@@ -137,7 +138,8 @@ enum ScreenRenderer {
                                              folders: notebooks.isEmpty ? [] : library.folders,
                                              suggestion: suggestion, settings: Fixtures.settings,
                                              guidedSyncActive: guided, isWaitingForSignIn: waiting,
-                                             suggestionUnreachable: unreachable, deletedNotebooks: deleted)
+                                             suggestionUnreachable: unreachable, deletedNotebooks: deleted,
+                                             remarkableAppRunning: remarkableRunning)
                 return AnyView(RootView().environmentObject(store))
             }
         }
@@ -206,6 +208,8 @@ enum ScreenRenderer {
             main("ready-quota-not-paused", state: quotaNotPaused, notebooks: library.notebooks),
             main("ready-deleted", state: Fixtures.readyState, notebooks: library.notebooks,
                  deleted: Fixtures.deletedNotebooks),
+            main("ready-remarkable-not-running", state: Fixtures.readyState, notebooks: library.notebooks,
+                 remarkableRunning: false),
             mainList("ready-footer", draft: savedPlusTwo),
             mainList("ready-quota-footer-min-size", size: mainMinimumSize, state: Fixtures.quotaExhaustedState,
                      draft: savedPlusTwo),
