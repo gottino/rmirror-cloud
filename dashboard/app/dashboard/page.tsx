@@ -20,6 +20,7 @@ import { OnboardingChecklist, getDefaultOnboardingSteps } from '@/components/Onb
 import { TermsAcceptanceModal } from '@/components/TermsAcceptanceModal';
 import { DeleteNotebookModal } from '@/components/DeleteNotebookModal';
 import { trackEvent } from '@/lib/analytics';
+import { resolveAgentDownloadUrl, DOWNLOAD_UNAVAILABLE_MESSAGE } from '@/lib/agentDownload';
 import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import { Skeleton } from '@/components/Skeleton';
 import { memo } from 'react';
@@ -226,17 +227,28 @@ function DashboardContent() {
   const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
   const isAdmin = isDevelopmentMode || (userId && ADMIN_USER_IDS.includes(userId));
 
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const handleDownloadClick = async () => {
+    setDownloadError(null);
+    // Open the window before any await so pop-up blockers allow it
+    const knownUrl = agentVersionInfo?.platforms.macos?.url;
+    if (knownUrl) {
+      window.open(knownUrl, '_blank');
+    } else {
+      const url = await resolveAgentDownloadUrl(agentVersionInfo);
+      if (!url) {
+        setDownloadError(DOWNLOAD_UNAVAILABLE_MESSAGE);
+        return;
+      }
+      window.open(url, '_blank');
+    }
+    trackEvent({ name: 'agent_downloaded' });
     if (effectiveIsSignedIn) {
       const token = await getToken();
       if (token) {
         await trackAgentDownload(token);
       }
     }
-    trackEvent({ name: 'agent_downloaded' });
-    const downloadUrl = agentVersionInfo?.platforms.macos?.url
-      || 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.5.6/rMirror-1.5.6.dmg';
-    window.open(downloadUrl, '_blank');
   };
 
   // Read-only data for the page. Each request gets a fresh token; a failed
@@ -883,6 +895,11 @@ function DashboardContent() {
                 onDismiss={handleDismissOnboarding}
                 onDownloadAgent={handleDownloadClick}
               />
+              {downloadError && (
+                <p role="alert" className="mt-2 text-sm" style={{ color: 'var(--warning-text)' }}>
+                  {downloadError}
+                </p>
+              )}
             </div>
           )}
 
