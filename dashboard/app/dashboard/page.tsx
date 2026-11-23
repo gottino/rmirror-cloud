@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Mail, Shield, BarChart3, Trash2 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
 import SetupWizard from './components/SetupWizard';
-import { getNotebooksTree, trackAgentDownload, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, getLatestAgentVersion, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentVersionInfo, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
+import { getNotebooksTree, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, type NotebookTree as NotebookTreeData, NotebookTreeNode, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
 import { useApiQuery } from '@/lib/useApiQuery';
 import { useAgentStatus } from '@/lib/useAgentStatus';
 import { useQuota } from '@/lib/quota-context';
@@ -19,7 +19,9 @@ import { SearchResults } from '@/components/SearchResults';
 import { OnboardingChecklist, getDefaultOnboardingSteps } from '@/components/OnboardingChecklist';
 import { TermsAcceptanceModal } from '@/components/TermsAcceptanceModal';
 import { DeleteNotebookModal } from '@/components/DeleteNotebookModal';
+import { AgentStatusPanel } from '@/components/AgentStatusPanel';
 import { trackEvent } from '@/lib/analytics';
+import { shouldShowSetupWizard } from '@/lib/setupWizard';
 import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import { Skeleton } from '@/components/Skeleton';
 import { memo } from 'react';
@@ -178,6 +180,8 @@ function DashboardContent() {
   const getToken = useApiToken();
   const router = useRouter();
   const searchParams = useSearchParams();
+  // "Set up the Mac app" in the sidebar opens the wizard even when notebooks exist
+  const setupRequested = searchParams.get('setup') === '1';
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -226,19 +230,6 @@ function DashboardContent() {
   const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
   const isAdmin = isDevelopmentMode || (userId && ADMIN_USER_IDS.includes(userId));
 
-  const handleDownloadClick = async () => {
-    if (effectiveIsSignedIn) {
-      const token = await getToken();
-      if (token) {
-        await trackAgentDownload(token);
-      }
-    }
-    trackEvent({ name: 'agent_downloaded' });
-    const downloadUrl = agentVersionInfo?.platforms.macos?.url
-      || 'https://f000.backblazeb2.com/file/rmirror-downloads/releases/v1.5.6/rMirror-1.5.6.dmg';
-    window.open(downloadUrl, '_blank');
-  };
-
   // Read-only data for the page. Each request gets a fresh token; a failed
   // token lookup counts as an error (shown only for the notebook tree).
   const authed = useCallback(async () => {
@@ -257,20 +248,20 @@ function DashboardContent() {
     ? notebooksQuery.error.message || 'Failed to fetch notebooks'
     : null;
   const reloadNotebooks = notebooksQuery.reload;
+  // Until a page has actually been uploaded (a metadata-only sync creates
+  // notebook rows first), or on ?setup=1, the main area is the setup wizard
+  const showWizard = useMemo(() => shouldShowSetupWizard(tree, setupRequested), [tree, setupRequested]);
 
-  const agentStatus = useAgentStatus({ enabled: !!effectiveIsSignedIn });
+  const agentStatus = useAgentStatus({ enabled: !!effectiveIsSignedIn, pollMs: 60000 });
   // Quota comes from QuotaProvider, which already fetches and polls it
   const { quota } = useQuota();
-  const { data: onboarding, setData: setOnboarding } = useApiQuery<OnboardingProgress>(
+  const { data: onboarding, setData: setOnboarding, loading: onboardingLoading } = useApiQuery<OnboardingProgress>(
     signedInKey('onboarding-progress'),
     async (signal) => getOnboardingProgress(await authed(), signal)
   );
   const { data: legalStatus, setData: setLegalStatus } = useApiQuery<LegalStatus>(
     signedInKey('legal-status'),
     async (signal) => getLegalStatus(await authed(), signal)
-  );
-  const { data: agentVersionInfo } = useApiQuery<AgentVersionInfo>('agent-version', (signal) =>
-    getLatestAgentVersion(signal)
   );
 
   const openDeleteModal = (notebook: NotebookTreeNode) => {
@@ -680,25 +671,8 @@ function DashboardContent() {
           )}
         </div>
 
-        {/* Agent Status */}
-        {agentStatus && (
-          <div className="p-4 border-t space-y-3" style={{ borderColor: 'var(--border)' }}>
-            <div className="flex items-center space-x-2">
-              <div
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: agentStatus.has_agent_connected ? 'var(--sage-green)' : 'var(--warm-gray)' }}
-              />
-              <span style={{ fontSize: '0.875em', color: 'var(--foreground)', fontWeight: 500 }}>
-                {agentStatus.has_agent_connected ? 'Agent Connected' : 'No Agent'}
-              </span>
-            </div>
-            {agentStatus.has_agent_connected && (
-              <div style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
-                Last sync: a few moments ago
-              </div>
-            )}
-          </div>
-        )}
+        {/* Mac app status */}
+        {agentStatus && <AgentStatusPanel status={agentStatus} />}
       </div>
       </aside>
     </>
@@ -873,7 +847,7 @@ function DashboardContent() {
         </header>
         <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
           {/* Onboarding Checklist (only after first sync, trimmed to post-sync steps) */}
-          {onboarding && !onboarding.onboarding_dismissed && !isSearchMode && notebooks.length > 0 && (
+          {onboarding && !onboarding.onboarding_dismissed && !isSearchMode && !showWizard && notebooks.length > 0 && (
             <div className="mb-6">
               <OnboardingChecklist
                 steps={getDefaultOnboardingSteps({
@@ -881,7 +855,6 @@ function DashboardContent() {
                   hasNotion: onboarding.has_notion,
                 })}
                 onDismiss={handleDismissOnboarding}
-                onDownloadAgent={handleDownloadClick}
               />
             </div>
           )}
@@ -895,10 +868,17 @@ function DashboardContent() {
               onLoadMore={loadMoreSearchResults}
               loadingMore={searchLoadingMore}
             />
-          ) : notebooks.length === 0 ? (
+          ) : showWizard && onboardingLoading ? (
+            // Wait for onboarding progress so the wizard starts at the right step
+            <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4" aria-busy="true">
+              <Skeleton style={{ width: '280px', height: '32px' }} />
+              <Skeleton style={{ width: '360px', height: '200px' }} />
+            </div>
+          ) : showWizard ? (
             <SetupWizard
               getToken={getToken}
               onComplete={() => {
+                if (setupRequested) router.replace('/dashboard', { scroll: false });
                 reloadNotebooks();
               }}
               onboardingProgress={onboarding ? {

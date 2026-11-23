@@ -22,7 +22,7 @@ dashboard/
 │   ├── globals.css          # Global styles
 │   ├── layout.tsx           # Root layout with Clerk provider
 │   ├── page.tsx             # Public landing page
-│   ├── dashboard/           # Authenticated dashboard (notebooks view, SetupWizard)
+│   ├── dashboard/           # Authenticated dashboard (notebooks view, SetupWizard; ?setup=1 forces the wizard, state logic in lib/setupWizard.ts)
 │   ├── notebooks/[id]/      # Notebook viewing page (incl. Markdown/PDF export)
 │   ├── integrations/        # Integration settings (Notion, Obsidian, Todoist + OAuth callbacks)
 │   ├── billing/             # Quota details and Pro tier info
@@ -66,6 +66,11 @@ GET /notebooks/{id}/export?format=markdown|pdf
 
 // Page PDF
 GET /pages/{page_id}/pdf
+
+// Mac app status (sidebar, setup wizard). last_activity_at = newest notebook
+// last_synced_at in UTC: the last time the Mac app synced anything, notebook
+// metadata included (not only page uploads); there is no stored heartbeat
+GET /agents/status
 
 // Quota and search
 GET /quota/status
