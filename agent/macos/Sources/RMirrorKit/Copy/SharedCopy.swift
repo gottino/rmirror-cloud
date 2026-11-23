@@ -131,7 +131,9 @@ public enum SharedCopy {
 
     public static func statusLine(stage: Stage, state: AppState?) -> String {
         switch stage {
-        case .starting: return "Starting…"
+        case .starting:
+            guard let state, Stage.isCatchingUp(state) else { return "Starting…" }
+            return state.auth.state == .offline ? "Waiting for an internet connection" : "Checking what's already online…"
         case .coreProblem(.portInUse): return "Another copy of rMirror is running"
         case .coreProblem: return "rMirror needs attention"
         case .signIn(.expired): return "Sign in again to keep syncing"

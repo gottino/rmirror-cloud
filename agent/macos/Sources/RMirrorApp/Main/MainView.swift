@@ -121,6 +121,19 @@ struct MainView: View {
                 }
             }
         }
+        if store.selectionNoticeCount > 0 {
+            // After the remarkable-app notice when both apply. Main window only: no menu bar line,
+            // no attention dot, never opens the window.
+            let count = store.selectionNoticeCount
+            MainNotice(kind: .info, systemImage: "icloud",
+                       title: MainCopy.selectionNoticeTitle(count: count),
+                       lines: [MainCopy.selectionNoticeBody(count: count)]) {
+                Button(MainCopy.notNow) { store.dismissSelectionNotice() }
+                    .buttonStyle(.rmSecondary)
+                Button(MainCopy.tickThem(count: count)) { tickNotebooksOnServer() }
+                    .buttonStyle(.rmSecondary)
+            }
+        }
         if let problem = store.problem {
             MainNotice(kind: .problem, systemImage: "exclamationmark.triangle",
                        lines: [SharedCopy.problem(problem)],
@@ -145,6 +158,13 @@ struct MainView: View {
             saved = await store.syncSelection(notebookUUIDs: selection)
         }
         if saved { browser.markSaved() }
+    }
+
+    /// "Tick them": ticks every notebook already online in the list, exactly as if ticked by hand (the
+    /// footer then offers "Save and sync"), and makes sure the notice does not come back.
+    private func tickNotebooksOnServer() {
+        browser.tick(store.notebooksToTickFromNotice(draft: browser.draft))
+        store.dismissSelectionNotice()
     }
 
     /// "Try again" after a sync with failed pages: sync the saved choice again.

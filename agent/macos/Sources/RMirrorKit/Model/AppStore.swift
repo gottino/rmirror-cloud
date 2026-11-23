@@ -68,6 +68,10 @@ public final class AppStore: ObservableObject {
     @Published public private(set) var remarkableAppInstalled = true
     /// "Open the reMarkable app when rMirror starts". Off by default.
     @Published public private(set) var opensRemarkableAppAtStart = false
+    /// The user answered the "already online but not ticked" notice in this window. It stays hidden
+    /// until the core reports no such notebooks (the dismissal reached it), or until the next poll after
+    /// the dismissal failed (then it may come back).
+    @Published public private(set) var selectionNoticeHidden = false
 
     // MARK: Dependencies
 
@@ -113,6 +117,8 @@ public final class AppStore: ObservableObject {
     private var lastSuggestionFetch: Date?
     /// The "open the reMarkable app at start" decision was made in this run.
     private var decidedRemarkableAppAtStart = false
+    /// The last dismissal of the selection notice failed: show it again from the next poll on.
+    private var reshowSelectionNotice = false
 
     public static let fastPollInterval: TimeInterval = 2
     public static let slowPollInterval: TimeInterval = 15
@@ -233,6 +239,10 @@ public final class AppStore: ObservableObject {
             let previousState = state
             state = newState
             if newState.auth.signedIn { isWaitingForSignIn = false }
+            if selectionNoticeHidden, newState.catchUp.unselectedOnServer == 0 || reshowSelectionNotice {
+                selectionNoticeHidden = false
+            }
+            reshowSelectionNotice = false
             // No sync running or finished in this core: a guided first sync is over.
             if newState.sync.state == .idle { guidedSyncActive = false }
             recomputeStage()
@@ -474,6 +484,40 @@ public final class AppStore: ObservableObject {
         opensRemarkableAppAtStart = on
         if let preferences = dependencies.preferences {
             RemarkableAppPreferences(opensAtStart: on).save(to: preferences)
+        }
+    }
+
+    // MARK: Notebooks already online (after a catch-up)
+
+    /// How many notebooks the server already has that are not ticked on this Mac, for the notice in the
+    /// main window. 0 when there is nothing to say, outside normal use, or once the user answered it.
+    /// Shown in the main window only: never in the menu bar, never a reason to open the window.
+    public var selectionNoticeCount: Int {
+        guard stage == .ready, !selectionNoticeHidden else { return 0 }
+        return state?.catchUp.unselectedOnServer ?? 0
+    }
+
+    /// "Tick them": the notebooks to tick in `draft`, the main window's unsaved selection: every notebook
+    /// the server has pages of that is not ticked there. Nothing uploads until the user saves.
+    /// The caller then calls `dismissSelectionNotice()`.
+    public func notebooksToTickFromNotice(draft: Set<String>) -> [String] {
+        NotebookList.onServerNotTicked(notebooks, draft: draft)
+    }
+
+    /// "Not now", and after "Tick them": hides the notice at once and tells the core not to raise it
+    /// again. A failure is not shown; the notice may come back with the next poll.
+    @discardableResult
+    public func dismissSelectionNotice() -> Task<Void, Never> {
+        selectionNoticeHidden = true
+        reshowSelectionNotice = false
+        let api = self.api
+        return Task { [weak self] in
+            guard let api else { self?.reshowSelectionNotice = true; return }
+            do {
+                try await api.dismissCatchUp()
+            } catch {
+                self?.reshowSelectionNotice = true
+            }
         }
     }
 

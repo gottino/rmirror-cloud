@@ -130,6 +130,14 @@ final class MainBrowserModel: ObservableObject {
         setDraft(NotebookList.selectingNone(visibleNotebookIDs, in: draft))
     }
 
+    /// Ticks these notebooks in the draft, as if the user had ticked each one ("Tick them" in the notice
+    /// after a catch-up). Nothing is saved or uploaded until "Save and sync".
+    func tick(_ uuids: [String]) {
+        guard !uuids.isEmpty else { return }
+        keepRowsOnScreen()
+        setDraft(NotebookList.selectingAll(uuids, in: draft))
+    }
+
     func cancel() { setDraft(saved) }
     /// Screenshot renderer only: start with a pending change so the footer shows.
     func replaceDraft(_ next: Set<String>) { setDraft(NotebookList.reconciling(draft: next, with: notebooks)) }

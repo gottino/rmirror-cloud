@@ -5,6 +5,8 @@ public protocol LocalAPI: Sendable {
     func state() async throws -> AppState
     func notebooks() async throws -> NotebooksResponse
     func setSelection(syncAll: Bool, selectedNotebooks: [String]) async throws
+    /// `POST /api/v2/catch-up/dismiss`: clears the "already online but not ticked" notice for good.
+    func dismissCatchUp() async throws
     func firstRunSuggestion(max: Int) async throws -> FirstRunSuggestion
     /// With `notebookUUIDs` the core saves them as the selection and starts; without, it syncs the current selection.
     /// `pageLimit` is always sent; nil means no limit.
@@ -79,6 +81,10 @@ public final class LocalAPIClient: LocalAPI, @unchecked Sendable {
         let _: OKResponse = try await send("PUT", "/api/v2/selection",
                                            body: SelectionRequest(syncAll: syncAll, selectedNotebooks: selectedNotebooks),
                                            timeout: 15)
+    }
+
+    public func dismissCatchUp() async throws {
+        let _: OKResponse = try await send("POST", "/api/v2/catch-up/dismiss", body: Optional<EmptyBody>.none, timeout: 15)
     }
 
     public func firstRunSuggestion(max: Int) async throws -> FirstRunSuggestion {

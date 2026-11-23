@@ -258,6 +258,23 @@ public enum LocalAPIErrorCode: CodedString {
     }
 }
 
+/// Whether the core has asked the current server what it already has (`catch_up.state`).
+/// A value this app does not know reads as `notNeeded`, so it never holds the app on the starting screen.
+public enum CatchUpState: String, Codable, Hashable, Sendable {
+    /// The core is asking the server (or retrying); the app shows its starting screen.
+    case pending
+    case done
+    /// The server is too old to answer; the selection uploads and the server skips what it has.
+    case unavailable
+    /// Set up by an earlier version; nothing to ask.
+    case notNeeded = "not_needed"
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = CatchUpState(rawValue: raw) ?? .notNeeded
+    }
+}
+
 /// Action for a notebook that was deleted on the server.
 public enum DeletedNotebookAction: String, Codable, Hashable, Sendable {
     case resync
