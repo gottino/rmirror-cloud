@@ -179,6 +179,8 @@ function DashboardContent() {
   const getToken = useApiToken();
   const router = useRouter();
   const searchParams = useSearchParams();
+  // "Set up the Mac app" in the sidebar opens the wizard even when notebooks exist
+  const setupRequested = searchParams.get('setup') === '1';
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -885,7 +887,7 @@ function DashboardContent() {
         </header>
         <main className="flex-1 overflow-y-auto px-6 lg:px-8 py-8">
           {/* Onboarding Checklist (only after first sync, trimmed to post-sync steps) */}
-          {onboarding && !onboarding.onboarding_dismissed && !isSearchMode && notebooks.length > 0 && (
+          {onboarding && !onboarding.onboarding_dismissed && !isSearchMode && !setupRequested && notebooks.length > 0 && (
             <div className="mb-6">
               <OnboardingChecklist
                 steps={getDefaultOnboardingSteps({
@@ -912,10 +914,13 @@ function DashboardContent() {
               onLoadMore={loadMoreSearchResults}
               loadingMore={searchLoadingMore}
             />
-          ) : notebooks.length === 0 ? (
+          ) : notebooks.length === 0 || setupRequested ? (
             <SetupWizard
+              // Remount once onboarding progress loads so a refresh resumes at the right step
+              key={onboarding ? 'progress-loaded' : 'progress-pending'}
               getToken={getToken}
               onComplete={() => {
+                if (setupRequested) router.replace('/dashboard', { scroll: false });
                 reloadNotebooks();
               }}
               onboardingProgress={onboarding ? {
