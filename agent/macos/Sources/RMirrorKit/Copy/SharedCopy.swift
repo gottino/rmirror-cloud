@@ -136,7 +136,8 @@ public enum SharedCopy {
 
     /// "5 minutes ago", "yesterday"
     public static func relative(_ date: Date, now: Date = Date(), locale: Locale = .current) -> String {
-        if abs(now.timeIntervalSince(date)) < 60 { return "just now" }
+        // Also covers a clock that is slightly ahead on the other side: never say "in 5 minutes".
+        if now.timeIntervalSince(date) < 60 { return "just now" }
         let formatter = RelativeDateTimeFormatter()
         formatter.locale = locale
         formatter.unitsStyle = .full
