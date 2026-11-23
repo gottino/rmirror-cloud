@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { Search, X, Grid3x3, List, ChevronRight, BookOpen, Puzzle, Menu, Home as HomeIcon, Folder, Loader2, MessageSquare, Mail, Shield, BarChart3, Trash2 } from 'lucide-react';
 import UserMenu from '@/components/UserMenu';
 import SetupWizard from './components/SetupWizard';
-import { getNotebooksTree, trackAgentDownload, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, getLatestAgentVersion, type NotebookTree as NotebookTreeData, NotebookTreeNode, type AgentVersionInfo, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
+import { getNotebooksTree, searchNotebooks, getOnboardingProgress, dismissOnboarding, getLegalStatus, acceptTerms, type NotebookTree as NotebookTreeData, NotebookTreeNode, type SearchResponse, type OnboardingProgress, type LegalStatus } from '@/lib/api';
 import { useApiQuery } from '@/lib/useApiQuery';
 import { useAgentStatus } from '@/lib/useAgentStatus';
 import { useQuota } from '@/lib/quota-context';
@@ -21,7 +21,6 @@ import { TermsAcceptanceModal } from '@/components/TermsAcceptanceModal';
 import { DeleteNotebookModal } from '@/components/DeleteNotebookModal';
 import { AgentStatusPanel } from '@/components/AgentStatusPanel';
 import { trackEvent } from '@/lib/analytics';
-import { resolveAgentDownloadUrl, DOWNLOAD_UNAVAILABLE_MESSAGE } from '@/lib/agentDownload';
 import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
 import { Skeleton } from '@/components/Skeleton';
 import { memo } from 'react';
@@ -230,30 +229,6 @@ function DashboardContent() {
   const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
   const isAdmin = isDevelopmentMode || (userId && ADMIN_USER_IDS.includes(userId));
 
-  const [downloadError, setDownloadError] = useState<string | null>(null);
-  const handleDownloadClick = async () => {
-    setDownloadError(null);
-    // Open the window before any await so pop-up blockers allow it
-    const knownUrl = agentVersionInfo?.platforms.macos?.url;
-    if (knownUrl) {
-      window.open(knownUrl, '_blank');
-    } else {
-      const url = await resolveAgentDownloadUrl(agentVersionInfo);
-      if (!url) {
-        setDownloadError(DOWNLOAD_UNAVAILABLE_MESSAGE);
-        return;
-      }
-      window.open(url, '_blank');
-    }
-    trackEvent({ name: 'agent_downloaded' });
-    if (effectiveIsSignedIn) {
-      const token = await getToken();
-      if (token) {
-        await trackAgentDownload(token);
-      }
-    }
-  };
-
   // Read-only data for the page. Each request gets a fresh token; a failed
   // token lookup counts as an error (shown only for the notebook tree).
   const authed = useCallback(async () => {
@@ -283,9 +258,6 @@ function DashboardContent() {
   const { data: legalStatus, setData: setLegalStatus } = useApiQuery<LegalStatus>(
     signedInKey('legal-status'),
     async (signal) => getLegalStatus(await authed(), signal)
-  );
-  const { data: agentVersionInfo } = useApiQuery<AgentVersionInfo>('agent-version', (signal) =>
-    getLatestAgentVersion(signal)
   );
 
   const openDeleteModal = (notebook: NotebookTreeNode) => {
@@ -879,13 +851,7 @@ function DashboardContent() {
                   hasNotion: onboarding.has_notion,
                 })}
                 onDismiss={handleDismissOnboarding}
-                onDownloadAgent={handleDownloadClick}
               />
-              {downloadError && (
-                <p role="alert" className="mt-2 text-sm" style={{ color: 'var(--warning-text)' }}>
-                  {downloadError}
-                </p>
-              )}
             </div>
           )}
 

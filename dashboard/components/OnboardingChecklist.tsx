@@ -22,7 +22,7 @@ interface OnboardingStep {
 interface OnboardingChecklistProps {
   steps: OnboardingStep[];
   onDismiss: () => void;
-  onDownloadAgent: () => void;
+  onDownloadAgent?: () => void;
 }
 
 function StepIcon({ completed, active }: { completed: boolean; active: boolean }) {
@@ -57,7 +57,7 @@ function StepIcon({ completed, active }: { completed: boolean; active: boolean }
 
 function StepAction({ action, onDownloadAgent }: {
   action: OnboardingStep['action'];
-  onDownloadAgent: () => void;
+  onDownloadAgent?: () => void;
 }) {
   if (!action) return null;
 
@@ -94,7 +94,7 @@ function StepAction({ action, onDownloadAgent }: {
   const isDownload = action.label.toLowerCase().includes('download');
   return (
     <button
-      onClick={action.onClick || onDownloadAgent}
+      onClick={action.onClick ?? onDownloadAgent}
       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg transition-all duration-200 cursor-pointer"
       style={{
         backgroundColor: isDownload ? 'var(--terracotta)' : 'transparent',
