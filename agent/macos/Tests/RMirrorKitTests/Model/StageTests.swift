@@ -95,6 +95,38 @@ final class AppStoreTests: XCTestCase {
         XCTAssertNil(store.problem)
     }
 
+    func testBackgroundUploadReloadsTheNotebookList() async {
+        // A page added on the tablet uploads by itself; the list must pick up the new page count.
+        let api = MockLocalAPI(state: Fixtures.readyState)
+        let store = makeStore(api)
+        store.coreStatusChanged(.running(connection))
+        await store.refresh()
+        let before = api.calls.filter { $0 == .notebooks }.count
+
+        await store.refresh()
+        XCTAssertEqual(api.calls.filter { $0 == .notebooks }.count, before, "nothing changed: no reload")
+
+        var uploaded = Fixtures.readyState
+        uploaded.lastUploadAt = (uploaded.lastUploadAt ?? Fixtures.now).addingTimeInterval(60)
+        var changed = Fixtures.readyNotebooks
+        changed.notebooks[0].pageCount += 1
+        api.stateResult = .success(uploaded)
+        api.notebooksResult = .success(changed)
+        await store.refresh()
+        XCTAssertEqual(api.calls.filter { $0 == .notebooks }.count, before + 1)
+        XCTAssertEqual(store.notebooks.first?.pageCount, changed.notebooks[0].pageCount)
+    }
+
+    func testEmptiedUploadQueueCountsAsAChange() {
+        var busy = Fixtures.readyState
+        busy.queue.pending = 2
+        var idle = Fixtures.readyState
+        idle.queue.pending = 0
+        XCTAssertTrue(AppStore.libraryMayHaveChanged(from: busy, to: idle))
+        XCTAssertFalse(AppStore.libraryMayHaveChanged(from: idle, to: idle))
+        XCTAssertFalse(AppStore.libraryMayHaveChanged(from: nil, to: idle))
+    }
+
     func testFailedActionIsReported() async {
         let api = MockLocalAPI(state: Fixtures.readyState)
         let store = makeStore(api)

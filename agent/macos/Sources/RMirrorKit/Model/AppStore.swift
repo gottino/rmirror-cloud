@@ -169,6 +169,8 @@ public final class AppStore: ObservableObject {
         // A sign-in abandoned with every window closed must not keep the fast polling going.
         if !visible { isWaitingForSignIn = false }
         if api != nil { startPolling() }
+        // The list may have gone stale while no window was open.
+        if visible, stage == .ready { Task { await self.reloadNotebooks() } }
     }
 
     public func restartCore() { dependencies.restartCore() }
@@ -201,6 +203,7 @@ public final class AppStore: ObservableObject {
             guard number > lastAppliedRefresh, number >= discardRefreshesBefore else { return }
             lastAppliedRefresh = number
             let previousStage = stage
+            let previousState = state
             state = newState
             if newState.auth.signedIn { isWaitingForSignIn = false }
             // No sync running or finished in this core: a guided first sync is over.
@@ -208,6 +211,10 @@ public final class AppStore: ObservableObject {
             recomputeStage()
             if stage != previousStage {
                 await loadForStage()
+            } else if stage == .ready, Self.libraryMayHaveChanged(from: previousState, to: newState) {
+                // Pages uploaded in the background (a page added on the tablet): page counts and
+                // "synced" figures in the list are now out of date.
+                await reloadNotebooks()
             } else if stage == .firstSync, suggestion?.reason != .ok, suggestionDue {
                 // Still waiting for notebooks or for the allowance to be known: look again now and then.
                 await loadSuggestion()
@@ -216,6 +223,14 @@ public final class AppStore: ObservableObject {
         } catch {
             // A missed poll is not worth showing; the supervisor reports a dead core.
         }
+    }
+
+    /// True when background syncing did something since the last poll: a newer upload time, or the
+    /// upload queue just emptied.
+    static func libraryMayHaveChanged(from old: AppState?, to new: AppState) -> Bool {
+        guard let old else { return false }
+        if old.lastUploadAt != new.lastUploadAt { return true }
+        return old.queue.pending > 0 && new.queue.pending == 0
     }
 
     private var suggestionDue: Bool {
