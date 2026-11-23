@@ -7,6 +7,7 @@ import { HomeIcon, Puzzle, X, MessageSquare, Mail, Shield } from 'lucide-react';
 import { useAuth } from '@clerk/nextjs';
 import { isDevAuthMode } from '@/lib/useApiToken';
 import { useAgentStatus } from '@/lib/useAgentStatus';
+import { AgentStatusPanel } from './AgentStatusPanel';
 
 interface SidebarProps {
   open?: boolean;
@@ -172,25 +173,8 @@ export default function Sidebar({ open = true, onClose }: SidebarProps) {
           )}
         </div>
 
-        {/* Agent Status */}
-        {agentStatus && (
-          <div className="p-4 border-t space-y-3" style={{ borderColor: 'var(--border)' }}>
-            <div className="flex items-center space-x-2">
-              <div
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: agentStatus.has_agent_connected ? 'var(--sage-green)' : 'var(--warm-gray)' }}
-              />
-              <span style={{ fontSize: '0.875em', color: 'var(--foreground)', fontWeight: 500 }}>
-                {agentStatus.has_agent_connected ? 'Agent Connected' : 'No Agent'}
-              </span>
-            </div>
-            {agentStatus.has_agent_connected && (
-              <div style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
-                Last sync: a few moments ago
-              </div>
-            )}
-          </div>
-        )}
+        {/* Mac app status */}
+        {agentStatus && <AgentStatusPanel status={agentStatus} />}
       </div>
     </aside>
   );

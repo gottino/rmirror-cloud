@@ -19,6 +19,7 @@ import { SearchResults } from '@/components/SearchResults';
 import { OnboardingChecklist, getDefaultOnboardingSteps } from '@/components/OnboardingChecklist';
 import { TermsAcceptanceModal } from '@/components/TermsAcceptanceModal';
 import { DeleteNotebookModal } from '@/components/DeleteNotebookModal';
+import { AgentStatusPanel } from '@/components/AgentStatusPanel';
 import { trackEvent } from '@/lib/analytics';
 import { resolveAgentDownloadUrl, DOWNLOAD_UNAVAILABLE_MESSAGE } from '@/lib/agentDownload';
 import { isDevAuthMode, useApiToken } from '@/lib/useApiToken';
@@ -272,7 +273,7 @@ function DashboardContent() {
     : null;
   const reloadNotebooks = notebooksQuery.reload;
 
-  const agentStatus = useAgentStatus({ enabled: !!effectiveIsSignedIn });
+  const agentStatus = useAgentStatus({ enabled: !!effectiveIsSignedIn, pollMs: 60000 });
   // Quota comes from QuotaProvider, which already fetches and polls it
   const { quota } = useQuota();
   const { data: onboarding, setData: setOnboarding } = useApiQuery<OnboardingProgress>(
@@ -694,25 +695,8 @@ function DashboardContent() {
           )}
         </div>
 
-        {/* Agent Status */}
-        {agentStatus && (
-          <div className="p-4 border-t space-y-3" style={{ borderColor: 'var(--border)' }}>
-            <div className="flex items-center space-x-2">
-              <div
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: agentStatus.has_agent_connected ? 'var(--sage-green)' : 'var(--warm-gray)' }}
-              />
-              <span style={{ fontSize: '0.875em', color: 'var(--foreground)', fontWeight: 500 }}>
-                {agentStatus.has_agent_connected ? 'Agent Connected' : 'No Agent'}
-              </span>
-            </div>
-            {agentStatus.has_agent_connected && (
-              <div style={{ fontSize: '0.75em', color: 'var(--warm-gray)' }}>
-                Last sync: a few moments ago
-              </div>
-            )}
-          </div>
-        )}
+        {/* Mac app status */}
+        {agentStatus && <AgentStatusPanel status={agentStatus} />}
       </div>
       </aside>
     </>

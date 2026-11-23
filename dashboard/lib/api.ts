@@ -198,6 +198,8 @@ export async function trackAgentDownload(token: string): Promise<void> {
 export interface AgentStatus {
   has_agent_connected: boolean;
   first_connected_at: string | null;
+  /** Newest notebook upload/sync time (UTC); null when nothing was uploaded yet. */
+  last_activity_at?: string | null;
   onboarding_state: string;
 }
 
