@@ -609,8 +609,8 @@ class TestSyncStart:
         assert config.sync.max_pages_per_notebook == 2
         save_mock.assert_called()
         progress = _wait_progress(client, "running")
-        # All pages of the two notebooks (3 + 5); the limit shows as left_out_by_page_limit
-        assert progress["counts"]["pages_total"] == 8
+        # Pages this run will try: newest 2 of each notebook (limit 2)
+        assert progress["counts"]["pages_total"] == 4
         (job,) = fake_initial_sync.instances
         deadline = time.monotonic() + 5
         while job.selected == "unset" and time.monotonic() < deadline:
@@ -690,6 +690,35 @@ class TestSyncStart:
 
     def test_resume_without_watcher(self, client):
         assert post(client, "/api/v2/sync/resume").get_json() == {"ok": True}
+
+
+class TestPagesTotal:
+    def test_already_uploaded_pages_are_not_counted(self, client, config, library, fake_initial_sync):
+        manifest = UploadManifest.for_config(config)
+        for page in (library / "diary").glob("*.rm"):
+            manifest.record_upload(page, fingerprint_file(page))
+        assert post(client, "/api/v2/sync/start", {"notebook_uuids": ["diary", "meeting"]}).status_code == 202
+        # diary's 5 pages are already uploaded: only meeting's 3 remain
+        assert _wait_progress(client, "running")["counts"]["pages_total"] == 3
+        fake_initial_sync.instances[0].release.set()
+
+    def test_changed_page_counts_again(self, client, config, library, fake_initial_sync):
+        manifest = UploadManifest.for_config(config)
+        pages = sorted((library / "diary").glob("*.rm"))
+        for page in pages:
+            manifest.record_upload(page, fingerprint_file(page))
+        pages[0].write_bytes(b"edited since the upload")
+        assert post(client, "/api/v2/sync/start", {"notebook_uuids": ["diary"]}).status_code == 202
+        assert _wait_progress(client, "running")["counts"]["pages_total"] == 1
+        fake_initial_sync.instances[0].release.set()
+
+    def test_other_host_uploads_do_not_count(self, client, config, library, fake_initial_sync):
+        other = UploadManifest(UploadManifest.for_config(config).db_path, "rmirror.io")
+        for page in (library / "diary").glob("*.rm"):
+            other.record_upload(page, fingerprint_file(page))
+        assert post(client, "/api/v2/sync/start", {"notebook_uuids": ["diary"]}).status_code == 202
+        assert _wait_progress(client, "running")["counts"]["pages_total"] == 5
+        fake_initial_sync.instances[0].release.set()
 
 
 class TestProgressMapping:

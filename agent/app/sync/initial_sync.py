@@ -31,7 +31,144 @@ from app.sync.metadata_sync import MetadataSync
 logger = logging.getLogger(__name__)
 
 
-class InitialSync:
+class PagePlanner:
+    """Which notebooks and pages an initial sync goes through.
+
+    Shared by InitialSync and the local API's progress total, so both count the
+    same pages.
+    """
+
+    def __init__(self, config: Config, manifest: UploadManifest):
+        self.config = config
+        self.manifest = manifest
+        self.remarkable_folder = Path(config.remarkable.source_directory)
+
+    def _notebooks(self, selected_notebook_uuids: Optional[list[str]]) -> list:
+        """The notebooks a run goes through: the selection (None = all), minus
+        notebooks deleted on the server, which are never re-uploaded here."""
+        notebooks = MetadataScanner(self.remarkable_folder).scan()
+        if selected_notebook_uuids is not None:
+            notebooks = [nb for nb in notebooks if nb.uuid in selected_notebook_uuids]
+        excluded = set(self.config.sync.excluded_notebooks)
+        return [nb for nb in notebooks if nb.uuid not in excluded]
+
+    def count_pages_to_upload(self, selected_notebook_uuids: Optional[list[str]] = None) -> int:
+        """Pages a run would try to upload right now (same rule as the run itself).
+
+        Blocking (reads the folder and the manifest). Used for the progress total:
+        once the run has finished, uploaded + failed + rate_limited equals it
+        (unless the run stopped for quota).
+        """
+        return sum(len(self._plan_pages(nb.uuid)[0]) for nb in self._notebooks(selected_notebook_uuids))
+
+    def _already_uploaded(self, page_file: Path) -> bool:
+        """True if the manifest records this exact version as uploaded (for the current host)."""
+        try:
+            entry = self.manifest.get(page_file)
+            if entry is None or entry.is_baseline:
+                return False
+            return self.manifest.changed_fingerprint(page_file) is None
+        except Exception as e:  # unreadable file or manifest: try the upload
+            logger.debug(f"Could not check {page_file.name} against the manifest: {e}")
+            return False
+
+    def _plan_pages(self, notebook_uuid: str) -> tuple[list[Path], int]:
+        """The notebook's page files to upload, newest first, and how many pages the
+        page limit leaves out.
+
+        The limit picks the newest N pages; pages already uploaded in this exact
+        version (manifest, current host) are then dropped from both parts, so a
+        notebook synced before only uploads what is new or changed.
+        """
+        to_upload, left_out = self._limit_pages(notebook_uuid)
+        return (
+            [p for p in to_upload if not self._already_uploaded(p)],
+            sum(1 for p in left_out if not self._already_uploaded(p)),
+        )
+
+    def _limit_pages(self, notebook_uuid: str) -> tuple[list[Path], list[Path]]:
+        """All page files newest first, split by the page limit: (within, beyond)."""
+        notebook_dir = self.remarkable_folder / notebook_uuid
+
+        # Check if notebook directory exists
+        if not notebook_dir.exists() or not notebook_dir.is_dir():
+            logger.warning(f"Notebook directory not found: {notebook_dir}")
+            return [], []
+
+        # 1. Get all page files
+        all_page_files = list(notebook_dir.glob("*.rm"))
+
+        if not all_page_files:
+            logger.info(f"No pages found in notebook {notebook_uuid}")
+            return [], []
+
+        # 2. Read .content file to get authoritative page order
+        # In reMarkable's .content file, pages array is ordered oldest to newest
+        content_file = self.remarkable_folder / f"{notebook_uuid}.content"
+        page_order = []  # List of page UUIDs in order (oldest to newest)
+
+        if content_file.exists():
+            try:
+                with open(content_file) as f:
+                    content_data = json.load(f)
+
+                # Get pages array (try both locations for different reMarkable versions)
+                pages_array = content_data.get("pages", [])
+                if not pages_array and "cPages" in content_data:
+                    pages_array = content_data.get("cPages", {}).get("pages", [])
+
+                # Extract page UUIDs - pages can be plain strings or dicts with 'id' field
+                # Skip deleted pages (they have 'deleted': {'value': 1} or similar)
+                for page_entry in pages_array:
+                    if isinstance(page_entry, str):
+                        page_order.append(page_entry)
+                    elif isinstance(page_entry, dict) and "id" in page_entry:
+                        # Check if page is deleted
+                        deleted = page_entry.get("deleted", {})
+                        if isinstance(deleted, dict) and deleted.get("value"):
+                            continue  # Skip deleted pages
+                        page_order.append(page_entry["id"])
+
+                logger.debug(f"Found {len(page_order)} pages in .content file for {notebook_uuid}")
+
+            except Exception as e:
+                logger.warning(f"Failed to read .content file for {notebook_uuid}: {e}")
+
+        # 3. Create UUID to file mapping
+        page_file_map = {pf.stem: pf for pf in all_page_files}
+
+        # 4. Sort page files: newest first (reverse of .content order)
+        # This ensures newest pages are uploaded first and get OCR priority
+        if page_order:
+            # Build ordered list from .content (reversed = newest first)
+            ordered_page_files = []
+            for uuid in reversed(page_order):
+                if uuid in page_file_map:
+                    ordered_page_files.append(page_file_map[uuid])
+
+            # Add any orphaned pages (in .rm folder but not in .content) at the end
+            orphaned_uuids = set(page_file_map.keys()) - set(page_order)
+            if orphaned_uuids:
+                logger.warning(f"Found {len(orphaned_uuids)} orphaned pages not in .content file")
+                for uuid in orphaned_uuids:
+                    ordered_page_files.append(page_file_map[uuid])
+        else:
+            # No .content file or empty - fall back to file modification time (newest first)
+            logger.warning("No page order from .content, falling back to file mtime")
+            ordered_page_files = sorted(
+                all_page_files,
+                key=lambda p: p.stat().st_mtime,
+                reverse=True  # Newest first
+            )
+
+        max_pages = self.config.sync.max_pages_per_notebook
+        if max_pages is not None and max_pages > 0 and len(ordered_page_files) > max_pages:
+            return ordered_page_files[:max_pages], ordered_page_files[max_pages:]
+        return ordered_page_files, []
+
+
+
+class InitialSync(PagePlanner):
     """
     Handles initial synchronization of all notebooks to the cloud.
 
@@ -134,15 +271,7 @@ class InitialSync:
         # ================================================================
         print("\n  📤 Phase 2: Uploading page content...")
 
-        # Scan for notebooks
-        scanner = MetadataScanner(self.remarkable_folder)
-        notebooks = scanner.scan()
-
-        # Filter by selection; notebooks deleted on the server are never re-uploaded here
-        if selected_notebook_uuids is not None:
-            notebooks = [nb for nb in notebooks if nb.uuid in selected_notebook_uuids]
-        excluded = set(self.config.sync.excluded_notebooks)
-        notebooks = [nb for nb in notebooks if nb.uuid not in excluded]
+        notebooks = self._notebooks(selected_notebook_uuids)
 
         if not notebooks:
             print("  ⚠️  No notebooks to sync")
@@ -268,7 +397,7 @@ class InitialSync:
             max_pages = self.config.sync.max_pages_per_notebook
             stats["skipped"] = skipped_count
             self._count("skipped", skipped_count)
-            print(f"   ⚡ Limiting to {max_pages} most recent pages (skipping {skipped_count} older pages)")
+            print(f"   ⚡ Limiting to {max_pages} most recent pages (leaving out {skipped_count} older pages)")
             logger.info(f"Limited notebook {notebook_uuid} to {max_pages} newest pages")
 
         # 6. Upload pages in order (newest first) with rate limit handling
@@ -319,87 +448,6 @@ class InitialSync:
             print(f"   ✓ Uploaded {stats['uploaded']} page(s)")
 
         return stats
-
-    def _plan_pages(self, notebook_uuid: str) -> tuple[list[Path], int]:
-        """The notebook's page files to upload, newest first and within the page
-        limit, and how many older pages the limit leaves out."""
-        notebook_dir = self.remarkable_folder / notebook_uuid
-
-        # Check if notebook directory exists
-        if not notebook_dir.exists() or not notebook_dir.is_dir():
-            logger.warning(f"Notebook directory not found: {notebook_dir}")
-            return [], 0
-
-        # 1. Get all page files
-        all_page_files = list(notebook_dir.glob("*.rm"))
-
-        if not all_page_files:
-            logger.info(f"No pages found in notebook {notebook_uuid}")
-            return [], 0
-
-        # 2. Read .content file to get authoritative page order
-        # In reMarkable's .content file, pages array is ordered oldest to newest
-        content_file = self.remarkable_folder / f"{notebook_uuid}.content"
-        page_order = []  # List of page UUIDs in order (oldest to newest)
-
-        if content_file.exists():
-            try:
-                with open(content_file) as f:
-                    content_data = json.load(f)
-
-                # Get pages array (try both locations for different reMarkable versions)
-                pages_array = content_data.get("pages", [])
-                if not pages_array and "cPages" in content_data:
-                    pages_array = content_data.get("cPages", {}).get("pages", [])
-
-                # Extract page UUIDs - pages can be plain strings or dicts with 'id' field
-                # Skip deleted pages (they have 'deleted': {'value': 1} or similar)
-                for page_entry in pages_array:
-                    if isinstance(page_entry, str):
-                        page_order.append(page_entry)
-                    elif isinstance(page_entry, dict) and "id" in page_entry:
-                        # Check if page is deleted
-                        deleted = page_entry.get("deleted", {})
-                        if isinstance(deleted, dict) and deleted.get("value"):
-                            continue  # Skip deleted pages
-                        page_order.append(page_entry["id"])
-
-                logger.debug(f"Found {len(page_order)} pages in .content file for {notebook_uuid}")
-
-            except Exception as e:
-                logger.warning(f"Failed to read .content file for {notebook_uuid}: {e}")
-
-        # 3. Create UUID to file mapping
-        page_file_map = {pf.stem: pf for pf in all_page_files}
-
-        # 4. Sort page files: newest first (reverse of .content order)
-        # This ensures newest pages are uploaded first and get OCR priority
-        if page_order:
-            # Build ordered list from .content (reversed = newest first)
-            ordered_page_files = []
-            for uuid in reversed(page_order):
-                if uuid in page_file_map:
-                    ordered_page_files.append(page_file_map[uuid])
-
-            # Add any orphaned pages (in .rm folder but not in .content) at the end
-            orphaned_uuids = set(page_file_map.keys()) - set(page_order)
-            if orphaned_uuids:
-                logger.warning(f"Found {len(orphaned_uuids)} orphaned pages not in .content file")
-                for uuid in orphaned_uuids:
-                    ordered_page_files.append(page_file_map[uuid])
-        else:
-            # No .content file or empty - fall back to file modification time (newest first)
-            logger.warning("No page order from .content, falling back to file mtime")
-            ordered_page_files = sorted(
-                all_page_files,
-                key=lambda p: p.stat().st_mtime,
-                reverse=True  # Newest first
-            )
-
-        max_pages = self.config.sync.max_pages_per_notebook
-        if max_pages is not None and max_pages > 0 and len(ordered_page_files) > max_pages:
-            return ordered_page_files[:max_pages], len(ordered_page_files) - max_pages
-        return ordered_page_files, 0
 
     def _defer(self, page_files: list[Path]) -> int:
         """Leave pages for the next rescan (not uploaded, not baselined); count them as will-retry."""

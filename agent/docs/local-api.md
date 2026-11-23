@@ -4,8 +4,8 @@ Status: agreed contract for rMirror for Mac 2.0. The Swift app is built against 
 implements it. Change the document first, then both sides.
 
 The legacy routes (`/api/status`, `/api/notebooks/tree`, …) and the Flask-rendered page stay as they are for the
-legacy menu-bar mode. The native app uses **only** `/api/v2/*`, `/health`, `/auth/bridge`, `/auth/callback` and
-`/auth/done`. In headless mode the core registers nothing else: no `/`, no legacy `/api/*`, no `/updates`, no static
+legacy menu-bar mode. The native app uses **only** `/api/v2/*` and `/health` itself; the browser it opens uses
+`/auth/bridge` (only through the URL returned by `POST /api/v2/auth/begin`), `/auth/callback` and `/auth/done`. In headless mode the core registers nothing else: no `/`, no legacy `/api/*`, no `/updates`, no static
 files (they take no app token and could re-point the core at another server). Those paths answer 404.
 
 ## Process contract
@@ -172,8 +172,12 @@ Body `{"notebook_uuids": ["…"], "page_limit": null}`. Both optional.
 - `will_retry`: pages deferred because the cloud asked to slow down. `pages_total` may be `null` if unknown.
 - Every key of `counts` is always present (zeros while idle; `pages_total` `null` while idle or when the sync
   was not started through `/api/v2/sync/start`).
-- `pages_total` is every page of the notebooks in the sync (not capped by the page limit). When the sync has
-  finished, `uploaded + failed + left_out_by_page_limit + will_retry == pages_total` (except for `stopped_quota`).
+- `pages_total` is the number of pages this run will try to upload: for each notebook in the sync, its newest
+  pages within the page limit, minus pages already uploaded in their current version for the current host (upload
+  manifest). The sync uses the same rule, so it never re-uploads those pages either. When the sync has finished,
+  `uploaded + failed + will_retry == pages_total` (except for `stopped_quota`).
+- `left_out_by_page_limit` is reported next to that total, not inside it: the older pages beyond the page limit
+  that are not uploaded yet. (A whole notebook failing to sync counts as 1 in `failed`.)
 - `will_retry`: pages not uploaded because the cloud asked to slow down, and, after a `stopped_sign_in`, every page
   not reached. They are uploaded by the watcher's next rescan (after the next sign-in); they are never recorded as
   uploaded.
@@ -236,12 +240,15 @@ Fallback when Sparkle is not configured. Same data as legacy `/api/updates/check
 
 ## Sign-in in headless mode
 
-1. The app calls `POST /api/v2/auth/begin` and opens the returned URL in the default browser. In headless mode
+1. The app calls `POST /api/v2/auth/begin` and opens exactly the URL it returns
+   (`http://127.0.0.1:<port>/auth/bridge?ticket=…`) in the default browser. The app never builds a bridge URL
+   itself and never opens `/auth/bridge` without a ticket. In headless mode
    `/auth/bridge` only starts a sign-in for a valid ticket from that call; it uses the ticket up before it issues a
    state or contacts the cloud. Without a ticket (or with a wrong, used or expired one) it answers `403` with a
    plain "open rMirror and select Sign in again" page and issues no state. The legacy menu-bar mode is unchanged
    (no ticket).
-2. The dashboard returns to `/auth/callback?state=…&token=…`. Validation and keychain storage unchanged.
+2. The dashboard returns to `http://localhost:<port>/auth/callback?state=…&token=…` (this callback URL is built
+   by the core and is unchanged). Validation and keychain storage unchanged.
 3. On success in headless mode the callback stores the sign-in and answers `303` to `/auth/done` (so the browser
    leaves the URL that carries the token). `/auth/done` takes no input and renders a small page ("You're signed
    in. You can close this tab.") that also tries to open `rmirror://signed-in` so the app comes to the front. It

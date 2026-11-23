@@ -352,3 +352,30 @@ async def test_sign_out_during_sync_ends_it_as_stopped_sign_in(test_config_with_
     assert progress["outcome"] == "stopped_sign_in"
     assert progress["counts"]["uploaded"] == 1 and progress["counts"]["will_retry"] == 1
     await cloud_sync.close()
+
+
+class TestPagesTotalMatchesTheRun:
+    async def test_counts_add_up_and_uploaded_pages_are_skipped(self, setup, test_config):
+        sync, manifest, handler, folder = setup
+        _add_pages(folder, 4)  # 6 pages, newest first: extra-3..extra-0, page-uuid-2, page-uuid-1
+        # extra-3 (newest) was uploaded before in this version
+        newest = folder / NB / "extra-3.rm"
+        manifest.record_upload(newest, fingerprint_file(newest))
+        test_config.sync.max_pages_per_notebook = 4  # newest 4: extra-3..extra-0
+
+        total = sync.count_pages_to_upload()
+        assert total == 3  # extra-2, extra-1, extra-0
+
+        calls = []
+
+        async def upload(path, uuid, ftype):
+            calls.append(path.name)
+            if len(calls) == 3:
+                raise RateLimitError("slow down", retry_after=1)
+            return {"success": True}
+
+        sync.cloud_sync.upload_file.side_effect = upload
+        stats = await sync.run()
+        assert "extra-3.rm" not in calls  # not uploaded again
+        assert stats["pages"] + stats["failed"] + stats["rate_limited"] == total
+        assert stats["skipped"] == 2  # page-uuid-2 and page-uuid-1 left out by the limit

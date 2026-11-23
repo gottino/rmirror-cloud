@@ -274,22 +274,16 @@ def _scan_notebooks(source: str) -> list:
 
 
 def _pages_to_sync(config: Config, selected_uuids: list[str] | None) -> int | None:
-    """All pages (.rm files) of the notebooks the initial sync will go through.
+    """Pages this initial sync will try to upload (pages_total).
 
-    Same notebooks as the sync (selection, minus notebooks deleted on the server).
-    Not capped by the page limit: uploaded + failed + left_out_by_page_limit +
-    will_retry add up to this number once a sync has finished.
+    Same rule as the sync itself (PagePlanner, which InitialSync uses): the
+    notebooks in the sync, their newest pages within the page limit, minus pages
+    already uploaded in this version for the current host.
     """
-    from app.remarkable.metadata_scanner import MetadataScanner
+    from app.sync.initial_sync import PagePlanner
 
     try:
-        source = Path(config.remarkable.source_directory)
-        notebooks = MetadataScanner(source).scan()
-        if selected_uuids is not None:
-            wanted = set(selected_uuids)
-            notebooks = [nb for nb in notebooks if nb.uuid in wanted]
-        excluded = set(config.sync.excluded_notebooks)
-        return sum(count_page_files(source, nb.uuid) for nb in notebooks if nb.uuid not in excluded)
+        return PagePlanner(config, _manifest()).count_pages_to_upload(selected_uuids)
     except Exception as e:
         logger.warning(f"Could not count pages to sync: {type(e).__name__}")
         return None
