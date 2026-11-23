@@ -25,9 +25,29 @@ class TestAPIConfig:
         config = APIConfig()
 
         assert config.url == "https://rmirror.io/api/v1"
-        assert config.use_clerk_auth is True
-        assert config.email == ""
-        assert config.password == ""
+
+    def test_removed_password_keys_are_ignored(self, tmp_path, mock_keychain):
+        """Config files from before 2.0 may still carry the password sign-in keys."""
+        path = tmp_path / "old.yaml"
+        path.write_text(
+            "api:\n  url: https://rmirror.io/api/v1\n  email: a@example.com\n"
+            "  password: secret\n  use_clerk_auth: false\n"
+        )
+        config = Config.load(path)
+        assert config.api.url == "https://rmirror.io/api/v1"
+        assert not hasattr(config.api, "password")
+        config.save()
+        saved = path.read_text()
+        assert "password" not in saved and "email" not in saved and "use_clerk_auth" not in saved
+
+    def test_save_writes_back_to_the_loaded_file(self, tmp_path, mock_keychain, isolated_home):
+        path = tmp_path / "custom.yaml"
+        path.write_text("web:\n  port: 5599\n")
+        config = Config.load(path)
+        config.sync.max_pages_per_notebook = 7
+        config.save()
+        assert "max_pages_per_notebook: 7" in path.read_text()
+        assert not (isolated_home / ".config/rmirror/config.yaml").exists()
 
     def test_token_property_returns_keychain_token(self, mock_keychain):
         """Test token property retrieves from keychain namespaced by API domain."""
@@ -140,8 +160,8 @@ class TestConfigLoadSave:
         config = Config.from_yaml(temp_config_file)
 
         assert config.api.url == "http://localhost:8000/api/v1"
-        assert config.api.email == "test@example.com"
-        assert config.api.use_clerk_auth is False
+        # Old password sign-in keys in the file are ignored
+        assert not hasattr(config.api, "email")
         assert config.remarkable.watch_enabled is False
         assert config.web.enabled is False
         assert config.sync.auto_sync is False
@@ -156,7 +176,6 @@ class TestConfigLoadSave:
         config = Config(
             api=APIConfig(
                 url="http://test.example.com/api/v1",
-                use_clerk_auth=False,
             ),
             sync=SyncConfig(auto_sync=False),
         )
@@ -263,7 +282,6 @@ class TestConfigValidation:
         config = Config(**data)
 
         assert config.api.url == "http://custom.api/v1"
-        assert config.api.email == "custom@example.com"
         assert config.sync.batch_size == 20
         assert config.sync.max_pages_per_notebook == 50
 

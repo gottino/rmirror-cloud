@@ -6,8 +6,11 @@ Monitors reMarkable Desktop app folder and syncs files to rMirror Cloud.
 
 import asyncio
 import concurrent.futures
+import errno
 import logging
+import os
 import signal
+import socket
 import sys
 import threading
 from collections.abc import Callable
@@ -20,8 +23,22 @@ from app.agent_loop import AgentLoop, AgentLoopNotRunningError
 from app.browser_utils import launch_browser_app_mode
 from app.config import Config
 from app.logging_config import setup_logging
+from app.remarkable.library import FOLDER_MISSING, FOLDER_OK, FOLDER_UNREADABLE, folder_state
+from app.sync.quota_cache import QuotaCache
 
 logger = logging.getLogger(__name__)
+
+# Headless mode (rMirror for Mac 2.0, see docs/local-api.md)
+APP_TOKEN_ENV = "RMIRROR_APP_TOKEN"
+MIN_APP_TOKEN_LENGTH = 32
+READY_LINE = "RMIRROR_CORE_READY port={port} api=2"
+HEADLESS_HOST = "127.0.0.1"
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_PORT_IN_USE = 3
+EXIT_BAD_APP_TOKEN = 4
+# How long each shutdown step may take in headless mode (the app waits 8 s after SIGTERM)
+HEADLESS_SHUTDOWN_STEP_SECONDS = 3.0
 
 
 class Agent:
@@ -44,10 +61,19 @@ class Agent:
         foreground: bool = False,
         tray_app: Optional[object] = None,
         agent_loop: AgentLoop | None = None,
+        headless: bool = False,
+        app_token: str | None = None,
     ):
-        """Initialize the agent."""
+        """Initialize the agent.
+
+        ``headless``: run for the native app (no tray, no browser); the web server is
+        bound by ``bind_web_server()`` before start() and the local API v2 requires
+        ``app_token``.
+        """
         self.config = config
         self.foreground = foreground
+        self.headless = headless
+        self.app_token = app_token
         self.running = False
         self.tray_app = tray_app
         self.loop = agent_loop if agent_loop is not None else AgentLoop()
@@ -58,6 +84,11 @@ class Agent:
         self.web_app = None
         self._web_server = None
         self.remarkable_folder_missing = False
+        # The folder exists but cannot be listed (macOS privacy protection): no
+        # watcher until it becomes readable (a scan would see an empty folder)
+        self.remarkable_folder_unreadable = False
+        self.quota_cache = QuotaCache()
+        self._account_refresh_task: asyncio.Task | None = None
 
         self._watcher_lock = threading.Lock()
         self._watcher_state = self.WATCHER_IDLE
@@ -77,11 +108,13 @@ class Agent:
         # Initialize CloudSync object BEFORE starting web server
         # This way the web server has a reference to the actual object
         from app.sync.cloud_sync import CloudSync
-        self.cloud_sync = CloudSync(self.config)
+        if self.cloud_sync is None:
+            self.cloud_sync = CloudSync(self.config)
 
         # Start web server in background thread (before auth)
-        # This ensures users can access the login page even if auth fails
-        if self.config.web.enabled:
+        # This ensures users can access the login page even if auth fails.
+        # (Headless mode has bound and started its server before start().)
+        if self.config.web.enabled and self._web_server is None:
             web_thread = threading.Thread(
                 target=self._run_web_server_thread,
                 daemon=True,
@@ -100,6 +133,10 @@ class Agent:
         try:
             await self.cloud_sync.authenticate()
 
+            if self.headless:
+                # The first loop tick also fetches the account email
+                self.quota_cache.mark_stale()
+
             # Update tray status if authentication succeeded
             if self.tray_app:
                 self.tray_app.update_status("Connected")
@@ -107,6 +144,8 @@ class Agent:
             # Display quota status after successful authentication
             try:
                 quota_status = await self.cloud_sync.get_quota_status()
+                self.quota_cache.store(quota_status)
+                self.quota_cache.note_attempt()
                 quota_display = self.cloud_sync.format_quota_display(quota_status)
                 print(f"\n{quota_display}\n")
                 logger.info(f"Quota: {quota_status['used']}/{quota_status['limit']} pages used")
@@ -123,7 +162,7 @@ class Agent:
                 self.tray_app.update_status("Not authenticated")
 
         # Keep running until stopped
-        if self.foreground:
+        if self.foreground and not self.headless:
             print("\nrMirror Agent running in foreground mode. Press Ctrl+C to stop.")
             print(f"Web UI: http://{self.config.web.host}:{self.config.web.port}")
             if self.cloud_sync and self.cloud_sync.authenticated:
@@ -142,22 +181,43 @@ class Agent:
         if self._can_watch():
             self._request_watcher_start()
 
+        if self.remarkable_folder_unreadable:
+            print("⚠️  reMarkable folder cannot be read (Full Disk Access?). Waiting for access...")
+
         # Keep the agent running; poll for the folder to appear if it is missing
+        # (or to become readable if access to it is blocked)
         while self.running:
             await asyncio.sleep(5)
             if self.remarkable_folder_missing:
                 if Path(self.config.remarkable.source_directory).exists():
                     self.remarkable_folder_missing = False
+                    if folder_state(self.config.remarkable.source_directory) == FOLDER_UNREADABLE:
+                        self.remarkable_folder_unreadable = True
+                        logger.warning("reMarkable folder detected but cannot be read")
+                        continue
                     logger.info("reMarkable folder detected!")
                     print("✓ reMarkable folder detected!")
                     if self.tray_app:
                         self.tray_app.update_status("Watching" if self.cloud_sync and self.cloud_sync.authenticated else "Connected")
                     if self._can_watch():
                         self._request_watcher_start()
+            elif self.remarkable_folder_unreadable:
+                state = folder_state(self.config.remarkable.source_directory)
+                if state != FOLDER_UNREADABLE:
+                    self.remarkable_folder_unreadable = False
+                    self.remarkable_folder_missing = state == FOLDER_MISSING
+                    if state == FOLDER_OK:
+                        logger.info("reMarkable folder is readable now")
+                        print("✓ reMarkable folder is readable now")
+                        if self._can_watch():
+                            self._request_watcher_start()
+            if self.headless:
+                self._maybe_refresh_account()
 
     def _can_watch(self) -> bool:
         return bool(
             not self.remarkable_folder_missing
+            and not self.remarkable_folder_unreadable
             and self.config.remarkable.watch_enabled
             and self.cloud_sync
             and self.cloud_sync.authenticated
@@ -179,6 +239,8 @@ class Agent:
         with self._watcher_lock:
             self._watcher_state = self.WATCHER_RUNNING
         self.file_watcher = FileWatcher(self.config, self.cloud_sync, on_status=self._set_tray_status)
+        if self.headless:
+            self.file_watcher.sync_queue.on_batch_complete = self._on_upload_batch
         await self.file_watcher.start()
 
     def _request_watcher_start(self) -> bool:
@@ -239,12 +301,147 @@ class Agent:
 
         self.remarkable_folder_missing = False
 
+        if folder_state(self.config.remarkable.source_directory) == FOLDER_UNREADABLE:
+            # The agent loop starts the watcher once the folder becomes readable
+            self.remarkable_folder_unreadable = True
+            logger.warning("Cannot start file watcher yet: reMarkable folder cannot be read")
+            return False
+        self.remarkable_folder_unreadable = False
+
         if not self.cloud_sync or not self.cloud_sync.authenticated:
             logger.warning("Cannot start file watcher: not authenticated")
             return False
 
         logger.info("Starting file watcher after authentication...")
         return self._request_watcher_start()
+
+    @property
+    def watcher_state(self) -> str:
+        """idle, starting or running."""
+        with self._watcher_lock:
+            return self._watcher_state
+
+    def update_folder_flags(self) -> str:
+        """Re-check the reMarkable folder and update the missing/unreadable flags."""
+        state = folder_state(self.config.remarkable.source_directory)
+        self.remarkable_folder_missing = state == FOLDER_MISSING
+        self.remarkable_folder_unreadable = state == FOLDER_UNREADABLE
+        return state
+
+    async def stop_file_watcher(self) -> None:
+        """Stop the running file watcher, if any (runs on the agent loop)."""
+        file_watcher = self.file_watcher
+        if file_watcher is not None:
+            await file_watcher.stop()
+        task = self._watcher_task
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except BaseException:  # Cancelled, or the error already logged by _on_watcher_done
+                pass
+        self.file_watcher = None
+
+    # ------------------------------------------------------------------
+    # Account cache (quota, email) for the local API v2 (headless mode)
+    # ------------------------------------------------------------------
+
+    def _on_upload_batch(self, stats: dict) -> None:
+        """Sync queue callback (agent loop): quota changes after uploads."""
+        if stats.get("uploaded"):
+            self.quota_cache.mark_stale()
+
+    def request_account_refresh(self) -> None:
+        """Refresh quota (and the account email) soon on the agent loop. Safe from any thread."""
+        self.quota_cache.mark_stale()
+        try:
+            self.loop.call_soon(self._maybe_refresh_account)
+        except AgentLoopNotRunningError:
+            pass
+
+    def _maybe_refresh_account(self) -> None:
+        """Start a refresh task if one is due (agent loop thread)."""
+        if not (self.cloud_sync and self.cloud_sync.authenticated):
+            return
+        if self._account_refresh_task is not None and not self._account_refresh_task.done():
+            return
+        if not self.quota_cache.refresh_due():
+            return
+        self.quota_cache.note_attempt()
+        self._account_refresh_task = asyncio.get_running_loop().create_task(self.refresh_account())
+
+    async def refresh_account(self) -> None:
+        """Fetch quota (and the email if unknown) into the cache. Never raises."""
+        cloud_sync = self.cloud_sync
+        if not (cloud_sync and cloud_sync.authenticated):
+            return
+        try:
+            self.quota_cache.store(await cloud_sync.get_quota_status())
+        except Exception as e:
+            logger.warning(f"Could not refresh quota: {type(e).__name__}")
+        if cloud_sync.authenticated and not cloud_sync.user_email:
+            try:
+                await cloud_sync.get_user_info()
+            except Exception as e:
+                logger.warning(f"Could not fetch account info: {type(e).__name__}")
+
+    async def reauthenticate(self) -> bool:
+        """Check the stored sign-in again (e.g. after switching environment). Never raises."""
+        if not self.cloud_sync:
+            return False
+        try:
+            await self.cloud_sync.authenticate()
+        except Exception as e:
+            logger.info(f"Not signed in for this environment ({type(e).__name__})")
+            return False
+        self.quota_cache.mark_stale()
+        self._maybe_refresh_account()
+        if self._can_watch():
+            self._request_watcher_start()
+        return True
+
+    # ------------------------------------------------------------------
+    # Web server
+    # ------------------------------------------------------------------
+
+    def bind_web_server(self) -> int:
+        """Headless mode: bind 127.0.0.1:<web.port> and build the server (not serving yet).
+
+        Raises OSError (errno EADDRINUSE if another process has the port). Returns the port.
+        """
+        from werkzeug.serving import make_server
+
+        from app.sync.cloud_sync import CloudSync
+        from app.web.app import create_app
+
+        if self.cloud_sync is None:
+            self.cloud_sync = CloudSync(self.config)
+
+        port = self.config.web.port
+        listener = bind_listen_socket(HEADLESS_HOST, port)
+        try:
+            app = create_app(
+                self.config,
+                self.cloud_sync,
+                agent=self,
+                agent_loop=self.loop,
+                app_token=self.app_token,
+                headless=True,
+            )
+            # werkzeug takes over a duplicate of the bound, listening socket
+            self._web_server = make_server(
+                HEADLESS_HOST, port, app, threaded=True, fd=listener.fileno()
+            )
+        finally:
+            listener.close()
+        return port
+
+    def serve_web_server_in_background(self) -> None:
+        """Serve the server built by bind_web_server() on a daemon thread."""
+        server = self._web_server
+        if server is None:
+            raise RuntimeError("bind_web_server() first")
+        threading.Thread(target=server.serve_forever, name="rmirror-web", daemon=True).start()
 
     def _run_web_server_thread(self) -> None:
         """Run the web server in a background thread."""
@@ -342,15 +539,66 @@ def setup_signal_handlers(agent: Agent, quit_app: Callable[[], None] | None = No
     signal.signal(signal.SIGTERM, signal_handler)
 
 
+def bind_listen_socket(host: str, port: int) -> socket.socket:
+    """A TCP socket bound to host:port and listening. Raises OSError (EADDRINUSE if taken)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        # Same as werkzeug/http.server: allows a restart while old connections linger
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+        sock.listen(128)
+    except BaseException:
+        sock.close()
+        raise
+    return sock
+
+
+def read_app_token(environ: "os._Environ[str] | dict[str, str]") -> str | None:
+    """The app token from the environment, or None if missing or too short."""
+    token = (environ.get(APP_TOKEN_ENV) or "").strip()
+    if len(token) < MIN_APP_TOKEN_LENGTH:
+        return None
+    return token
+
+
+def watch_parent_stdin(on_eof: Callable[[], None], stream=None) -> threading.Thread:
+    """Call on_eof when stdin reaches end of file (the parent app is gone).
+
+    Runs on a daemon thread. The app keeps the write end of the pipe open for its
+    whole life and never writes, so EOF means it exited or crashed.
+    """
+    fd = (stream if stream is not None else sys.stdin).fileno()
+
+    def watch() -> None:
+        try:
+            while os.read(fd, 4096):
+                pass
+        except OSError as e:
+            logger.warning(f"Reading stdin failed ({e}); treating it as closed")
+        logger.info("stdin closed: the app is gone, shutting down")
+        on_eof()
+
+    thread = threading.Thread(target=watch, name="rmirror-parent-watch", daemon=True)
+    thread.start()
+    return thread
+
+
 @click.group(invoke_without_command=True)
 @click.option("--config", "-c", type=click.Path(exists=True, path_type=Path), help="Config file path")
 @click.option("--foreground", "-f", is_flag=True, help="Run in foreground (don't daemonize)")
 @click.option("--debug", "-d", is_flag=True, help="Enable debug logging")
+@click.option(
+    "--headless",
+    is_flag=True,
+    help="Run as the core of the native app: no menu bar, no browser (needs RMIRROR_APP_TOKEN)",
+)
 @click.pass_context
-def cli(ctx: click.Context, config: Optional[Path], foreground: bool, debug: bool) -> None:
+def cli(ctx: click.Context, config: Optional[Path], foreground: bool, debug: bool, headless: bool) -> None:
     """rMirror Agent - Sync reMarkable tablets to the cloud."""
     # If no subcommand, run the agent
     if ctx.invoked_subcommand is None:
+        if headless:
+            sys.exit(run_headless(config, debug))
         run_agent(config, foreground, debug)
 
 
@@ -362,7 +610,6 @@ def status(config: Optional[Path]) -> None:
     print("rMirror Agent Status")
     print("=" * 50)
     print(f"API URL: {cfg.api.url}")
-    print(f"Email: {cfg.api.email or '(not configured)'}")
     print(f"reMarkable folder: {cfg.remarkable.source_directory}")
     print(f"Watch enabled: {cfg.remarkable.watch_enabled}")
     print(f"Web UI: {'Enabled' if cfg.web.enabled else 'Disabled'}")
@@ -404,12 +651,6 @@ def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> Non
     # Load configuration
     config = Config.load(config_path)
 
-    # Validate configuration (only for legacy password auth)
-    if not config.api.use_clerk_auth and (not config.api.email or not config.api.password):
-        click.echo("Error: API credentials not configured.", err=True)
-        click.echo("Run 'rmirror-agent init' to create a configuration file.", err=True)
-        sys.exit(1)
-
     # Check if reMarkable folder exists
     remarkable_path = Path(config.remarkable.source_directory)
     remarkable_folder_missing = not remarkable_path.exists()
@@ -420,6 +661,9 @@ def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> Non
     # Create and run agent
     agent = Agent(config, foreground=foreground)
     agent.remarkable_folder_missing = remarkable_folder_missing
+    agent.remarkable_folder_unreadable = (
+        not remarkable_folder_missing and folder_state(remarkable_path) == FOLDER_UNREADABLE
+    )
 
     # Run the agent: all of its coroutines run on one long-lived loop thread
     if foreground or not config.tray.enabled:
@@ -450,6 +694,80 @@ def run_agent(config_path: Optional[Path], foreground: bool, debug: bool) -> Non
 
         # Run tray app in main thread (blocking)
         app.run()
+
+
+def run_headless(config_path: Optional[Path], debug: bool, stdin=None) -> int:
+    """Run as the native app's core process; returns the exit code (see docs/local-api.md).
+
+    Never imports rumps and never opens a browser. Binds 127.0.0.1:<web.port>,
+    prints the ready line once the server is listening, stops cleanly on SIGTERM,
+    SIGINT or when stdin closes.
+    """
+    app_token = read_app_token(os.environ)
+    if app_token is None:
+        print(f"{APP_TOKEN_ENV} is missing or shorter than {MIN_APP_TOKEN_LENGTH} characters", file=sys.stderr)
+        return EXIT_BAD_APP_TOKEN
+
+    try:
+        setup_logging("DEBUG" if debug else "INFO")
+        logger.info("rMirror core starting up (headless)")
+        config = Config.load(config_path)
+        agent = Agent(config, foreground=True, headless=True, app_token=app_token)
+        agent.update_folder_flags()
+        try:
+            port = agent.bind_web_server()
+        except OSError as e:
+            if e.errno == errno.EADDRINUSE:
+                logger.error(f"Port {config.web.port} is already in use")
+                print(f"Port {config.web.port} is already in use", file=sys.stderr)
+                return EXIT_PORT_IN_USE
+            raise
+    except Exception as e:
+        logger.error(f"rMirror core failed to start: {e}", exc_info=True)
+        return EXIT_ERROR
+
+    return _serve_headless(agent, port, stdin)
+
+
+def _serve_headless(agent: Agent, port: int, stdin=None) -> int:
+    """Run a bound headless agent until it is asked to stop; returns the exit code."""
+    stop_requested = threading.Event()
+    finished = threading.Event()
+
+    def request_stop() -> None:
+        stop_requested.set()
+        finished.set()
+
+    def on_signal(sig: int, frame: object) -> None:
+        logger.info(f"Received {signal.Signals(sig).name}, shutting down")
+        request_stop()
+
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+
+    exit_code = EXIT_OK
+    try:
+        agent.loop.start()
+        agent.serve_web_server_in_background()
+        print(READY_LINE.format(port=port), flush=True)
+        watch_parent_stdin(request_stop, stream=stdin)
+
+        future = agent.loop.submit(agent.start())
+        future.add_done_callback(lambda _f: finished.set())
+        # Wake up regularly so signal handlers run promptly on the main thread
+        while not finished.wait(0.5):
+            pass
+        if not stop_requested.is_set():
+            error = None if future.cancelled() else future.exception()
+            if error is not None:
+                logger.error(f"Agent stopped with an error: {error}", exc_info=error)
+                exit_code = EXIT_ERROR
+    except Exception as e:
+        logger.error(f"rMirror core failed: {e}", exc_info=True)
+        exit_code = EXIT_ERROR
+    finally:
+        agent.shutdown(timeout=HEADLESS_SHUTDOWN_STEP_SECONDS)
+    return exit_code
 
 
 def _log_agent_exit(future: "concurrent.futures.Future[None]") -> None:

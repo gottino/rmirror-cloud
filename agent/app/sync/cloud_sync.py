@@ -58,6 +58,9 @@ class CloudSync:
         self.authenticated = False
         self.user_email: Optional[str] = None
         self.user_id: Optional[int] = None
+        # True after the backend rejected the stored sign-in (401), until the next
+        # successful sign-in; False after the user signed out themselves.
+        self.sign_in_rejected = False
 
     @property
     def _verify_ssl(self) -> bool:
@@ -84,96 +87,57 @@ class CloudSync:
 
     async def authenticate(self) -> bool:
         """
-        Authenticate with the backend API and store the access token.
+        Verify the stored sign-in (agent token from the dashboard) with the backend.
+
+        Password sign-in (``POST /auth/login``) was removed from the backend; the
+        only way to sign in is the browser flow (/auth/bridge -> /auth/callback).
 
         Returns:
-            True if authentication successful, False otherwise.
+            True if the stored token is valid.
+
+        Raises:
+            AuthenticationRequiredError: no token stored, or the backend rejected it.
+            CloudSyncError: the token could not be checked (network or server error).
         """
         self.ensure_client()
 
-        # If we already have a token (from any source), verify it's valid
-        if self.config.api.token:
-            try:
-                # Test the token with a simple API call
-                logger.debug("Verifying existing JWT token")
-                response = await self.client.get(
-                    f"{self.config.api.url}/sync/stats",
-                    headers={"Authorization": f"Bearer {self.config.api.token}"}
+        if not self.config.api.token:
+            raise AuthenticationRequiredError(
+                "Please sign in via the web interface at http://localhost:5555"
+            )
+
+        try:
+            logger.debug("Verifying existing JWT token")
+            response = await self.client.get(
+                f"{self.config.api.url}/sync/stats",
+                headers={"Authorization": f"Bearer {self.config.api.token}"}
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                logger.warning("JWT token expired or invalid")
+                self._sign_out("backend rejected the stored token (401)")
+                raise AuthenticationRequiredError(
+                    "Authentication token expired. Please sign in again via the web interface.",
+                    status_code=401,
                 )
-                response.raise_for_status()
-                self.authenticated = True
-                auth_method = "Clerk" if self.config.api.use_clerk_auth else "password"
-                logger.info(f"✓ Authenticated with rMirror Cloud using existing token ({auth_method})")
-                print(f"✓ Authenticated with rMirror Cloud using existing token ({auth_method})")
-                return True
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 401:
-                    logger.warning("JWT token expired or invalid")
-                    # Token expired - if using Clerk, need to re-auth via web
-                    if self.config.api.use_clerk_auth:
-                        self._sign_out("backend rejected the stored token (401)")
-                        raise AuthenticationRequiredError(
-                            "Authentication token expired. Please sign in again via the web interface.",
-                            status_code=401,
-                        )
-                    # Otherwise, fall through to password auth below
-                    logger.info("Token expired, will try password authentication")
-                else:
-                    raise CloudSyncError(
-                        f"Token verification failed: {e}",
-                        status_code=e.response.status_code,
-                        transient=e.response.status_code >= 500,
-                    )
-            except Exception as e:
-                # Log the actual exception for debugging
-                logger.error(f"Token verification error: {type(e).__name__}: {e}", exc_info=True)
-                # If using Clerk auth, we can't fall back to password auth
-                if self.config.api.use_clerk_auth:
-                    raise CloudSyncError(
-                        f"Token verification failed: {e}",
-                        transient=isinstance(e, httpx.TransportError),
-                    )
-                # Otherwise fall through to password auth
-                logger.info("Token verification failed, will try password authentication")
+            raise CloudSyncError(
+                f"Token verification failed: {e}",
+                status_code=e.response.status_code,
+                transient=e.response.status_code >= 500,
+            )
+        except Exception as e:
+            logger.error(f"Token verification error: {type(e).__name__}: {e}", exc_info=True)
+            raise CloudSyncError(
+                f"Token verification failed: {e}",
+                transient=isinstance(e, httpx.TransportError),
+            )
 
-        # Fall back to password authentication if configured
-        if not self.config.api.use_clerk_auth:
-            if not self.config.api.email or not self.config.api.password:
-                raise CloudSyncError("API credentials not configured")
-
-            try:
-                logger.debug(f"Authenticating with {self.config.api.url}/auth/login")
-                # Login to get access token
-                response = await self.client.post(
-                    f"{self.config.api.url}/auth/login",
-                    json={
-                        "email": self.config.api.email,
-                        "password": self.config.api.password,
-                    },
-                )
-                response.raise_for_status()
-
-                data = response.json()
-                self.config.api.token = data["access_token"]
-                self.authenticated = True
-
-                logger.info(f"✓ Authenticated with rMirror Cloud as {self.config.api.email}")
-                print(f"✓ Authenticated with rMirror Cloud as {self.config.api.email}")
-                return True
-
-            except httpx.HTTPStatusError as e:
-                logger.error(f"Authentication failed with status {e.response.status_code}: {e}")
-                if e.response.status_code == 401:
-                    raise CloudSyncError("Invalid email or password")
-                raise CloudSyncError(f"Authentication failed: {e}")
-            except Exception as e:
-                logger.error(f"Authentication error: {e}", exc_info=True)
-                raise CloudSyncError(f"Authentication error: {e}")
-
-        # If we got here with Clerk auth but no token, user needs to sign in
-        raise AuthenticationRequiredError(
-            "Please sign in via the web interface at http://localhost:5555"
-        )
+        self.authenticated = True
+        self.sign_in_rejected = False
+        logger.info("✓ Authenticated with rMirror Cloud using existing token")
+        print("✓ Authenticated with rMirror Cloud using existing token")
+        return True
 
     async def ensure_authenticated(self) -> None:
         """Ensure we have a valid authentication token and HTTP client."""
@@ -734,11 +698,11 @@ class CloudSync:
         enough to stop authenticated requests. The sync queue pauses itself with
         "Sign in required" on the next AuthenticationRequiredError.
 
-        Note: use_clerk_auth is left unchanged so the sign-in modal shows the
-        OAuth option, not password auth. The backend revoke endpoint is never
-        called from here (agent tokens cannot revoke themselves).
+        The backend revoke endpoint is never called from here (agent tokens
+        cannot revoke themselves).
         """
         self.authenticated = False
+        self.sign_in_rejected = True
         self.user_email = None
         self.user_id = None
         self.config.api.clear_token()
@@ -751,6 +715,7 @@ class CloudSync:
     def logout(self) -> None:
         """Clear authentication state and stored token."""
         self._sign_out("user signed out")
+        self.sign_in_rejected = False
 
     def format_quota_display(self, quota_data: dict) -> str:
         """

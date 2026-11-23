@@ -55,6 +55,8 @@ def create_app(
     cloud_sync: CloudSync,
     agent: "Agent" = None,
     agent_loop: AgentLoop | None = None,
+    app_token: str | None = None,
+    headless: bool = False,
 ) -> Flask:
     """
     Create and configure the Flask web application.
@@ -64,6 +66,9 @@ def create_app(
         cloud_sync: Cloud sync client
         agent: Reference to the main Agent instance (optional)
         agent_loop: The agent's event loop; routes run their coroutines on it
+        app_token: When set, every /api/v2/* request must carry it in the
+            X-RMirror-App-Token header (always set in headless mode)
+        headless: Running as the native app's core (sign-in result pages differ)
 
     Returns:
         Configured Flask app
@@ -76,6 +81,8 @@ def create_app(
     app.config["CLOUD_SYNC"] = cloud_sync
     app.config["AGENT"] = agent
     app.config["AGENT_LOOP"] = agent_loop
+    app.config["APP_TOKEN"] = app_token
+    app.config["HEADLESS"] = headless
 
     # Only serve requests addressed to this agent on the loopback names, and
     # refuse state-changing requests that come from another site.
@@ -106,5 +113,9 @@ def create_app(
     # Register routes
     from app.web.routes import register_routes
     register_routes(app)
+
+    # Local API v2 for the native app (docs/local-api.md)
+    from app.web.routes_v2 import register_v2_routes
+    register_v2_routes(app)
 
     return app

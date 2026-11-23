@@ -51,9 +51,6 @@ def test_config(mock_keychain) -> Config:
     config = Config(
         api=APIConfig(
             url="http://test-api.rmirror.io/api/v1",
-            email="test@example.com",
-            password="testpassword",
-            use_clerk_auth=False,
         ),
         remarkable=ReMarkableConfig(
             source_directory="/tmp/remarkable-test",

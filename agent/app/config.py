@@ -21,8 +21,6 @@ class APIConfig(BaseSettings):
     """API configuration."""
 
     url: str = Field(default="https://rmirror.io/api/v1", description="rMirror Cloud API URL")
-    email: str = Field(default="", description="User email (for legacy password auth)")
-    password: str = Field(default="", description="User password (for legacy password auth)")
     _token: Optional[str] = None  # Private field, use token property instead
 
     # Clerk OAuth configuration
@@ -30,11 +28,9 @@ class APIConfig(BaseSettings):
         default="https://rmirror.io",
         description="Clerk frontend API URL for OAuth"
     )
-    use_clerk_auth: bool = Field(
-        default=True,
-        description="Use Clerk OAuth instead of email/password"
-    )
-
+    # Keys of the removed password sign-in (``email``, ``password``,
+    # ``use_clerk_auth``) may still be in old config files: extra="ignore" drops
+    # them on load, and save() no longer writes them.
     model_config = SettingsConfigDict(env_prefix="RMIRROR_API_", extra="ignore")
 
     @property
@@ -178,6 +174,9 @@ class Config(BaseSettings):
     # Serialises save() calls: Flask request threads and the agent loop thread
     # both save the config. Re-entrant so a caller holding it can still save.
     _save_lock: threading.RLock = PrivateAttr(default_factory=threading.RLock)
+    # The file load() read (None: defaults). save() writes back to it, so a config
+    # given with --config or RMIRROR_CONFIG_PATH is not saved somewhere else.
+    _source_path: Optional[Path] = PrivateAttr(default=None)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -239,7 +238,9 @@ class Config(BaseSettings):
         # Load from YAML if file exists, otherwise use defaults + env vars
         if config_path.exists():
             print(f"Loading configuration from: {config_path}")
-            return cls.from_yaml(config_path)
+            config = cls.from_yaml(config_path)
+            config._source_path = config_path
+            return config
         else:
             print(f"Config file not found at {config_path}, using defaults and environment variables")
             return cls()
@@ -252,7 +253,7 @@ class Config(BaseSettings):
         a reader never sees a half-written file.
         """
         if config_path is None:
-            config_path = self.get_default_config_path()
+            config_path = self._source_path or self.get_default_config_path()
 
         with self._save_lock:
             # Create parent directory with restricted permissions (owner-only access)
