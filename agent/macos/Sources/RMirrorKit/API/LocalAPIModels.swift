@@ -55,17 +55,32 @@ public struct AuthInfo: Codable, Equatable, Sendable {
     public var signedIn: Bool
     public var email: String?
     public var signInRequired: Bool
+    /// Finer-grained than `signedIn`. A core that does not send it gets a value derived from `signedIn`.
+    public var state: AuthState
 
-    public init(signedIn: Bool, email: String? = nil, signInRequired: Bool = false) {
+    public init(signedIn: Bool, email: String? = nil, signInRequired: Bool = false, state: AuthState? = nil) {
         self.signedIn = signedIn
         self.email = email
         self.signInRequired = signInRequired
+        self.state = state ?? (signedIn ? .signedIn : .signedOut)
     }
 
     enum CodingKeys: String, CodingKey {
         case signedIn = "signed_in"
         case email
         case signInRequired = "sign_in_required"
+        case state
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let signedIn = try c.decode(Bool.self, forKey: .signedIn)
+        self.init(
+            signedIn: signedIn,
+            email: try c.decodeIfPresent(String.self, forKey: .email),
+            signInRequired: try c.decodeIfPresent(Bool.self, forKey: .signInRequired) ?? false,
+            state: try c.decodeIfPresent(AuthState.self, forKey: .state)
+        )
     }
 }
 

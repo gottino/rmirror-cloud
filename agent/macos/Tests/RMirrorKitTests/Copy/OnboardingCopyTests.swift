@@ -14,6 +14,13 @@ final class OnboardingCopyTests: XCTestCase {
                        "That's more than the 1 page you have left this month. Untick a notebook.")
     }
 
+    func testNoneFitMessage() {
+        XCTAssertEqual(OnboardingCopy.noneFitMessage(remaining: 12),
+                       "Your most recent notebooks are larger than the 12 pages you have left this month. Tick smaller ones to start.")
+        XCTAssertEqual(OnboardingCopy.noneFitMessage(remaining: 1),
+                       "Your most recent notebooks are larger than the 1 page you have left this month. Tick smaller ones to start.")
+    }
+
     func testSuggestionTitleAdaptsToCount() {
         XCTAssertEqual(OnboardingCopy.suggestionTitle(count: 3), "Start with your 3 most recent notebooks")
         XCTAssertEqual(OnboardingCopy.suggestionTitle(count: 1), "Start with your most recent notebook")

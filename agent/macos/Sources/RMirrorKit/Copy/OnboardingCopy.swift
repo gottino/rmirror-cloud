@@ -19,6 +19,7 @@ public enum OnboardingCopy {
 
     public static let startingTitle = "Starting rMirror…"
     public static let startingMessage = "This only takes a moment."
+    public static let checkingSignIn = "Checking your sign-in…"
 
     // MARK: Could not start
 
@@ -104,6 +105,13 @@ public enum OnboardingCopy {
 
     // MARK: First sync: other situations
 
+    public static let noneFitTitle = "Choose what to sync first"
+
+    /// "Your most recent notebooks are larger than the 12 pages you have left this month. Tick smaller ones to start."
+    public static func noneFitMessage(remaining: Int) -> String {
+        "Your most recent notebooks are larger than the \(SharedCopy.pages(remaining)) you have left this month. Tick smaller ones to start."
+    }
+
     public static let loadingSuggestion = "Finding your recent notebooks…"
     public static let preparing = "Getting things ready…"
 
@@ -137,7 +145,7 @@ public enum OnboardingCopy {
     public static var allStrings: [String] {
         [
             tryAgain, quit, cancel, done, checksByItself,
-            startingTitle, startingMessage,
+            startingTitle, startingMessage, checkingSignIn,
             otherCopyTitle, otherCopyMessage, otherCopyHowTo,
             cannotStartTitle, cannotStartMissingPart, cannotStartMessage,
             signInTitle, signInIntro, signInRenewTitle, signInRenewMessage, signInButton, signInHint,
@@ -152,6 +160,7 @@ public enum OnboardingCopy {
             nothingTicked, overAllowance(remaining: 1), overAllowance(remaining: 12),
             notebookRow(name: "Meeting Notes", folder: "Work", pages: 12),
             notebookRow(name: "Book Club", folder: nil, pages: 1),
+            noneFitTitle, noneFitMessage(remaining: 1), noneFitMessage(remaining: 12),
             loadingSuggestion, preparing,
             noNotebooksTitle, noNotebooksMessage, waitingForNotebooks,
             noPagesLeftTitle, noPagesLeftMessage, noPagesLeftNothingToUpload,

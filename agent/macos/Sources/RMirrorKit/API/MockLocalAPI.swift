@@ -165,6 +165,18 @@ public enum Fixtures {
         folder: okFolder, watcher: idleWatcher, queue: QueueInfo(pending: 0, running: false, pausedReason: .signIn),
         quota: nil, firstSyncCompleted: false)
 
+    /// A stored sign-in exists and is still being checked.
+    public static let checkingSignInState = state(
+        auth: AuthInfo(signedIn: false, email: nil, signInRequired: false, state: .checking),
+        folder: okFolder, watcher: idleWatcher, queue: QueueInfo(pending: 0, running: false, pausedReason: nil),
+        quota: nil, firstSyncCompleted: true)
+
+    /// Signed in before, but the cloud cannot be reached right now.
+    public static let offlineState = state(
+        auth: AuthInfo(signedIn: false, email: email, signInRequired: false, state: .offline),
+        folder: okFolder, watcher: idleWatcher, queue: QueueInfo(pending: 0, running: false, pausedReason: .offline),
+        quota: nil, firstSyncCompleted: true)
+
     /// The stored sign-in was rejected: user must sign in again.
     public static let signInRequiredState = state(
         auth: AuthInfo(signedIn: false, email: email, signInRequired: true),

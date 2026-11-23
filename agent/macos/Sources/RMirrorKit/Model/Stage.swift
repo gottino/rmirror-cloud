@@ -38,7 +38,16 @@ public enum Stage: Equatable, Sendable {
         guard let state else { return .starting }
 
         if state.auth.signInRequired { return .signIn(reason: .expired) }
-        if !state.auth.signedIn { return .signIn(reason: .signedOut) }
+        switch state.auth.state {
+        case .checking:
+            // A stored sign-in is being checked: do not flash the sign-in screen meanwhile.
+            return .starting
+        case .offline:
+            // Signed in before, cloud unreachable right now: carry on; the status line says so.
+            break
+        default:
+            if !state.auth.signedIn { return .signIn(reason: .signedOut) }
+        }
 
         switch state.folder.state {
         case .missing: return .remarkableMissing

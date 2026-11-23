@@ -162,8 +162,41 @@ public enum EnvironmentName: CodedString {
     }
 }
 
+/// Where the stored sign-in stands.
+public enum AuthState: CodedString {
+    /// A stored sign-in exists and is being checked with the cloud.
+    case checking
+    case signedIn
+    case signedOut
+    /// A stored sign-in exists but the cloud cannot be reached; the core keeps retrying.
+    case offline
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "checking": self = .checking
+        case "signed_in": self = .signedIn
+        case "signed_out": self = .signedOut
+        case "offline": self = .offline
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .checking: return "checking"
+        case .signedIn: return "signed_in"
+        case .signedOut: return "signed_out"
+        case .offline: return "offline"
+        case .unknown(let s): return s
+        }
+    }
+}
+
 public enum SuggestionReason: CodedString {
     case ok, noNotebooks, quotaExhausted, notSignedIn, folderUnavailable
+    /// There are notebooks, but none is small enough for the pages left this month.
+    case noneFit
     case unknown(String)
 
     public init(rawValue: String) {
@@ -173,6 +206,7 @@ public enum SuggestionReason: CodedString {
         case "quota_exhausted": self = .quotaExhausted
         case "not_signed_in": self = .notSignedIn
         case "folder_unavailable": self = .folderUnavailable
+        case "none_fit": self = .noneFit
         default: self = .unknown(rawValue)
         }
     }
@@ -184,6 +218,7 @@ public enum SuggestionReason: CodedString {
         case .quotaExhausted: return "quota_exhausted"
         case .notSignedIn: return "not_signed_in"
         case .folderUnavailable: return "folder_unavailable"
+        case .noneFit: return "none_fit"
         case .unknown(let s): return s
         }
     }

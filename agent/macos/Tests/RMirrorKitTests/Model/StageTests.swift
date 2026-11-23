@@ -20,6 +20,19 @@ final class StageTests: XCTestCase {
         XCTAssertEqual(Stage.derive(core: running, state: Fixtures.signInRequiredState, guidedSyncActive: false), .signIn(reason: .expired))
     }
 
+    func testCheckingAndOfflineDoNotShowSignIn() {
+        XCTAssertEqual(Stage.derive(core: running, state: Fixtures.checkingSignInState, guidedSyncActive: false), .starting)
+        XCTAssertEqual(Stage.derive(core: running, state: Fixtures.offlineState, guidedSyncActive: false), .ready)
+        XCTAssertEqual(SharedCopy.statusLine(stage: .ready, state: Fixtures.offlineState), "Waiting for an internet connection")
+    }
+
+    func testAuthStateDefaultsFromSignedIn() throws {
+        let old = try LocalAPICoding.makeDecoder().decode(AuthInfo.self, from: Data(#"{"signed_in": true, "email": null, "sign_in_required": false}"#.utf8))
+        XCTAssertEqual(old.state, .signedIn)
+        let new = try LocalAPICoding.makeDecoder().decode(AuthInfo.self, from: Data(#"{"signed_in": false, "sign_in_required": false, "state": "offline"}"#.utf8))
+        XCTAssertEqual(new.state, .offline)
+    }
+
     func testFolderStates() {
         XCTAssertEqual(Stage.derive(core: running, state: Fixtures.folderMissingState, guidedSyncActive: false), .remarkableMissing)
         XCTAssertEqual(Stage.derive(core: running, state: Fixtures.folderUnreadableState, guidedSyncActive: false), .permission)

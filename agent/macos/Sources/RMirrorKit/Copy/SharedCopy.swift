@@ -121,6 +121,7 @@ public enum SharedCopy {
         case .firstSyncProgress, .firstSyncResult, .ready: break
         }
         guard let state else { return "Starting…" }
+        if state.auth.state == .offline { return "Waiting for an internet connection" }
         if state.sync.state == .running { return "Syncing: \(progressLine(state.sync.counts))" }
         switch state.queue.pausedReason {
         case .quota?: return "Paused: no pages left this month"
