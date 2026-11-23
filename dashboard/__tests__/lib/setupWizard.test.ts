@@ -179,3 +179,35 @@ describe('notebooksWithPages', () => {
     expect(notebooksWithPages(tree).map((u) => u.name)).toEqual(['New', 'Old']);
   });
 });
+
+describe('wording helpers', () => {
+  it('takes the file name from the download link', async () => {
+    const { downloadFileName } = await import('@/lib/setupWizard');
+    expect(downloadFileName('https://downloads.example.com/releases/v2.0.0/rMirror-2.0.0-arm64.dmg')).toBe(
+      'rMirror-2.0.0-arm64.dmg',
+    );
+    expect(downloadFileName('https://downloads.example.com/releases/v1.7.0/rMirror-1.7.0.dmg?x=1')).toBe(
+      'rMirror-1.7.0.dmg',
+    );
+    expect(downloadFileName(undefined)).toBeNull();
+    expect(downloadFileName('not a url')).toBeNull();
+    expect(downloadFileName('https://downloads.example.com/')).toBeNull();
+  });
+
+  it('formats the minimum macOS version from the server', async () => {
+    const { minimumMacOSLabel } = await import('@/lib/setupWizard');
+    expect(minimumMacOSLabel('13.0')).toBe('macOS 13 or later');
+    expect(minimumMacOSLabel('12')).toBe('macOS 12 or later');
+    expect(minimumMacOSLabel('14.4')).toBe('macOS 14.4 or later');
+    expect(minimumMacOSLabel(undefined)).toBeNull();
+    expect(minimumMacOSLabel('')).toBeNull();
+  });
+
+  it('describes the real page allowance, never a fixed number', async () => {
+    const { allowanceLine } = await import('@/lib/setupWizard');
+    expect(allowanceLine({ limit: 200, remaining: 196 })).toContain('196 of 200 pages');
+    expect(allowanceLine({ limit: 30, remaining: 0 })).toContain('no pages left this month');
+    expect(allowanceLine({ limit: -1, remaining: 0 })).not.toMatch(/\d/);
+    expect(allowanceLine(null)).not.toMatch(/\d/);
+  });
+});

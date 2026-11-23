@@ -5,6 +5,7 @@ vi.mock('@/lib/api', () => ({
   getLatestAgentVersion: vi.fn(),
   getAgentStatus: vi.fn(),
   getNotebooksTree: vi.fn(),
+  getQuotaStatus: vi.fn().mockResolvedValue({ limit: 200, remaining: 196 }),
   trackAgentDownload: vi.fn(),
 }));
 vi.mock('@/lib/analytics', () => ({ trackEvent: vi.fn() }));

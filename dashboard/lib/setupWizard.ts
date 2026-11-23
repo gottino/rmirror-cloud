@@ -164,3 +164,34 @@ export function firstSyncState({ tree, baseline, waitedMs, fetchFailures }: Firs
   if (complete) return { phase: 'arrived', upload: complete };
   return { phase: 'uploading', upload: fresh[0] };
 }
+
+/** The file name a download link ends in ("rMirror-2.0.0-arm64.dmg"), or null if it has none. */
+export function downloadFileName(url: string | undefined | null): string | null {
+  if (!url) return null;
+  try {
+    const last = new URL(url).pathname.split('/').filter(Boolean).pop();
+    return last ? decodeURIComponent(last) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** "macOS 13 or later" from a minimum version such as "13.0"; null when unknown. */
+export function minimumMacOSLabel(minOs: string | undefined | null): string | null {
+  const match = minOs?.trim().match(/^(\d+)(?:\.(\d+))?/);
+  if (!match) return null;
+  const minor = match[2] && match[2] !== '0' ? `.${match[2]}` : '';
+  return `macOS ${match[1]}${minor} or later`;
+}
+
+/** The pages line on the sync step. Uses the account's real allowance, never a fixed number. */
+export function allowanceLine(quota: { limit: number; remaining: number } | null | undefined): string {
+  if (!quota || quota.limit <= 0) {
+    return 'Start with a few notebooks. You can always sync more later.';
+  }
+  const remaining = Math.max(0, quota.remaining);
+  if (remaining === 0) {
+    return 'You have no pages left this month. Notebooks you sync now are turned into text when your pages reset.';
+  }
+  return `You have ${remaining} of ${quota.limit} pages left this month. rMirror suggests notebooks that fit, and you can always sync more later.`;
+}

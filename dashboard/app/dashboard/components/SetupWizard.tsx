@@ -19,8 +19,10 @@ import {
   getLatestAgentVersion,
   getAgentStatus,
   getNotebooksTree,
+  getQuotaStatus,
   trackAgentDownload,
   type AgentVersionInfo,
+  type QuotaStatus,
   type NotebookTreeNode,
 } from '@/lib/api';
 import { useApiQuery } from '@/lib/useApiQuery';
@@ -29,8 +31,11 @@ import { DOWNLOAD_UNAVAILABLE_MESSAGE } from '@/lib/agentDownload';
 import {
   WIZARD_STEPS,
   WIZARD_POLL_MS,
+  allowanceLine,
+  downloadFileName,
   firstSyncState,
   initialWizardStep,
+  minimumMacOSLabel,
   stepIndex,
   syncBaseline,
   type NotebookUpload,
@@ -118,6 +123,28 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
   const versionQuery = useApiQuery<AgentVersionInfo>('agent-version', (signal) => getLatestAgentVersion(signal));
   const macosUrl = versionQuery.data?.platforms.macos?.url;
   const version = versionQuery.data?.version;
+  const downloadName = downloadFileName(macosUrl);
+  const minimumMacOS = minimumMacOSLabel(versionQuery.data?.platforms.macos?.min_os);
+  const [quota, setQuota] = useState<QuotaStatus | null>(null);
+
+  // Sync step: show the account's real page allowance (never a fixed number)
+  useEffect(() => {
+    if (step !== 'sync') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        const status = await getQuotaStatus(token);
+        if (!cancelled) setQuota(status);
+      } catch {
+        // The line falls back to wording without numbers
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, getToken]);
 
   // Download + Connect screen: poll for the Mac app from the moment it is shown
   useEffect(() => {
@@ -266,7 +293,8 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
                       </a>
                       {version && (
                         <p className="text-xs mt-3" style={{ color: 'var(--warm-gray)' }}>
-                          Version {version} &middot; macOS 12+ &middot; Windows support coming soon
+                          Version {version}
+                          {minimumMacOS && <> &middot; {minimumMacOS}</>} &middot; Windows support coming soon
                         </p>
                       )}
                       {step === 'connect' && (
@@ -308,11 +336,17 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
                       <div>
                         <p className="font-medium" style={{ color: 'var(--warm-charcoal)' }}>Open the downloaded file</p>
                         <p className="text-sm" style={{ color: 'var(--warm-gray)' }}>
-                          Double-click{' '}
-                          <code className="px-1 py-0.5 rounded text-xs" style={{ background: 'var(--warm-border)' }}>
-                            rMirror-{version || '…'}.dmg
-                          </code>{' '}
-                          in your Downloads folder
+                          {downloadName ? (
+                            <>
+                              Double-click{' '}
+                              <code className="px-1 py-0.5 rounded text-xs" style={{ background: 'var(--warm-border)' }}>
+                                {downloadName}
+                              </code>{' '}
+                              in your Downloads folder
+                            </>
+                          ) : (
+                            <>Double-click the rMirror file (its name ends in .dmg) in your Downloads folder</>
+                          )}
                         </p>
                       </div>
                     </li>
@@ -396,9 +430,9 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
               Sync your first notebooks
             </h2>
             <p className="text-base mb-6" style={{ color: 'var(--warm-gray)' }}>
-              In the rMirror window on your Mac, press the &quot;Sync&quot; button (it shows how many notebooks
-              it will send). Can&apos;t see the window? Click the rMirror icon in the menu bar and choose
-              &quot;Open rMirror&quot;.
+              In the rMirror window on your Mac, press the button under the suggested notebooks. It reads like
+              &quot;Sync 3 notebooks (23 pages)&quot;. Can&apos;t see the window? Click the rMirror icon in the
+              menu bar and choose &quot;Open rMirror&quot;.
             </p>
 
             <div className="rounded-xl p-6 mb-6 text-left" style={panelStyle} role="status" aria-live="polite">
@@ -457,7 +491,10 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
                 </p>
                 <ul className="text-sm space-y-1.5 list-disc pl-5" style={{ color: 'var(--warning-text)' }}>
                   <li>rMirror is open on your Mac: click its menu bar icon and choose &quot;Open rMirror&quot;.</li>
-                  <li>You pressed the &quot;Sync&quot; button in the rMirror window.</li>
+                  <li>
+                    You pressed the button under the notebook list in the rMirror window (it starts with
+                    &quot;Sync&quot; or &quot;Upload&quot;).
+                  </li>
                   <li>
                     rMirror is allowed to read your reMarkable folder. If it asked for Full Disk Access, finish its
                     steps in System Settings.
@@ -484,7 +521,7 @@ export default function SetupWizard({ getToken, onComplete, onboardingProgress }
 
             <div className="rounded-xl p-5 mb-6 text-left" style={panelStyle}>
               <p className="text-sm" style={{ color: 'var(--warm-gray)' }}>
-                Your free tier includes <strong>30 pages</strong> of OCR per month. You can always sync more later.
+                {allowanceLine(quota)}
               </p>
             </div>
 
