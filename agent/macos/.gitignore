@@ -2,3 +2,5 @@
 build/
 *.xcodeproj
 .swiftpm/
+# The repo root ignores every scripts/ directory; this package keeps its build scripts in git.
+!scripts/
