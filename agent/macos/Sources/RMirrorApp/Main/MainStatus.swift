@@ -35,7 +35,7 @@ enum MainStatus {
 
     /// Whether a finished sync's result is worth a strip in the main window.
     static func showsResult(_ progress: SyncProgress) -> Bool {
-        progress.outcome == .partial || progress.outcome == .failed
+        progress.outcome == .partial || progress.outcome == .failed || progress.outcome == .stoppedQuota
     }
 
     /// "https://rmirror.io" -> "https://rmirror.io/dashboard"; nil unless `SafeURL` allows it.

@@ -55,11 +55,14 @@ struct MainHeader: View {
 /// Allowance for the month: a line with a thin bar, or a calm banner once it is used up.
 struct MainAllowance: View {
     let quota: QuotaInfo
+    /// The core paused uploads because the allowance is used up (`queue.paused_reason == quota`).
+    var uploadsPaused = false
 
     var body: some View {
         if quota.isExhausted {
             MainNotice(kind: .attention, systemImage: "pause.circle", title: MainCopy.allowanceExhaustedTitle,
-                       lines: [MainCopy.allowanceExhaustedBody, SharedCopy.allowanceReset(quota)].compactMap { $0 })
+                       lines: MainCopy.allowanceExhaustedLines(uploadsPaused: uploadsPaused,
+                                                               resetDay: SharedCopy.resetDay(quota)))
         } else {
             HStack(spacing: Theme.Space.s) {
                 Text(SharedCopy.allowance(quota))

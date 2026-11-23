@@ -37,7 +37,7 @@ public enum SharedCopy {
     public static func resultTitle(_ progress: SyncProgress) -> String {
         switch progress.outcome {
         case .success?: return "Your notebooks are in rMirror"
-        case .partial?: return progress.counts.uploaded > 0 ? "Most of your pages are in rMirror" : "Some pages could not be uploaded"
+        case .partial?: return progress.counts.uploaded > 0 ? "Some of your pages are in rMirror" : "Some pages could not be uploaded"
         case .stoppedQuota?: return "You've used this month's pages"
         case .stoppedSignIn?: return "Please sign in again"
         case .failed?: return "The sync could not finish"
@@ -46,7 +46,8 @@ public enum SharedCopy {
     }
 
     /// One short line per thing the user should know, most important first.
-    public static func resultDetails(_ progress: SyncProgress) -> [String] {
+    /// - Parameter quota: the allowance, for the reset date after a sync stopped because the pages ran out.
+    public static func resultDetails(_ progress: SyncProgress, quota: QuotaInfo? = nil) -> [String] {
         let counts = progress.counts
         var lines: [String] = []
         if counts.uploaded > 0 { lines.append("\(pages(counts.uploaded)) uploaded.") }
@@ -61,7 +62,12 @@ public enum SharedCopy {
         }
         switch progress.outcome {
         case .stoppedQuota?:
-            lines.append("The rest will be transcribed when your pages reset.")
+            // The core does not upload the rest by itself: say so, and when to sync again.
+            if let day = quota.flatMap({ resetDay($0) }) {
+                lines.append("The rest was not uploaded. Sync again after your pages reset on \(day).")
+            } else {
+                lines.append("The rest was not uploaded. Sync again after your pages reset.")
+            }
         case .stoppedSignIn?:
             lines.append("Sign in again and the sync continues where it stopped.")
         case .failed? where counts.uploaded == 0 && counts.failed == 0:
@@ -72,10 +78,12 @@ public enum SharedCopy {
         return lines
     }
 
-    /// Whether the result screen should offer "Try again".
-    public static func resultOffersRetry(_ progress: SyncProgress) -> Bool {
+    /// Whether the result screen should offer "Try again". After a sync stopped because the pages ran
+    /// out, only once pages are available again (the month reset or the plan changed).
+    public static func resultOffersRetry(_ progress: SyncProgress, quota: QuotaInfo? = nil) -> Bool {
         switch progress.outcome {
         case .partial?, .failed?: return true
+        case .stoppedQuota?: return quota.map { !$0.isExhausted } ?? false
         default: return false
         }
     }
@@ -89,15 +97,28 @@ public enum SharedCopy {
         return "\(remaining) of \(pages(quota.limit)) left this month"
     }
 
+    /// The whole interface is English, so dates and relative times are always formatted in British
+    /// English ("1 December", "2 days ago"), whatever the system locale.
+    public static let locale = Locale(identifier: "en_GB")
+
     /// "Resets 1 December"
-    public static func allowanceReset(_ quota: QuotaInfo, calendar: Calendar = .current, locale: Locale = .current) -> String? {
+    /// - Parameter calendar: supplies the time zone only; its locale is ignored.
+    public static func allowanceReset(_ quota: QuotaInfo, calendar: Calendar = .current) -> String? {
+        resetDay(quota, calendar: calendar).map { "Resets \($0)" }
+    }
+
+    /// "1 December": the day the pages reset, or nil when unlimited or unknown.
+    public static func resetDay(_ quota: QuotaInfo, calendar: Calendar = .current) -> String? {
         guard !quota.isUnlimited, let reset = quota.resetAt else { return nil }
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.locale = locale
+        gregorian.timeZone = calendar.timeZone
         let formatter = DateFormatter()
-        formatter.calendar = calendar
+        formatter.calendar = gregorian
         formatter.locale = locale
         formatter.timeZone = calendar.timeZone
-        formatter.setLocalizedDateFormatFromTemplate("d MMMM")
-        return "Resets \(formatter.string(from: reset))"
+        formatter.dateFormat = "d MMMM"
+        return formatter.string(from: reset)
     }
 
     /// "Uses 23 of your 196 remaining pages" for a planned sync.
@@ -135,11 +156,16 @@ public enum SharedCopy {
         return "Up to date"
     }
 
-    /// "5 minutes ago", "yesterday"
-    public static func relative(_ date: Date, now: Date = Date(), locale: Locale = .current) -> String {
+    /// "5 minutes ago", "yesterday", always in English (see `locale`).
+    /// - Parameter calendar: supplies the time zone only; its locale is ignored.
+    public static func relative(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         // Also covers a clock that is slightly ahead on the other side: never say "in 5 minutes".
         if now.timeIntervalSince(date) < 60 { return "just now" }
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.locale = locale
+        gregorian.timeZone = calendar.timeZone
         let formatter = RelativeDateTimeFormatter()
+        formatter.calendar = gregorian
         formatter.locale = locale
         formatter.unitsStyle = .full
         formatter.dateTimeStyle = .named

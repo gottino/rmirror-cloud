@@ -67,6 +67,49 @@ final class SharedCopyTests: XCTestCase {
         XCTAssertEqual(SharedCopy.allowanceUse(pages: 1, remaining: nil), "Uses 1 page")
     }
 
+    func testResultWording() {
+        XCTAssertEqual(SharedCopy.resultTitle(progress(.partial, counts(uploaded: 20, failed: 3))), "Some of your pages are in rMirror")
+        // Midday UTC: 1 December in every time zone the tests might run in.
+        let quota = QuotaInfo(used: 200, limit: 200, remaining: 0,
+                              resetAt: ISO8601DateFormatter().date(from: "2026-12-01T12:00:00Z"))
+        let stopped = progress(.stoppedQuota, counts(uploaded: 5))
+        XCTAssertEqual(SharedCopy.resultDetails(stopped, quota: quota).last,
+                       "The rest was not uploaded. Sync again after your pages reset on 1 December.")
+        XCTAssertEqual(SharedCopy.resultDetails(stopped).last,
+                       "The rest was not uploaded. Sync again after your pages reset.")
+        XCTAssertFalse(SharedCopy.resultOffersRetry(stopped, quota: quota))
+        XCTAssertFalse(SharedCopy.resultOffersRetry(stopped))
+        let reset = QuotaInfo(used: 0, limit: 200, remaining: 200)
+        XCTAssertTrue(SharedCopy.resultOffersRetry(stopped, quota: reset))
+    }
+
+    func testDatesAreEnglishWhateverTheSystemLocale() throws {
+        var german = Calendar(identifier: .gregorian)
+        german.locale = Locale(identifier: "de_DE")
+        german.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Berlin"))
+        let quota = QuotaInfo(used: 4, limit: 200, remaining: 196,
+                              resetAt: ISO8601DateFormatter().date(from: "2026-12-01T00:00:00Z"))
+        XCTAssertEqual(SharedCopy.allowanceReset(quota, calendar: german), "Resets 1 December")
+        XCTAssertEqual(SharedCopy.resetDay(quota, calendar: german), "1 December")
+        let now = Fixtures.now
+        XCTAssertEqual(SharedCopy.relative(now.addingTimeInterval(-2 * 86_400), now: now, calendar: german), "2 days ago")
+        XCTAssertEqual(SharedCopy.relative(now.addingTimeInterval(-5 * 60), now: now, calendar: german), "5 minutes ago")
+        XCTAssertEqual(SharedCopy.relative(now.addingTimeInterval(-10), now: now, calendar: german), "just now")
+    }
+
+    /// One term for OCR everywhere: "turned into text".
+    func testOneTermForTurningHandwritingIntoText() {
+        var samples = MainCopy.allStrings + OnboardingCopy.allStrings + SettingsCopy.allStrings
+        for outcome in [SyncOutcome.success, .partial, .stoppedQuota, .stoppedSignIn, .failed] {
+            let value = progress(outcome, counts(uploaded: 2, failed: 1, leftOut: 1, retry: 1, total: 5))
+            samples.append(SharedCopy.resultTitle(value))
+            samples += SharedCopy.resultDetails(value)
+        }
+        for sample in samples {
+            XCTAssertNil(sample.range(of: "transcri", options: .caseInsensitive), "\"\(sample)\" says transcribe")
+        }
+    }
+
     func testStatusLine() {
         XCTAssertEqual(SharedCopy.statusLine(stage: .firstSyncProgress, state: Fixtures.firstSyncRunningState), "Syncing: 4 of 23 pages uploaded")
         XCTAssertEqual(SharedCopy.statusLine(stage: .permission, state: nil), "Needs permission to read your notebooks")

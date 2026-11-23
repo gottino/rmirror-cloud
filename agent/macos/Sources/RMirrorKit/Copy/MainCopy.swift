@@ -15,7 +15,18 @@ public enum MainCopy {
     // MARK: Allowance
 
     public static let allowanceExhaustedTitle = "You've used this month's pages"
-    public static let allowanceExhaustedBody = "New pages still upload. They are transcribed after your pages reset."
+
+    /// The banner under the title, true to what the core reports: uploads paused for the allowance,
+    /// or still uploading and waiting to be turned into text. `resetDay` is "1 December" when known.
+    public static func allowanceExhaustedLines(uploadsPaused: Bool, resetDay: String?) -> [String] {
+        if uploadsPaused {
+            if let resetDay { return ["Uploads are paused until your pages reset on \(resetDay)."] }
+            return ["Uploads are paused until your pages reset."]
+        }
+        let body = "New pages still upload. They are turned into text after your pages reset."
+        if let resetDay { return [body, "Resets \(resetDay)"] }
+        return [body]
+    }
     public static func allowanceUsedAccessibility(used: Int, limit: Int) -> String {
         "\(used) of \(SharedCopy.pages(limit)) used"
     }
@@ -91,7 +102,7 @@ public enum MainCopy {
 
     /// Shown, without blocking, when the new pages are more than the pages left this month.
     public static func overAllowance(remaining: Int) -> String {
-        "That's more than the \(SharedCopy.pages(remaining)) you have left this month. The rest will be transcribed after your pages reset."
+        "That's more than the \(SharedCopy.pages(remaining)) you have left this month. The rest is turned into text after your pages reset."
     }
 
     public static let removalNote = "Unticked notebooks stop syncing. Pages already in rMirror stay there."
@@ -115,7 +126,7 @@ public enum MainCopy {
     public static var allStrings: [String] {
         [
             openOnWeb, settings, settingsHelp, accountFallback, signedInAs("sample@example.com"),
-            allowanceExhaustedTitle, allowanceExhaustedBody, allowanceUsedAccessibility(used: 24, limit: 200),
+            allowanceExhaustedTitle, allowanceUsedAccessibility(used: 24, limit: 200),
             syncingTitle, dismiss, tryAgain, pausedTitle, pausedBody,
             listTitle, listIntro, searchPlaceholder, clearSearch, selectAll, selectNone,
             selectAllMatching, selectNoneMatching, topLevelGroup,
@@ -133,6 +144,8 @@ public enum MainCopy {
             overAllowance(remaining: 12), overAllowance(remaining: 1),
             removalNote, cancel, saveAndSync, save, saving, waitForSync,
             deletedTitle, deletedBody, syncAgain, keepRemoved, deletedWhen("yesterday"),
-        ]
+        ] + allowanceExhaustedLines(uploadsPaused: true, resetDay: "1 December")
+          + allowanceExhaustedLines(uploadsPaused: true, resetDay: nil)
+          + allowanceExhaustedLines(uploadsPaused: false, resetDay: "1 December")
     }
 }

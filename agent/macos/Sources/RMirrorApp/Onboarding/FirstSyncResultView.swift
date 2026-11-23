@@ -18,7 +18,7 @@ struct FirstSyncResultView: View {
     }
 
     private var offersRetry: Bool {
-        SharedCopy.resultOffersRetry(progress) && !selectedNotebookUUIDs.isEmpty
+        SharedCopy.resultOffersRetry(progress, quota: store.state?.quota) && !selectedNotebookUUIDs.isEmpty
     }
 
     var body: some View {
@@ -28,7 +28,7 @@ struct FirstSyncResultView: View {
             title: SharedCopy.resultTitle(progress)
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ForEach(SharedCopy.resultDetails(progress), id: \.self) { line in
+                ForEach(SharedCopy.resultDetails(progress, quota: store.state?.quota), id: \.self) { line in
                     Text(line)
                         .font(Theme.Font.body)
                         .fixedSize(horizontal: false, vertical: true)

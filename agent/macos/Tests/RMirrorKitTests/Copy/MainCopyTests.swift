@@ -37,9 +37,18 @@ final class MainCopyTests: XCTestCase {
         XCTAssertEqual(MainCopy.changeSummary(added: 1, removed: 0, newPages: 0), "1 notebook added")
     }
 
+    func testAllowanceBannerFollowsWhatTheCoreReports() {
+        XCTAssertEqual(MainCopy.allowanceExhaustedLines(uploadsPaused: true, resetDay: "1 December"),
+                       ["Uploads are paused until your pages reset on 1 December."])
+        XCTAssertEqual(MainCopy.allowanceExhaustedLines(uploadsPaused: true, resetDay: nil),
+                       ["Uploads are paused until your pages reset."])
+        XCTAssertEqual(MainCopy.allowanceExhaustedLines(uploadsPaused: false, resetDay: "1 December"),
+                       ["New pages still upload. They are turned into text after your pages reset.", "Resets 1 December"])
+    }
+
     func testOverAllowanceAndRowLabel() {
         XCTAssertEqual(MainCopy.overAllowance(remaining: 12),
-                       "That's more than the 12 pages you have left this month. The rest will be transcribed after your pages reset.")
+                       "That's more than the 12 pages you have left this month. The rest is turned into text after your pages reset.")
         XCTAssertEqual(MainCopy.rowAccessibilityLabel(name: "Meeting Notes", pages: 12, selected: true),
                        "Meeting Notes, 12 pages, selected")
     }

@@ -62,7 +62,7 @@ struct MainView: View {
                 webURL: MainStatus.dashboardURL(store.state)
             )
             if let quota = store.state?.quota {
-                MainAllowance(quota: quota)
+                MainAllowance(quota: quota, uploadsPaused: store.state?.queue.pausedReason == .quota)
             }
             notices
         }
@@ -75,9 +75,9 @@ struct MainView: View {
         } else if let finishedSync {
             MainNotice(kind: .attention, systemImage: "exclamationmark.circle",
                        title: SharedCopy.resultTitle(finishedSync),
-                       lines: SharedCopy.resultDetails(finishedSync),
+                       lines: SharedCopy.resultDetails(finishedSync, quota: store.state?.quota),
                        onDismiss: { self.finishedSync = nil }) {
-                if SharedCopy.resultOffersRetry(finishedSync) {
+                if SharedCopy.resultOffersRetry(finishedSync, quota: store.state?.quota) {
                     Button(MainCopy.tryAgain) { Task { await retrySync() } }
                         .buttonStyle(.rmSecondary)
                         .disabled(store.isStartingSync)
