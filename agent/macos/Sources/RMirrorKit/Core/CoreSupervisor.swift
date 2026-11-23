@@ -80,7 +80,7 @@ public struct CoreSupervisorTiming: Sendable {
 public final class CoreSupervisor: @unchecked Sendable {
     public static let exitCodePortInUse: Int32 = 3
     public static let readyLinePrefix = "RMIRROR_CORE_READY"
-    /// The last bytes of the core's stderr kept for the system log when it fails.
+    /// The last bytes of the core's stderr kept for diagnostics when it fails.
     public static let stderrTailBytes = 4 * 1024
 
     private let spec: CoreLaunchSpec
@@ -104,12 +104,12 @@ public final class CoreSupervisor: @unchecked Sendable {
     private var currentToken: String?
     private var onStatusChange: (@Sendable (CoreStatus) -> Void)?
 
-    /// - Parameter log: where failure details go (default: the system log via `NSLog`).
+    /// - Parameter log: where failure details go (default: a file only the user can read, see `CoreDiagnostics`).
     public init(
         spec: CoreLaunchSpec,
         timing: CoreSupervisorTiming = CoreSupervisorTiming(),
         callbackQueue: DispatchQueue = .main,
-        log: @escaping @Sendable (String) -> Void = { NSLog("%@", $0) }
+        log: @escaping @Sendable (String) -> Void = { CoreDiagnostics.record($0) }
     ) {
         self.spec = spec
         self.timing = timing
@@ -361,7 +361,7 @@ public final class CoreSupervisor: @unchecked Sendable {
         }
     }
 
-    /// Writes the end of the core's stderr to the system log. The launch token only ever travels
+    /// Hands the end of the core's stderr to the diagnostics sink. The launch token only ever travels
     /// in the child's environment and the core never prints it; if the tail contains it anyway,
     /// the tail is withheld.
     private func logStderrTail(_ tail: BoundedTail, token: String?, reason: String) {
@@ -527,4 +527,48 @@ public enum CoreLocator {
         )
     }
     #endif
+}
+
+/// Where details of a failed core go. The core's stderr can contain file paths, an email address
+/// or other personal details from a Python traceback, so it is never written to the system log
+/// (which other tools and sysdiagnose archives can read). It goes to a file only the user can
+/// read; the system log gets one fixed line that points to it.
+public enum CoreDiagnostics {
+    public static let maxFileBytes = 64 * 1024
+
+    public static var fileURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/rMirror", isDirectory: true)
+            .appendingPathComponent("core-failures.log")
+    }
+
+    public static func record(_ message: String) {
+        if write(message, to: fileURL) {
+            NSLog("rMirror: the sync core had a problem; details are in ~/Library/Logs/rMirror/core-failures.log")
+        } else {
+            NSLog("rMirror: the sync core had a problem; details could not be saved")
+        }
+    }
+
+    /// Appends a timestamped entry, keeping the file private (0600) and bounded.
+    @discardableResult
+    static func write(_ message: String, to url: URL, now: Date = Date()) -> Bool {
+        let manager = FileManager.default
+        do {
+            try manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                        attributes: [.posixPermissions: 0o700])
+            var contents = (try? Data(contentsOf: url)) ?? Data()
+            let stamp = ISO8601DateFormatter().string(from: now)
+            contents.append(Data("[\(stamp)] \(message)\n".utf8))
+            if contents.count > maxFileBytes { contents = contents.suffix(maxFileBytes) }
+            if !manager.fileExists(atPath: url.path) {
+                guard manager.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { return false }
+            }
+            try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            try contents.write(to: url, options: [])
+            return true
+        } catch {
+            return false
+        }
+    }
 }
