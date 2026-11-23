@@ -22,6 +22,7 @@ final class LiveCoreTests: XCTestCase {
         let state = try await api.state()
         XCTAssertEqual(state.apiVersion, 2)
         XCTAssertFalse(state.auth.signedIn, "the throwaway core has no sign-in")
+        XCTAssertEqual(state.auth.state, .signedOut)
         if case .unknown(let raw) = state.folder.state { XCTFail("unknown folder state \(raw)") }
         if case .unknown(let raw) = state.watcher.state { XCTFail("unknown watcher state \(raw)") }
         if case .unknown(let raw) = state.sync.state { XCTFail("unknown sync state \(raw)") }
@@ -36,6 +37,22 @@ final class LiveCoreTests: XCTestCase {
         let suggestion = try await api.firstRunSuggestion(max: 3)
         XCTAssertEqual(suggestion.reason, .notSignedIn)
         XCTAssertTrue(suggestion.notebooks.isEmpty)
+    }
+
+    func testBeginSignInGivesAOneTimeLinkToThisCore() async throws {
+        let api = try client()
+        let url = try await api.beginSignIn()
+        XCTAssertEqual(url.host, "127.0.0.1")
+        XCTAssertEqual(url.path, "/auth/bridge")
+        XCTAssertTrue(url.query?.hasPrefix("ticket=") ?? false)
+    }
+
+    func testOldUnprotectedRoutesAreGone() async throws {
+        let api = try client()
+        for path in ["/api/status", "/api/config", "/"] {
+            let (_, response) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(api.port)\(path)")!)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 404, path)
+        }
     }
 
     func testWrongTokenIsRejected() async throws {
