@@ -52,7 +52,6 @@ public struct CoreConnection: Equatable, Sendable {
 
 public struct CoreSupervisorTiming: Sendable {
     public var readyTimeout: TimeInterval = 30
-    public var healthPollInterval: TimeInterval = 0.5
     public var restartBackoff: [TimeInterval] = [1, 2, 5, 15, 30]
     /// More than `maxFailures` unexpected exits within `failureWindow` stops the restart loop.
     public var maxFailures = 5
@@ -76,7 +75,6 @@ public final class CoreSupervisor: @unchecked Sendable {
     private let timing: CoreSupervisorTiming
     private let queue = DispatchQueue(label: "io.rmirror.core-supervisor")
     private let callbackQueue: DispatchQueue
-    private let healthCheck: @Sendable (Int) -> Bool
 
     // All state below is confined to `queue`.
     private var status: CoreStatus = .stopped
@@ -92,13 +90,11 @@ public final class CoreSupervisor: @unchecked Sendable {
     public init(
         spec: CoreLaunchSpec,
         timing: CoreSupervisorTiming = CoreSupervisorTiming(),
-        callbackQueue: DispatchQueue = .main,
-        healthCheck: (@Sendable (Int) -> Bool)? = nil
+        callbackQueue: DispatchQueue = .main
     ) {
         self.spec = spec
         self.timing = timing
         self.callbackQueue = callbackQueue
-        self.healthCheck = healthCheck ?? CoreSupervisor.defaultHealthCheck
     }
 
     /// Called on `callbackQueue` every time the status changes.
@@ -195,7 +191,7 @@ public final class CoreSupervisor: @unchecked Sendable {
         }
         process = child
         stdinPipe = stdin
-        pollHealth(generation: launchGeneration, token: token, deadline: Date().addingTimeInterval(timing.readyTimeout))
+        armReadyTimeout(generation: launchGeneration)
     }
 
     private func consumeStdout(_ data: Data, generation launchGeneration: Int, token: String) {
@@ -212,26 +208,21 @@ public final class CoreSupervisor: @unchecked Sendable {
         markRunning(token: token, port: CoreSupervisor.port(fromReadyLine: String(readyLine)) ?? spec.port)
     }
 
-    private func pollHealth(generation launchGeneration: Int, token: String, deadline: Date) {
-        queue.asyncAfter(deadline: .now() + timing.healthPollInterval) { [weak self] in
+    /// The only readiness signal is the ready line on the child's own stdout. A health request
+    /// to the port is deliberately not used: if another process were listening there, it would
+    /// answer, and the app would then send it the launch token.
+    private func armReadyTimeout(generation launchGeneration: Int) {
+        queue.asyncAfter(deadline: .now() + timing.readyTimeout) { [weak self] in
             guard let self, launchGeneration == self.generation, case .starting = self.status else { return }
-            if self.healthCheck(self.spec.port) {
-                self.markRunning(token: token, port: self.spec.port)
-            } else if Date() >= deadline {
-                // Never became ready: stop it and treat as a failed start.
-                self.generation += 1  // detach the exit handler of this child
-                self.terminateCurrent(waitForExit: true)
-                self.wantRunning = false
-                self.setStatus(.failed(.readyTimeout))
-            } else {
-                self.pollHealth(generation: launchGeneration, token: token, deadline: deadline)
-            }
+            self.terminateCurrent(waitForExit: true)
+            self.wantRunning = false
+            self.setStatus(.failed(.readyTimeout))
         }
     }
 
     private func markRunning(token: String, port: Int) {
         dispatchPrecondition(condition: .onQueue(queue))
-        guard case .starting = status else { return }
+        guard case .starting = status, process?.isRunning == true else { return }
         restartAttempt = 0
         setStatus(.running(CoreConnection(port: port, appToken: token)))
     }
@@ -308,23 +299,6 @@ public final class CoreSupervisor: @unchecked Sendable {
         if let handler = onStatusChange {
             callbackQueue.async { handler(newStatus) }
         }
-    }
-
-    // MARK: - Health
-
-    private static let defaultHealthCheck: @Sendable (Int) -> Bool = { port in
-        guard let url = URL(string: "http://127.0.0.1:\(port)/health") else { return false }
-        var request = URLRequest(url: url, timeoutInterval: 1)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        let semaphore = DispatchSemaphore(value: 0)
-        var healthy = false
-        let task = URLSession.shared.dataTask(with: request) { _, response, _ in
-            healthy = (response as? HTTPURLResponse)?.statusCode == 200
-            semaphore.signal()
-        }
-        task.resume()
-        if semaphore.wait(timeout: .now() + 1.5) == .timedOut { task.cancel() }
-        return healthy
     }
 }
 

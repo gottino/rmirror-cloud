@@ -23,19 +23,17 @@ final class CoreSupervisorTests: XCTestCase {
 
     private func fastTiming() -> CoreSupervisorTiming {
         var timing = CoreSupervisorTiming()
-        timing.healthPollInterval = 0.05
         timing.restartBackoff = [0.05]
         timing.terminateGrace = 2
         return timing
     }
 
-    private func supervisor(_ url: URL, timing: CoreSupervisorTiming? = nil, healthy: Bool = false) -> (CoreSupervisor, StatusRecorder) {
+    private func supervisor(_ url: URL, timing: CoreSupervisorTiming? = nil) -> (CoreSupervisor, StatusRecorder) {
         let recorder = StatusRecorder()
         let supervisor = CoreSupervisor(
             spec: CoreLaunchSpec(executableURL: url, arguments: [], port: 5999),
             timing: timing ?? fastTiming(),
-            callbackQueue: DispatchQueue(label: "test-callbacks"),
-            healthCheck: { _ in healthy }
+            callbackQueue: DispatchQueue(label: "test-callbacks")
         )
         supervisor.setStatusHandler { recorder.append($0) }
         return (supervisor, recorder)
@@ -51,14 +49,6 @@ final class CoreSupervisorTests: XCTestCase {
         XCTAssertEqual(connection.appToken.count, 64)
         supervisor.stopAndWait()
         XCTAssertEqual(supervisor.currentStatus, .stopped)
-    }
-
-    func testHealthCheckAloneMakesItRunning() throws {
-        let url = try script("cat >/dev/null")
-        let (supervisor, recorder) = supervisor(url, healthy: true)
-        supervisor.start()
-        XCTAssertNotNil(recorder.waitFor { $0 == .running(CoreConnection(port: 5999, appToken: "")) || { if case .running = $0 { return true } else { return false } }($0) })
-        supervisor.stopAndWait()
     }
 
     func testTheTokenReachesTheChildEnvironment() throws {
