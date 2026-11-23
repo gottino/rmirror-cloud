@@ -154,32 +154,46 @@ jobs:
       - name: Unit tests
         run: cd agent && poetry run pytest tests/ -v --tb=short -x
 
-  # rMirror for Mac 2.0 (Swift package). Pull requests only, and only when
-  # agent/macos changed: the deploy workflows reuse this file and do not need it.
-  agent-macos-checks:
+  # rMirror for Mac 2.0 (Swift package). Pull requests only: the deploy workflows reuse
+  # this file and do not need it.
+  #
+  # Two jobs on purpose. macOS runners can take a long time to be assigned, so a cheap
+  # Linux job first decides whether the Mac app changed at all. Only then is a macOS
+  # runner requested; otherwise the Swift job is skipped at once and unrelated pull
+  # requests never wait for one.
+  agent-macos-changes:
     if: github.event_name == 'pull_request'
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.changes.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Check for agent/macos changes
+      - name: Check for Mac app changes
         id: changes
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          if git diff --quiet "origin/$BASE_REF...HEAD" -- agent/macos; then
+          # The Swift package, or this workflow (so a change to the Swift job is itself tested).
+          if git diff --quiet "origin/$BASE_REF...HEAD" -- agent/macos .github/workflows/ci.yml; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "agent/macos unchanged: skipping Swift build and tests"
+            echo "Mac app unchanged: the Swift build and tests are skipped"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat "origin/$BASE_REF...HEAD" -- agent/macos .github/workflows/ci.yml | tail -1
           fi
 
+  agent-macos-checks:
+    needs: agent-macos-changes
+    if: github.event_name == 'pull_request' && needs.agent-macos-changes.outputs.changed == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Build
-        if: steps.changes.outputs.changed == 'true'
         run: cd agent/macos && swift --version && swift build
 
       - name: Unit tests
-        if: steps.changes.outputs.changed == 'true'
         run: cd agent/macos && swift test

@@ -111,7 +111,7 @@ x86_64 is **untested**: if the Intel core fails under the hardened runtime, add 
 - `.github/workflows/build-mac-app.yml` (macos-15, arm64 core) and `build-mac-app-intel.yml` (macos-15-intel,
   x86_64 core): `workflow_dispatch` only, same secrets as the legacy agent workflows, DMG kept as a workflow
   artifact. No upload, no release.
-- `ci.yml` job `agent-macos-checks`: `swift build` + `swift test` on pull requests that change `agent/macos/`.
+- `ci.yml` job `agent-macos-checks`: `swift build` + `swift test` on pull requests that change `agent/macos/` (or `ci.yml` itself). A cheap Linux job, `agent-macos-changes`, decides that first, so other pull requests skip the Swift job without ever waiting for a macOS runner.
 
 ## Not done by the script (release time, by the owner)
 
