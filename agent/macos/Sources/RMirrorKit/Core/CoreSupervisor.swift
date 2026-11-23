@@ -48,6 +48,11 @@ public enum CoreStatus: Equatable, Sendable {
 public struct CoreConnection: Equatable, Sendable {
     public let port: Int
     public let appToken: String
+
+    public init(port: Int, appToken: String) {
+        self.port = port
+        self.appToken = appToken
+    }
 }
 
 public struct CoreSupervisorTiming: Sendable {

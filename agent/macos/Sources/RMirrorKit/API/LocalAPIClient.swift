@@ -41,7 +41,7 @@ public final class LocalAPIClient: LocalAPI, @unchecked Sendable {
     private let encoder = LocalAPICoding.makeEncoder()
 
     /// Where the user signs in (opened in the default browser).
-    public var signInURL: URL { URL(string: "http://localhost:\(port)/auth/bridge")! }
+    public var signInURL: URL { URL(string: "http://127.0.0.1:\(port)/auth/bridge")! }
 
     public init(port: Int, appToken: String, session: URLSession? = nil) {
         self.port = port

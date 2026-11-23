@@ -215,7 +215,7 @@ final class LocalAPITests: XCTestCase {
     }
 
     func testSignInURL() {
-        XCTAssertEqual(client().signInURL.absoluteString, "http://localhost:5555/auth/bridge")
+        XCTAssertEqual(client().signInURL.absoluteString, "http://127.0.0.1:5555/auth/bridge")
     }
 
     // MARK: Errors
