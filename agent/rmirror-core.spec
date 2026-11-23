@@ -74,6 +74,9 @@ a = Analysis(
         'Foundation',
         'objc',
         'PyObjCTools',
+        # Dev-only: collect_submodules('pydantic') reaches pydantic.mypy, which would pull in
+        # mypy's compiled modules (~5 MB) when mypy is installed in the build environment
+        'mypy',
         # Not used
         'matplotlib',
         'numpy',
