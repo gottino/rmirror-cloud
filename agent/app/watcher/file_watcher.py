@@ -19,9 +19,10 @@ from watchdog.observers import Observer
 
 from app.config import Config
 from app.remarkable.library import FOLDER_UNREADABLE, folder_state
+from app.sync.catch_up import CatchUp
 from app.sync.cloud_sync import CloudSync
 from app.sync.manifest import UploadManifest, fingerprint_file
-from app.sync.queue import SyncQueue
+from app.sync.queue import PAUSED_SIGN_IN, SyncQueue
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +33,17 @@ class ReMarkableEventHandler(FileSystemEventHandler):
     # File extensions we care about
     RELEVANT_EXTENSIONS = {".content", ".metadata", ".pagedata", ".rm", ".pdf", ".epub"}
 
-    def __init__(self, sync_queue: SyncQueue, config: Config):
-        """Initialize event handler."""
+    def __init__(self, sync_queue: SyncQueue, config: Config, gate: Callable[[], bool] | None = None):
+        """Initialize event handler.
+
+        ``gate``: when given, events are only queued while it returns True (the
+        watcher closes it until the current API host has been caught up with, see
+        ``app.sync.catch_up``; the catch-up scan covers those files instead).
+        """
         super().__init__()
         self.sync_queue = sync_queue
         self.config = config
+        self._gate = gate
         # Wall-clock time of the last event watchdog delivered (any type), for /api/status
         self.last_event_at: datetime | None = None
 
@@ -177,6 +184,10 @@ class ReMarkableEventHandler(FileSystemEventHandler):
             print(f"⏭️  Skipping (not selected): {file_path.name} (UUID: {notebook_uuid})")
             return
 
+        if self._gate is not None and not self._gate():
+            logger.debug(f"Not queued (catch-up with the server not done yet): {file_path.name}")
+            return
+
         # Get file type
         file_type = self._get_file_type(file_path)
 
@@ -212,14 +223,16 @@ def scan_for_changes(
     Uses the watcher's own filters (``_should_ignore_file``, ``_extract_notebook_uuid``,
     ``_should_sync_notebook``), so the scan considers exactly the files the watcher would.
 
-    Baseline rule: the first time this runs for an API host the manifest is empty.
-    Uploading everything then would spend the user's OCR quota on the whole library
-    without asking (first uploads go through the explicit initial sync, which has a
-    page limit). So on that first run every existing file is recorded as a *baseline*
-    (hash stored, not uploaded) and nothing is returned. From then on, files that are
-    new or whose hash differs from their entry (baseline or uploaded) are returned.
-    Files of notebooks that are not selected for sync are baselined if they have no
-    entry yet, so selecting a notebook later does not upload its whole history either.
+    Meant for a manifest whose host is initialised: ``FileWatcher.rescan`` only
+    calls it after the first-contact catch-up (``app.sync.catch_up``) has
+    initialised the host for the signed-in account. Files that are new or whose
+    hash differs from their entry (baseline or uploaded) are returned. Files of
+    notebooks that are not selected for sync are baselined if they have no entry
+    yet, so selecting a notebook later does not upload its whole history either.
+
+    Called on a host that is not initialised (direct callers only) it keeps the
+    old blind rule: every existing file is recorded as a baseline and nothing is
+    returned.
 
     Blocking (stats and hashes files); run it off the event loop.
 
@@ -327,6 +340,14 @@ class FileWatcher:
         self.sync_queue = SyncQueue(config, cloud_sync, manifest=manifest, on_status=on_status)
         # Rescan when the queue resumes after the user signs in again
         self.sync_queue.on_reconnect = self.rescan
+        # First contact with a host: ask the server what it has before any upload
+        self.catch_up = CatchUp(
+            config,
+            cloud_sync,
+            self.sync_queue.manifest,
+            clock=clock,
+            on_sign_in_required=self._catch_up_sign_in_required,
+        )
 
         self._observer_factory = observer_factory
         self._clock = clock
@@ -361,19 +382,20 @@ class FileWatcher:
 
         await self.sync_queue.start()
 
-        self.event_handler = ReMarkableEventHandler(self.sync_queue, self.config)
+        self.event_handler = ReMarkableEventHandler(self.sync_queue, self.config, gate=self.catch_up.gate_open)
 
-        # First run for this backend: record the baseline before watching, so the
-        # baseline cannot swallow a change made while it is being recorded.
-        baseline_first = not await asyncio.to_thread(self.sync_queue.manifest.is_initialised)
-        if baseline_first:
+        # First contact with this backend: catch up (records what the server has)
+        # before watching, so the records cannot swallow a change made meanwhile.
+        # Events stay ignored (gate closed) until the catch-up has run.
+        catch_up_first = not await asyncio.to_thread(self.sync_queue.manifest.is_initialised)
+        if catch_up_first:
             await self._rescan_logged("start-up")
 
         self._start_observer()
         print(f"Observer started, is_alive: {self.observer.is_alive()}")
 
         # Later runs: scan after the observer is up, so no change slips between the two
-        if not baseline_first:
+        if not catch_up_first:
             await self._rescan_logged("start-up")
 
         self.running = True
@@ -407,6 +429,9 @@ class FileWatcher:
             if self.running and self._clock() >= next_rescan:
                 await self._periodic_rescan()
                 next_rescan = self._clock() + self._rescan_interval()
+            elif self.running and self.catch_up.retry_due():
+                # A failed catch-up retries on its own backoff, not the rescan interval
+                await self._periodic_rescan(reason="catch-up")
 
     def observer_alive(self) -> bool:
         """Whether the observer thread and all its emitter threads are running."""
@@ -455,12 +480,12 @@ class FileWatcher:
         logger.info("Observer restarted")
         await self._rescan_logged("observer restart")
 
-    async def _periodic_rescan(self) -> None:
+    async def _periodic_rescan(self, reason: str = "periodic") -> None:
         """Safety-net rescan; skipped if another rescan is still running."""
         if not self.running or self._rescan_lock.locked():
             return
         try:
-            count = await self.rescan(reason="periodic")
+            count = await self.rescan(reason=reason)
         except Exception as e:
             logger.warning(f"Periodic rescan failed: {e}", exc_info=True)
             return
@@ -471,23 +496,33 @@ class FileWatcher:
     async def rescan(self, reason: str = "reconnect") -> int:
         """Queue files that changed since they were last seen (see scan_for_changes).
 
-        Rescans never overlap; a second caller waits for the first.
+        First makes sure the current API host has been caught up with for the
+        signed-in account (``CatchUp.ensure_ready``); until then nothing is scanned,
+        baselined or queued. Rescans never overlap; a second caller waits for the first.
         """
         async with self._rescan_lock:
             source_dir = Path(self.config.remarkable.source_directory)
             handler = self.event_handler or ReMarkableEventHandler(self.sync_queue, self.config)
+            manifest = self.sync_queue.manifest
             try:
+                host = manifest.api_host
+                ready = await self.catch_up.ensure_ready(source_dir, handler, reason)
+                if not ready:
+                    self._record_rescan(reason, f"waiting for catch-up ({self.catch_up.waiting_reason})")
+                    return 0
+                # Pinned to the host that was checked: a server switch during the
+                # scan must not write records for the new, not yet caught-up host
                 changed = await asyncio.to_thread(
                     scan_for_changes,
                     source_dir,
                     handler,
-                    self.sync_queue.manifest,
-                    reason != "periodic",
+                    manifest.for_host(host) if isinstance(manifest, UploadManifest) else manifest,
+                    reason not in ("periodic", "catch-up"),
                 )
             except Exception as e:
                 self._record_rescan(reason, f"failed: {e}")
                 raise
-            if reason == "periodic" and not self.running:
+            if reason in ("periodic", "catch-up") and not self.running:
                 # Stopped while scanning: leave the changes to the next start-up scan
                 self._record_rescan(reason, "stopped")
                 return 0
@@ -495,6 +530,11 @@ class FileWatcher:
                 await self.sync_queue.add(file_path, notebook_uuid, file_type)
             self._record_rescan(reason, f"{len(changed)} changed")
             return len(changed)
+
+    def _catch_up_sign_in_required(self) -> None:
+        """The catch-up request was rejected (401): same path as an upload rejected with 401."""
+        if self.sync_queue.paused_reason != PAUSED_SIGN_IN:
+            self.sync_queue._pause(PAUSED_SIGN_IN)
 
     def _record_rescan(self, reason: str, result: str) -> None:
         self.last_rescan_at = datetime.now()

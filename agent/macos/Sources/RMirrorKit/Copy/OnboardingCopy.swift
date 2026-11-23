@@ -22,6 +22,9 @@ public enum OnboardingCopy {
     /// Shown when starting takes longer than usual (the first start after an install or update can take a minute).
     public static let startingSlowMessage = "The first start after installing or updating can take up to a minute."
     public static let checkingSignIn = "Checking your sign-in…"
+    /// First contact with a server or account: rMirror asks it which pages it already has.
+    public static let checkingOnlineTitle = "Checking what's already online…"
+    public static let checkingOnlineMessage = "rMirror is looking at which pages are already in your account, so it only uploads what is new or changed."
 
     // MARK: Could not start
 
@@ -156,6 +159,7 @@ public enum OnboardingCopy {
         [
             tryAgain, quit, cancel, done, checksByItself,
             startingTitle, startingMessage, startingSlowMessage, checkingSignIn,
+            checkingOnlineTitle, checkingOnlineMessage,
             otherCopyTitle, otherCopyMessage, otherCopyHowTo,
             cannotStartTitle, cannotStartMissingPart, cannotStartMessage,
             signInTitle, signInIntro, signInRenewTitle, signInRenewMessage, signInButton, signInHint,

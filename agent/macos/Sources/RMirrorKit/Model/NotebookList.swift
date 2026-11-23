@@ -179,6 +179,12 @@ public enum NotebookList {
         draft.union(visible)
     }
 
+    /// The notebooks the server already has pages of that are not ticked in `draft`, in list order
+    /// ("Tick them" in the notice after a catch-up).
+    public static func onServerNotTicked(_ notebooks: [NotebookEntry], draft: Set<String>) -> [String] {
+        notebooks.filter { $0.onServer && !draft.contains($0.uuid) }.map(\.uuid)
+    }
+
     /// "Select none" for the rows currently visible; rows hidden by the search keep their state.
     public static func selectingNone(_ visible: [String], in draft: Set<String>) -> Set<String> {
         draft.subtracting(visible)

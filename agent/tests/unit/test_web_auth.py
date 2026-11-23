@@ -233,6 +233,25 @@ class TestCallback:
         assert resp.status_code == 302
 
 
+    def test_sign_in_rescans_a_running_watcher_and_forgets_the_old_email(
+        self, app, client, config, cloud_sync, mock_keychain, no_register
+    ):
+        """The catch-up for the (possibly different) account starts right away."""
+        config.remarkable.watch_enabled = True
+        cloud_sync.user_email = "previous@example.test"
+        agent = MagicMock()
+        app.config["AGENT"] = agent
+        state = _state_from_live_bridge(client)
+        with patch.object(routes, "verify_agent_token", new=AsyncMock(return_value=True)), patch.object(
+            routes.shared, "request_rescan"
+        ) as request_rescan:
+            resp = self._callback(client, state=state, token="new-token")
+        assert resp.status_code == 302
+        agent.start_file_watcher_sync.assert_called_once()
+        request_rescan.assert_called_once_with(app, "sign-in")
+        assert cloud_sync.user_email is None
+
+
 class TestVerifyAgentToken:
     def test_true_on_200(self, cloud_sync):
         cloud_sync.client, _ = _backend_returning(200)

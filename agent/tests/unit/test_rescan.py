@@ -112,9 +112,8 @@ class TestRescan:
 
 class TestRestart:
     async def test_file_changed_while_stopped_uploads_after_restart(self, source, config, manifest):
-        # First run: baseline only
-        first = FileWatcher(config, MagicMock(), manifest=manifest)
-        assert await first.rescan() == 0
+        # Earlier run: the host was initialised (existing files recorded)
+        assert scan_for_changes(source, ReMarkableEventHandler(MagicMock(), config), manifest) == []
 
         # Agent stopped; the user edits a page
         page = source / NB / "p1.rm"

@@ -27,6 +27,19 @@ public enum Stage: Equatable, Sendable {
         case expired
     }
 
+    /// The core is asking the server which pages it already has (`catch_up.state` `pending`), and the app
+    /// should wait for it: signed in (or offline with a stored sign-in) and the folder readable. The
+    /// starting screen and the status line say so instead of "Starting".
+    public static func isCatchingUp(_ state: AppState?) -> Bool {
+        guard let state, state.catchUp.state == .pending, !state.auth.signInRequired,
+              state.folder.state == .ok else { return false }
+        switch state.auth.state {
+        case .offline: return true
+        case .checking: return false
+        default: return state.auth.signedIn
+        }
+    }
+
     /// - Parameter guidedSyncActive: the user started the guided first sync in this session
     ///   and has not dismissed its result yet.
     public static func derive(core: CoreStatus, state: AppState?, guidedSyncActive: Bool) -> Stage {
@@ -54,6 +67,9 @@ public enum Stage: Equatable, Sendable {
         case .unreadable: return .permission
         default: break
         }
+        // First contact with this server or account: the core is asking what is already online.
+        // Until it knows, `first_sync` means nothing, so neither the first sync nor the main window shows.
+        if isCatchingUp(state) { return .starting }
 
         if guidedSyncActive {
             switch state.sync.state {

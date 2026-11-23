@@ -27,6 +27,9 @@ final class LiveCoreTests: XCTestCase {
         if case .unknown(let raw) = state.watcher.state { XCTFail("unknown watcher state \(raw)") }
         if case .unknown(let raw) = state.sync.state { XCTFail("unknown sync state \(raw)") }
         if case .unknown(let raw) = state.environment.name { XCTFail("unknown environment \(raw)") }
+        // A throwaway core has never caught up with its server, and has no notice while signed out.
+        XCTAssertEqual(state.catchUp.state, .pending)
+        XCTAssertEqual(state.catchUp.unselectedOnServer, 0)
 
         _ = try await api.notebooks()
         _ = try await api.syncProgress()

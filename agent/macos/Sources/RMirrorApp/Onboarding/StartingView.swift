@@ -11,16 +11,28 @@ struct StartingView: View {
 
     /// The core is up and is checking the saved sign-in with rMirror Cloud.
     private var isCheckingSignIn: Bool { store.state?.auth.state == .checking }
+    /// First contact with this server or account: the core asks it which pages it already has.
+    private var isCatchingUp: Bool { Stage.isCatchingUp(store.state) }
+
+    private var title: String {
+        if isCatchingUp { return OnboardingCopy.checkingOnlineTitle }
+        return isCheckingSignIn ? OnboardingCopy.checkingSignIn : OnboardingCopy.startingTitle
+    }
+
+    private var message: String {
+        if isCatchingUp { return OnboardingCopy.checkingOnlineMessage }
+        return takingLonger ? OnboardingCopy.startingSlowMessage : OnboardingCopy.startingMessage
+    }
 
     var body: some View {
         VStack(spacing: Theme.Space.m) {
             ProgressView()
                 .controlSize(.regular)
                 .accessibilityHidden(true)
-            Text(isCheckingSignIn ? OnboardingCopy.checkingSignIn : OnboardingCopy.startingTitle)
+            Text(title)
                 .font(Theme.Font.heading)
                 .foregroundStyle(Theme.text)
-            Text(takingLonger ? OnboardingCopy.startingSlowMessage : OnboardingCopy.startingMessage)
+            Text(message)
                 .font(Theme.Font.body)
                 .foregroundStyle(Theme.textSecondary)
         }

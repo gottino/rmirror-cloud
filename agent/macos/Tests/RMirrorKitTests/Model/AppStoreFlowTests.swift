@@ -57,6 +57,7 @@ final class GatedLocalAPI: LocalAPI, @unchecked Sendable {
     func setSelection(syncAll: Bool, selectedNotebooks: [String]) async throws {
         try await base.setSelection(syncAll: syncAll, selectedNotebooks: selectedNotebooks)
     }
+    func dismissCatchUp() async throws { try await base.dismissCatchUp() }
     func firstRunSuggestion(max: Int) async throws -> FirstRunSuggestion { try await base.firstRunSuggestion(max: max) }
     func syncProgress() async throws -> SyncProgress { try await base.syncProgress() }
     func resumeSync() async throws { try await base.resumeSync() }

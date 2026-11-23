@@ -228,6 +228,33 @@ public struct SyncCounts: Codable, Equatable, Sendable {
     }
 }
 
+/// `catch_up` in `/api/v2/state`: the first contact with a server or account. A core that does not
+/// send it reads as `notNeeded` with no notice.
+public struct CatchUpInfo: Codable, Equatable, Sendable {
+    public var state: CatchUpState
+    /// Notebooks the server has pages for that are not ticked on this Mac. Non-zero only while the
+    /// selection notice is pending (`POST /api/v2/catch-up/dismiss` clears it for good).
+    public var unselectedOnServer: Int
+
+    public init(state: CatchUpState = .notNeeded, unselectedOnServer: Int = 0) {
+        self.state = state
+        self.unselectedOnServer = unselectedOnServer
+    }
+
+    public static let notNeeded = CatchUpInfo()
+
+    enum CodingKeys: String, CodingKey {
+        case state
+        case unselectedOnServer = "unselected_on_server"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = try c.decodeIfPresent(CatchUpState.self, forKey: .state) ?? .notNeeded
+        unselectedOnServer = max(0, try c.decodeIfPresent(Int.self, forKey: .unselectedOnServer) ?? 0)
+    }
+}
+
 /// `GET /api/v2/sync/progress`, also embedded as `sync` in `/api/v2/state`.
 public struct SyncProgress: Codable, Equatable, Sendable {
     public var state: SyncState
@@ -263,12 +290,15 @@ public struct AppState: Codable, Equatable, Sendable {
     public var queue: QueueInfo
     public var quota: QuotaInfo?
     public var firstSync: FirstSyncInfo
+    /// Missing from an older core: `notNeeded`, no notice.
+    public var catchUp: CatchUpInfo
     public var sync: SyncProgress
     public var lastUploadAt: Date?
 
     public init(apiVersion: Int = 2, coreVersion: String, auth: AuthInfo, environment: EnvironmentInfo,
                 folder: FolderInfo, watcher: WatcherInfo, queue: QueueInfo, quota: QuotaInfo?,
-                firstSync: FirstSyncInfo, sync: SyncProgress, lastUploadAt: Date? = nil) {
+                firstSync: FirstSyncInfo, catchUp: CatchUpInfo = .notNeeded, sync: SyncProgress,
+                lastUploadAt: Date? = nil) {
         self.apiVersion = apiVersion
         self.coreVersion = coreVersion
         self.auth = auth
@@ -278,6 +308,7 @@ public struct AppState: Codable, Equatable, Sendable {
         self.queue = queue
         self.quota = quota
         self.firstSync = firstSync
+        self.catchUp = catchUp
         self.sync = sync
         self.lastUploadAt = lastUploadAt
     }
@@ -287,8 +318,25 @@ public struct AppState: Codable, Equatable, Sendable {
         case coreVersion = "core_version"
         case auth, environment, folder, watcher, queue, quota
         case firstSync = "first_sync"
+        case catchUp = "catch_up"
         case sync
         case lastUploadAt = "last_upload_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        apiVersion = try c.decode(Int.self, forKey: .apiVersion)
+        coreVersion = try c.decode(String.self, forKey: .coreVersion)
+        auth = try c.decode(AuthInfo.self, forKey: .auth)
+        environment = try c.decode(EnvironmentInfo.self, forKey: .environment)
+        folder = try c.decode(FolderInfo.self, forKey: .folder)
+        watcher = try c.decode(WatcherInfo.self, forKey: .watcher)
+        queue = try c.decode(QueueInfo.self, forKey: .queue)
+        quota = try c.decodeIfPresent(QuotaInfo.self, forKey: .quota)
+        firstSync = try c.decode(FirstSyncInfo.self, forKey: .firstSync)
+        catchUp = try c.decodeIfPresent(CatchUpInfo.self, forKey: .catchUp) ?? .notNeeded
+        sync = try c.decode(SyncProgress.self, forKey: .sync)
+        lastUploadAt = try c.decodeIfPresent(Date.self, forKey: .lastUploadAt)
     }
 }
 
@@ -329,12 +377,15 @@ public struct NotebookEntry: Codable, Equatable, Sendable, Identifiable {
     public var lastModifiedAt: Date?
     public var selected: Bool
     public var syncedPages: Int
+    /// The server had pages of this notebook when the core caught up with it. False when unknown
+    /// (before the catch-up, an older backend, or a core that does not send it).
+    public var onServer: Bool
 
     public var id: String { uuid }
 
     public init(uuid: String, name: String, folderPath: [String] = [], parentUUID: String? = nil,
                 documentType: String = "notebook", pageCount: Int, lastOpenedAt: Date? = nil,
-                lastModifiedAt: Date? = nil, selected: Bool = false, syncedPages: Int = 0) {
+                lastModifiedAt: Date? = nil, selected: Bool = false, syncedPages: Int = 0, onServer: Bool = false) {
         self.uuid = uuid
         self.name = name
         self.folderPath = folderPath
@@ -345,6 +396,7 @@ public struct NotebookEntry: Codable, Equatable, Sendable, Identifiable {
         self.lastModifiedAt = lastModifiedAt
         self.selected = selected
         self.syncedPages = syncedPages
+        self.onServer = onServer
     }
 
     enum CodingKeys: String, CodingKey {
@@ -357,6 +409,22 @@ public struct NotebookEntry: Codable, Equatable, Sendable, Identifiable {
         case lastModifiedAt = "last_modified_at"
         case selected
         case syncedPages = "synced_pages"
+        case onServer = "on_server"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        uuid = try c.decode(String.self, forKey: .uuid)
+        name = try c.decode(String.self, forKey: .name)
+        folderPath = try c.decode([String].self, forKey: .folderPath)
+        parentUUID = try c.decodeIfPresent(String.self, forKey: .parentUUID)
+        documentType = try c.decode(String.self, forKey: .documentType)
+        pageCount = try c.decode(Int.self, forKey: .pageCount)
+        lastOpenedAt = try c.decodeIfPresent(Date.self, forKey: .lastOpenedAt)
+        lastModifiedAt = try c.decodeIfPresent(Date.self, forKey: .lastModifiedAt)
+        selected = try c.decode(Bool.self, forKey: .selected)
+        syncedPages = try c.decode(Int.self, forKey: .syncedPages)
+        onServer = try c.decodeIfPresent(Bool.self, forKey: .onServer) ?? false
     }
 }
 

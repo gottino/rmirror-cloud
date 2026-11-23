@@ -300,7 +300,8 @@ class TestManifestSummaries:
         other = UploadManifest(tmp_path / "m.sqlite3", "other")
         other.record_upload(files[0], fingerprint_file(files[0]))
         assert manifest.last_upload_at() is not None
-        assert manifest.uploaded_pages_by_notebook(source) == {"nb1": 2, "nb2": 1}
+        assert manifest.uploaded_paths() == {str(f) for f in files}
+        assert other.uploaded_paths() == {str(files[0])}
 
     def test_baseline_does_not_count(self, tmp_path):
         f = tmp_path / "nb" / "p.rm"
@@ -309,7 +310,7 @@ class TestManifestSummaries:
         manifest = UploadManifest(tmp_path / "m.sqlite3", "host")
         manifest.record_baseline(f, fingerprint_file(f))
         assert manifest.last_upload_at() is None
-        assert manifest.uploaded_pages_by_notebook(tmp_path) == {}
+        assert manifest.uploaded_paths() == set()
 
 
 # ----------------------------------------------------------------------

@@ -45,6 +45,20 @@ public enum MainCopy {
     public static let remarkableNotRunningBody = "New pages won't arrive until it's open. It can stay in the background."
     public static let openRemarkable = "Open reMarkable"
 
+    // MARK: Notebooks already online (after switching server or account)
+
+    /// "12 notebooks from this account are already online but not ticked on this Mac."
+    public static func selectionNoticeTitle(count: Int) -> String {
+        count == 1
+            ? "1 notebook from this account is already online but not ticked on this Mac."
+            : "\(count) notebooks from this account are already online but not ticked on this Mac."
+    }
+    public static func selectionNoticeBody(count: Int) -> String {
+        count == 1 ? "Ticking it only uploads what is new or changed." : "Ticking them only uploads what is new or changed."
+    }
+    public static func tickThem(count: Int) -> String { count == 1 ? "Tick it" : "Tick them" }
+    public static let notNow = "Not now"
+
     // MARK: Notebook list
 
     public static let listTitle = "Notebooks to sync"
@@ -175,6 +189,8 @@ public enum MainCopy {
             allowanceExhaustedTitle, allowanceUsedAccessibility(used: 24, limit: 200),
             syncingTitle, dismiss, tryAgain, pausedTitle, pausedBody,
             remarkableNotRunningTitle, remarkableNotRunningBody, openRemarkable,
+            selectionNoticeTitle(count: 1), selectionNoticeTitle(count: 12),
+            selectionNoticeBody(count: 1), selectionNoticeBody(count: 12), tickThem(count: 1), tickThem(count: 12), notNow,
             listTitle, listIntro, searchPlaceholder, clearSearch, selectAll, selectNone,
             selectAllMatching, selectNoneMatching, topLevelGroup,
             listIntroFolders, viewPickerLabel, viewFolders, viewRecent, expandAll, collapseAll,

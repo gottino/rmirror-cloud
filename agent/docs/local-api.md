@@ -70,6 +70,7 @@ upload batch, and at most every 5 minutes).
   "queue": {"pending": 0, "running": true, "paused_reason": null},
   "quota": {"used": 4, "limit": 200, "remaining": 196, "reset_at": "2026-12-01T00:00:00Z", "fetched_at": "2026-11-23T08:00:00Z"},
   "first_sync": {"completed": false},
+  "catch_up": {"state": "done", "unselected_on_server": 0},
   "sync": { "…same object as GET /api/v2/sync/progress…": 0 },
   "last_upload_at": null
 }
@@ -91,11 +92,40 @@ upload batch, and at most every 5 minutes).
   are shown while the worker waits and clear by themselves.
 - `quota`: `null` when signed out or never fetched (or fetched for another environment). `limit` `-1` means
   unlimited, then `remaining` is `null`. `reset_at` may be `null`.
-- `first_sync.completed`: true once any page has been uploaded for the current API host (from the upload manifest),
-  **or** when the config the core started with already held a notebook selection saved by the 1.x menu-bar app
-  (`sync.sync_all_notebooks` false and `sync.selected_notebooks` not empty). A fresh install has
-  `sync_all_notebooks` true (the default) and no selection, so it is false; a selection the app saves later does
-  not count (it is read once at start-up), so the first-sync screens still run for new users.
+- `first_sync.completed`: never `true` while `catch_up.state` is `pending` (clients ignore it then). Otherwise `true`
+  iff at least one page (`.rm` file) is recorded as uploaded in the upload manifest for the current API host and
+  account, including pages the first-contact catch-up found already on the server (see "First contact with a
+  server"): someone switching to a server that already has their pages is completed without a sync. Hosts set up
+  by an earlier version (`catch_up.state` `not_needed`) also count as completed when the config holds a saved
+  notebook selection (`sync.sync_all_notebooks` false and `sync.selected_notebooks` not empty), so existing users
+  are not sent through the first sync again. That shortcut never applies to `done`, `unavailable` or `pending`.
+- `last_upload_at`: when this core last uploaded a file for the current host; records made by the catch-up (the
+  server already had the file) are not uploads and do not count. `null` if never.
+- `catch_up.state`: `pending` | `done` | `unavailable` | `not_needed`.
+  - `pending`: the current host has not been caught up with for this account yet (the core is asking the server
+    what it has, or retrying after a network error, 429 or 5xx), or a different account than the one the upload
+    records belong to has signed in and the core has not reset them yet. Clients treat `pending` like starting
+    (the app shows its starting screen) and do not evaluate `first_sync`. It also reads `pending` while signed out
+    if the host was never caught up with, and stays `pending` while the watcher cannot run (folder missing or
+    unreadable): clients only evaluate `catch_up` while `auth.state` is `signed_in` and `folder.state` is `ok`.
+    Retryable failures end after 10 minutes in a row: the core then continues without the server's list
+    (`unavailable`), so `pending` does not last forever while the cloud is reachable enough to sign in.
+  - `done`: the catch-up used the server's list (`GET /sync/stored-pages`).
+  - `unavailable`: the core continued without the server's list: the backend does not have the endpoint (older
+    backend), it answered another 4xx or something that is not a valid list, or retryable errors lasted 10
+    minutes. Not permanent: the core asks again once each time its watcher starts (core start, sign-in, folder
+    change) and moves to `done` when that works (see "First contact with a server", rule 9).
+  - `not_needed`: the host was initialised by an earlier version (its upload records were adopted for the account).
+  - While the account e-mail is not known yet (shortly after a sign-in), the stored records are assumed to belong
+    to the signed-in account.
+- `catch_up.unselected_on_server`: the number of notebooks in the folder (not deleted on the server) that the server
+  had pages for at the catch-up and that are not selected now. Always 0 while everything is synced
+  (`sync_all` true): `GET /api/v2/notebooks` then shows every notebook as selected, so nothing is unticked. Non-zero
+  only while the selection notice is pending: the notice is raised by a catch-up (or a later upgrade from
+  `unavailable`) that found at least one such notebook, and cleared for good (this host and account) by
+  `POST /api/v2/catch-up/dismiss`, or when the count is 0 while `folder.state` is `ok` (a missing or unreadable
+  folder reads 0 but does not clear it). After that it is always 0, so a user who later unticks a notebook is not
+  nagged. 0 while signed out or `pending`.
 
 ### `GET /api/v2/notebooks`
 
@@ -114,7 +144,7 @@ search and sorting.
     {"uuid": "…", "name": "Meeting Notes", "folder_path": ["Work", "2026"], "parent_uuid": "f-2026",
      "document_type": "notebook",
      "page_count": 12, "last_opened_at": "2026-11-20T10:00:00Z", "last_modified_at": "2026-11-20T10:05:00Z",
-     "selected": true, "synced_pages": 12}
+     "selected": true, "synced_pages": 12, "on_server": true}
   ]
 }
 ```
@@ -132,12 +162,22 @@ search and sorting.
 - When `folder_state` is not `ok`, `folders` is `[]` like `notebooks`.
 - `page_count`: the pages a sync of that notebook uploads: its page files (including pages not listed in the
   notebook's page order), capped by the saved page limit. The suggestion uses the same number.
-- `synced_pages`: pages already recorded in the upload manifest for the current host (0 if unknown).
+- `synced_pages`: of the `page_count` pages (the newest within the page limit), how many are recorded as uploaded in
+  the upload manifest for the current host, including pages the catch-up found on the server. Never more than
+  `page_count`; 0 if unknown. `page_count - synced_pages` is not exactly what a sync uploads (a recorded page that
+  was edited since is uploaded again; `pages_total` of the progress has the exact number).
+- `on_server`: the server had pages of this notebook when the core caught up with it (`false` when unknown: before
+  the catch-up, or while `catch_up.state` is `unavailable` or `not_needed`).
 
 ### `PUT /api/v2/selection`
 
 Body `{"sync_all": false, "selected_notebooks": ["uuid", …]}`. Persists to the config. Same semantics as the
 legacy selection route, including baselining of unselected notebooks. Returns `{"ok": true}`.
+
+### `POST /api/v2/catch-up/dismiss`
+
+Clears the selection notice for the current host and account (`catch_up.unselected_on_server` reads 0 from then
+on). No body. `{"ok": true}`.
 
 ### `GET /api/v2/first-run/suggestion?max=3`
 
@@ -227,8 +267,9 @@ It always returns `{"ok": true, "needs_sign_in": true|false}` (`true` when no si
   `400 invalid_request`. Sign-ins are kept per server: the bare host name for https on the default port (as in
   1.x), `host:port` for any other port or for plain http to a remote host.
 - `source_directory`: the core stops the watcher, records every file already in the new folder as a baseline
-  (not uploaded, same rule as the first run) and watches the new folder. Nothing in it is uploaded until it
-  changes or is synced through `/sync/start`.
+  (not uploaded) and watches the new folder. Nothing in it is uploaded until it changes or is synced through
+  `/sync/start`. A folder change does not ask the server (no catch-up), as before. Exception: if the current host
+  has not been caught up with yet, nothing is baselined and the coming catch-up covers the new folder.
 Changing the environment keeps the existing behaviour (per-host sign-in, per-host manifest) and returns
 `{"ok": true, "needs_sign_in": true|false}`.
 
@@ -256,6 +297,61 @@ does not apply, as for any watcher upload); `synced_pages` reads 0 until then. `
 
 Fallback when Sparkle is not configured. Same data as legacy `/api/updates/check`:
 `{"has_update": false, "current_version": "2.0.0", "latest_version": "2.0.0", "download_url": null}`.
+
+## First contact with a server (catch-up)
+
+The upload manifest (SQLite next to the config) decides whether a file is uploaded. It is kept per API host and
+bound to an account (the signed-in e-mail, lower-cased). The first time the core works with a host for an account
+(no records, or the records belong to another account), it asks the server what it already has instead of only
+recording every existing file as "already there" (the 1.x and early 2.0 rule, which silently dropped everything
+that changed while rMirror was not syncing: server switch, reinstall, long gap):
+
+1. Only while signed in. While signed out, checking or offline nothing is recorded for a host that has not been
+   caught up with, and nothing is uploaded for it; file events are not queued until the catch-up has run (the
+   catch-up reads the folder as it is then, so a change made meanwhile is not lost). When a sign-in completes
+   (browser callback, or the stored sign-in confirmed after an environment switch) the core rescans at once
+   instead of waiting for the periodic rescan.
+2. When a sign-in completes for a host whose records belong to another account, that host's records are
+   forgotten (other hosts are not touched) and the catch-up runs. If the core stops between the two, the next
+   start finds the host without records and runs the catch-up. Records are bound by e-mail: an e-mail change at
+   the identity provider looks like another account (one reset and catch-up). Records written by an earlier
+   version (no account stored) are adopted without a catch-up for whoever signs in first on that host. Signing
+   out clears nothing.
+3. `GET {api_url}/sync/stored-pages` lists the account's notebooks with each page's `page_uuid`, `file_hash`
+   (SHA-256 of the raw `.rm` file) and `ocr_status`.
+4. A page file in the folder (`<folder>/<notebook uuid>/<page uuid>.rm`) that the server lists with the same hash
+   and a status other than `failed` / `not_synced` is recorded as uploaded, in every notebook, selected or not
+   (as a catch-up record: it does not change `last_upload_at`). Selecting such a notebook later only uploads what
+   differs, and the page counts above include those pages.
+5. Without an explicit selection (`sync.sync_all_notebooks` true, the default of a fresh install and of 1.x
+   users who never saved a selection) everything else is recorded as before and nothing is uploaded: the
+   first-sync screens decide what to upload.
+6. With an explicit selection (`sync_all_notebooks` false), in selected notebooks that are not deleted on the
+   server, these files get no record, so the watcher uploads them through its queue right away (with its usual
+   handling of 429, 402, 401 and server errors):
+   - the pages a sync would upload (the newest within the page limit);
+   - pages beyond the page limit that the server holds in a different version (the server's copy follows the
+     file); pages beyond the limit the server does not have are recorded as before;
+   - the notebook's `.metadata` and `.content`, only if the server has the notebook or at least one of its pages
+     is left to upload (renames and moves made meanwhile arrive; a PDF without annotations or an empty notebook
+     the server does not know would otherwise be refused on every scan).
+   Every other file type (`.pdf`, `.epub`, `.pagedata`, …) and every folder `.metadata` is recorded as before
+   (folder uuids are never in a selection, so the watcher does not upload folder files at any time).
+7. Everything else (notebooks not selected or deleted on the server) is recorded as before, so selecting a
+   notebook later does not upload its whole history.
+8. Errors: FastAPI's own 404 / 405 for the route (body `{"detail": "Not Found"}` / `{"detail": "Method Not
+   Allowed"}`: older backend), any other 4xx except 401 and 429, and an answer that is not a valid list → the same
+   rules with an empty server list right away (`unavailable`). Network errors, 429, 5xx and any other 404 (e.g.
+   "User not found", a proxy page) → nothing is recorded, `catch_up.state` stays `pending`, retried after 5 s
+   doubling up to 5 minutes; after 10 minutes of continuous failure → `unavailable` as above. 401 → the usual
+   sign-in-required path (`auth.sign_in_required`, queue paused with `sign_in`), no retries until the next sign-in.
+9. A host that is `unavailable` is asked again once per watcher start (not per rescan). On success every page that
+   is recorded as before or has no record and that the server holds in its current version is recorded as
+   uploaded (catch-up record), the notebook list for `on_server` is stored, the state becomes `done` and the
+   selection notice is evaluated (raised only if it was never raised before). This never removes a record and
+   never uploads anything by itself.
+10. A host that has been caught up with for the signed-in account is not asked again (except rule 9): no extra
+    request per rescan.
 
 ## Sign-in in headless mode
 

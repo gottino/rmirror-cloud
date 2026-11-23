@@ -5,7 +5,7 @@ import Foundation
 public final class MockLocalAPI: LocalAPI, @unchecked Sendable {
     public enum Call: Equatable, Sendable {
         case state, notebooks, firstRunSuggestion(max: Int), syncProgress, resumeSync, settings, signOut
-        case updateCheck, deletedNotebooks, health, beginSignIn
+        case updateCheck, deletedNotebooks, health, beginSignIn, dismissCatchUp
         case setSelection(syncAll: Bool, selectedNotebooks: [String])
         case startSync(notebookUUIDs: [String]?, pageLimit: Int?)
         case updateSettings(SettingsUpdate)
@@ -24,6 +24,7 @@ public final class MockLocalAPI: LocalAPI, @unchecked Sendable {
     private var _healthResult: Result<Bool, LocalAPIError> = .success(true)
     /// Result for the endpoints that return nothing: setSelection, startSync, resumeSync, signOut, resolveDeletedNotebook.
     private var _actionResult: Result<Void, LocalAPIError> = .success(())
+    private var _dismissCatchUpResult: Result<Void, LocalAPIError> = .success(())
     private var _calls: [Call] = []
 
     public init(state: AppState = Fixtures.readyState,
@@ -84,6 +85,10 @@ public final class MockLocalAPI: LocalAPI, @unchecked Sendable {
         get { locked { _actionResult } }
         set { locked { _actionResult = newValue } }
     }
+    public var dismissCatchUpResult: Result<Void, LocalAPIError> {
+        get { locked { _dismissCatchUpResult } }
+        set { locked { _dismissCatchUpResult = newValue } }
+    }
 
     /// Convenience: make every endpoint fail with `error` (e.g. `.coreUnreachable`).
     public func failEverything(with error: LocalAPIError) {
@@ -91,7 +96,7 @@ public final class MockLocalAPI: LocalAPI, @unchecked Sendable {
             _stateResult = .failure(error); _notebooksResult = .failure(error); _suggestionResult = .failure(error)
             _progressResult = .failure(error); _settingsResult = .failure(error); _updateSettingsResult = .failure(error)
             _deletedResult = .failure(error); _updateCheckResult = .failure(error); _healthResult = .failure(error)
-            _actionResult = .failure(error)
+            _actionResult = .failure(error); _dismissCatchUpResult = .failure(error)
         }
     }
 
@@ -105,6 +110,7 @@ public final class MockLocalAPI: LocalAPI, @unchecked Sendable {
         record(.setSelection(syncAll: syncAll, selectedNotebooks: selectedNotebooks))
         try actionResult.get()
     }
+    public func dismissCatchUp() async throws { record(.dismissCatchUp); try dismissCatchUpResult.get() }
     public func firstRunSuggestion(max: Int) async throws -> FirstRunSuggestion {
         record(.firstRunSuggestion(max: max)); return try suggestionResult.get()
     }
@@ -150,11 +156,11 @@ public enum Fixtures {
     }
 
     private static func state(auth: AuthInfo, folder: FolderInfo, watcher: WatcherInfo, queue: QueueInfo = QueueInfo(pending: 0, running: true),
-                              quota: QuotaInfo?, firstSyncCompleted: Bool, sync: SyncProgress = idleSync,
-                              lastUploadAt: Date? = nil) -> AppState {
+                              quota: QuotaInfo?, firstSyncCompleted: Bool, catchUp: CatchUpInfo = CatchUpInfo(state: .done),
+                              sync: SyncProgress = idleSync, lastUploadAt: Date? = nil) -> AppState {
         AppState(coreVersion: "2.0.0", auth: auth, environment: production, folder: folder, watcher: watcher,
-                 queue: queue, quota: quota, firstSync: FirstSyncInfo(completed: firstSyncCompleted), sync: sync,
-                 lastUploadAt: lastUploadAt)
+                 queue: queue, quota: quota, firstSync: FirstSyncInfo(completed: firstSyncCompleted), catchUp: catchUp,
+                 sync: sync, lastUploadAt: lastUploadAt)
     }
 
     private static let signedIn = AuthInfo(signedIn: true, email: email, signInRequired: false)
@@ -242,6 +248,20 @@ public enum Fixtures {
                                               notebooksDone: 3, notebooksTotal: 3, pagesTotal: 24),
                            startedAt: now.addingTimeInterval(-3_600), finishedAt: now.addingTimeInterval(-3_500)),
         lastUploadAt: now.addingTimeInterval(-900))
+
+    /// Signed in to a server (or account) this Mac has not synced with yet: the core is asking it what
+    /// it already has, so nothing is decided about the first sync yet.
+    public static let catchingUpState = state(
+        auth: signedIn, folder: okFolder, watcher: runningWatcher, quota: quota(used: 24), firstSyncCompleted: false,
+        catchUp: CatchUpInfo(state: .pending))
+
+    /// Normal use right after a catch-up that found four notebooks online that are not ticked here
+    /// (see `catchUpLibraryNotebooks`).
+    public static let selectionNoticeState: AppState = {
+        var state = readyState
+        state.catchUp = CatchUpInfo(state: .done, unselectedOnServer: 4)
+        return state
+    }()
 
     /// Quota used up: queue paused, uploads waiting.
     public static let quotaExhaustedState = state(
@@ -339,6 +359,23 @@ public enum Fixtures {
             nb("nb-cafe", "Café Ideas", in: "", pages: 5, modified: 2 * day),
             nb("nb-quick", "Quick Notes", in: "", pages: 1, modified: nil),
         ])
+    }()
+
+    /// `libraryNotebooks` after a catch-up: every ticked notebook is online, and so are four unticked ones,
+    /// whose pages are mostly recorded as uploaded already (Standup has 5 pages changed since).
+    public static let catchUpLibraryNotebooks: NotebooksResponse = {
+        var response = libraryNotebooks
+        let online: [String: Int] = ["nb-roadmap": 21, "nb-standup": 40, "nb-quarterly": 18, "nb-recipes": 17]
+        for index in response.notebooks.indices {
+            let notebook = response.notebooks[index]
+            if notebook.selected {
+                response.notebooks[index].onServer = true
+            } else if let synced = online[notebook.uuid] {
+                response.notebooks[index].onServer = true
+                response.notebooks[index].syncedPages = synced
+            }
+        }
+        return response
     }()
 
     public static let settings = AppSettings(

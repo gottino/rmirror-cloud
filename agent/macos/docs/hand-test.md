@@ -87,6 +87,21 @@ Needs a core that sends `folders` and `parent_uuid` (with an older core the fold
 - With the reMarkable app running only in a different macOS user account (fast user switching), the warning still
   shows. That is correct: its files land in that other account.
 
+### Switching server or account (catch-up)
+
+- Signed in and synced, switch server in Settings (e.g. production to staging) and sign in there. Expected: the
+  starting screen shows "Checking what's already online…" briefly (the menu bar status line says the same), then the
+  main window or the first sync. Afterwards only new or changed pages of ticked notebooks upload by themselves.
+- Use an account that has more notebooks online than are ticked on this Mac. Expected: the main window shows "N
+  notebooks from this account are already online but not ticked on this Mac." with "Not now" and "Tick them"
+  ("1 notebook … is", "Tick it" for one). No line in the menu bar, no dot on the icon, the window does not come
+  forward. With the reMarkable app quit as well, both notices show, this one second.
+- "Tick them". Expected: those notebooks are ticked in the list, nothing uploads yet, the notice is gone, and the
+  footer shows the pages to upload and "Save and sync". After "Save and sync" the number of pages uploaded matches
+  that count; pages unchanged since the last sync are not uploaded again.
+- "Not now". Expected: the notice is gone, nothing is ticked, and it does not come back after quitting and reopening
+  rMirror.
+
 ## 7. Settings
 
 - "Open rMirror when I log in" on, then restart the Mac. Expected: the menu bar icon is back after login without

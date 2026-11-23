@@ -194,6 +194,7 @@ AGENT_ALLOWED_ROUTES = [
     ("POST", f"{API}/processing/metadata/update"),
     ("POST", f"{API}/notebooks/{{notebook_uuid}}/content"),
     ("GET", f"{API}/sync/deleted-notebooks"),
+    ("GET", f"{API}/sync/stored-pages"),
     ("POST", f"{API}/sync/deleted-notebooks/{{notebook_uuid}}/acknowledge"),
 ]
 

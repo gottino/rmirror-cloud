@@ -226,8 +226,16 @@ class Agent:
         self.quota_cache.mark_stale()  # quota and account email on the next tick
         self._maybe_refresh_account()
         if self._can_watch():
-            self._request_watcher_start()
+            if not self._request_watcher_start():
+                self._request_catch_up()
         return True
+
+    def _request_catch_up(self) -> None:
+        """A watcher is already running (e.g. after an environment switch): rescan now,
+        so the catch-up with this host and account does not wait for the periodic rescan."""
+        file_watcher = self.file_watcher
+        if file_watcher is not None and getattr(file_watcher, "running", False):
+            asyncio.get_running_loop().create_task(file_watcher._rescan_logged("sign-in"))
 
     def _schedule_auth_retry(self) -> None:
         if self._auth_retry_task is not None and not self._auth_retry_task.done():
@@ -425,12 +433,17 @@ class Agent:
     async def _baseline_current_folder(self, file_watcher) -> None:
         from app.watcher.file_watcher import ReMarkableEventHandler, baseline_folder
 
+        manifest = file_watcher.sync_queue.manifest
+        if not await asyncio.to_thread(manifest.is_initialised):
+            # First contact with this host is still to come: its catch-up covers
+            # the new folder (baselining it here would hide pages from it)
+            return
         handler = ReMarkableEventHandler(file_watcher.sync_queue, self.config)
         await asyncio.to_thread(
             baseline_folder,
             Path(self.config.remarkable.source_directory),
             handler,
-            file_watcher.sync_queue.manifest,
+            manifest,
         )
 
     async def change_source_directory(self, new_directory: str) -> str:

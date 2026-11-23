@@ -116,13 +116,17 @@ def observers():
 
 
 @pytest.fixture
-def make_watcher(config, manifest, fake_time, observers):
+def make_watcher(config, manifest, fake_time, observers, source):
     def factory():
         observer = FakeObserver()
         observers.append(observer)
         return observer
 
     def make():
+        if not manifest.is_initialised():
+            # A host the agent has caught up with before (these tests are not
+            # about first contact, see test_catch_up.py): existing files recorded
+            fw.scan_for_changes(source, ReMarkableEventHandler(MagicMock(), config), manifest)
         watcher = FileWatcher(
             config,
             MagicMock(),
@@ -264,7 +268,7 @@ class TestPeriodicRescan:
         self, make_watcher, fake_time, source, caplog
     ):
         watcher = make_watcher()
-        task = await start_watcher(watcher)  # first run: baseline, nothing queued
+        task = await start_watcher(watcher)  # nothing changed: nothing queued
         assert pending_names(watcher) == []
 
         (source / NB / "p1.rm").write_bytes(b"edited, but no file event arrived")

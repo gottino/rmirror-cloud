@@ -68,6 +68,52 @@ final class LocalAPITests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.requests.last?.url?.path, "/api/v2/state")
     }
 
+    func testCatchUpIsOptionalAndUnknownValuesAreNotNeeded() async throws {
+        // An older core sends no catch_up: nothing to wait for, no notice.
+        stub(Self.stateJSON)
+        var s = try await client().state()
+        XCTAssertEqual(s.catchUp, CatchUpInfo(state: .notNeeded, unselectedOnServer: 0))
+
+        let withCatchUp = Self.stateJSON.replacingOccurrences(
+            of: "\"first_sync\": {\"completed\": false},",
+            with: "\"first_sync\": {\"completed\": false}, \"catch_up\": {\"state\": \"pending\", \"unselected_on_server\": 0},")
+        XCTAssertNotEqual(withCatchUp, Self.stateJSON)
+        stub(withCatchUp)
+        s = try await client().state()
+        XCTAssertEqual(s.catchUp, CatchUpInfo(state: .pending, unselectedOnServer: 0))
+
+        let decoder = LocalAPICoding.makeDecoder()
+        func decode(_ json: String) throws -> CatchUpInfo { try decoder.decode(CatchUpInfo.self, from: Data(json.utf8)) }
+        XCTAssertEqual(try decode(#"{"state": "done", "unselected_on_server": 12}"#), CatchUpInfo(state: .done, unselectedOnServer: 12))
+        XCTAssertEqual(try decode(#"{"state": "unavailable", "unselected_on_server": 0}"#).state, .unavailable)
+        XCTAssertEqual(try decode(#"{"state": "not_needed"}"#), CatchUpInfo(state: .notNeeded, unselectedOnServer: 0))
+        XCTAssertEqual(try decode(#"{"state": "reticulating", "unselected_on_server": 3}"#).state, .notNeeded)
+        XCTAssertEqual(try decode(#"{}"#), .notNeeded)
+    }
+
+    func testOnServerIsOptional() async throws {
+        stub("""
+        {"folder_state": "ok", "sync_all": false, "notebooks": [
+          {"uuid": "u1", "name": "A", "folder_path": [], "document_type": "notebook", "page_count": 2,
+           "selected": false, "synced_pages": 2, "on_server": true},
+          {"uuid": "u2", "name": "B", "folder_path": [], "document_type": "notebook", "page_count": 1,
+           "selected": false, "synced_pages": 0, "on_server": false},
+          {"uuid": "u3", "name": "C", "folder_path": [], "document_type": "notebook", "page_count": 1,
+           "selected": true, "synced_pages": 0}]}
+        """)
+        let r = try await client().notebooks()
+        XCTAssertEqual(r.notebooks.map(\.onServer), [true, false, false])
+    }
+
+    func testDismissCatchUpPostsWithoutBody() async throws {
+        stub(#"{"ok": true}"#)
+        try await client().dismissCatchUp()
+        let req = try XCTUnwrap(StubURLProtocol.requests.last)
+        XCTAssertEqual(req.httpMethod, "POST")
+        XCTAssertEqual(req.url?.path, "/api/v2/catch-up/dismiss")
+        XCTAssertEqual(req.value(forHTTPHeaderField: LocalAPIClient.tokenHeader), "secret-token")
+    }
+
     func testDecodesNotebooks() async throws {
         stub("""
         {"folder_state": "ok", "sync_all": false, "notebooks": [
@@ -392,7 +438,8 @@ final class LocalAPITests: XCTestCase {
     func testFixturesRoundTripThroughCoding() throws {
         let states = [Fixtures.signedOutState, Fixtures.signInRequiredState, Fixtures.folderMissingState,
                       Fixtures.folderUnreadableState, Fixtures.firstSyncPendingState, Fixtures.firstSyncRunningState,
-                      Fixtures.readyState, Fixtures.quotaExhaustedState, Fixtures.syncDonePartialState]
+                      Fixtures.readyState, Fixtures.quotaExhaustedState, Fixtures.syncDonePartialState,
+                      Fixtures.catchingUpState, Fixtures.selectionNoticeState]
         for s in states {
             let data = try LocalAPICoding.makeEncoder().encode(s)
             XCTAssertEqual(try LocalAPICoding.makeDecoder().decode(AppState.self, from: data), s)
@@ -400,6 +447,9 @@ final class LocalAPITests: XCTestCase {
         XCTAssertEqual(Fixtures.readyNotebooks.notebooks.count, 12)
         let library = try LocalAPICoding.makeEncoder().encode(Fixtures.libraryNotebooks)
         XCTAssertEqual(try LocalAPICoding.makeDecoder().decode(NotebooksResponse.self, from: library), Fixtures.libraryNotebooks)
+        let caughtUp = try LocalAPICoding.makeEncoder().encode(Fixtures.catchUpLibraryNotebooks)
+        XCTAssertEqual(try LocalAPICoding.makeDecoder().decode(NotebooksResponse.self, from: caughtUp),
+                       Fixtures.catchUpLibraryNotebooks)
         XCTAssertEqual(Fixtures.threeNotebookSuggestion.totalPages, 23)
         XCTAssertTrue(Fixtures.quotaExhaustedState.quota!.isExhausted)
         XCTAssertEqual(Fixtures.firstSyncRunningState.sync.counts.uploaded, 4)

@@ -555,7 +555,11 @@ def register_routes(app: Flask) -> None:
             # Save configuration
             config.save()
 
-            # Mark cloud sync as authenticated
+            # Mark cloud sync as authenticated. The account may differ from the one
+            # signed in before: forget its cached e-mail so the catch-up (upload
+            # records are bound to an account) looks it up again.
+            cloud_sync.user_email = None
+            cloud_sync.user_id = None
             cloud_sync.authenticated = True
 
             # Register agent with backend
@@ -587,6 +591,10 @@ def register_routes(app: Flask) -> None:
                     app.logger.info("File watcher started after authentication")
                 except Exception as e:
                     app.logger.error(f"Failed to start file watcher: {e}")
+                # A watcher already running (e.g. paused after a rejected sign-in, or
+                # another account): catch up with this account now, not at the next
+                # periodic rescan. A watcher that is just starting does it itself.
+                shared.request_rescan(app, "sign-in")
 
             if headless:
                 # The native app notices the sign-in on its next state poll. Leave

@@ -86,20 +86,25 @@ class PagePlanner:
             sum(1 for p in left_out if not self._already_uploaded(p)),
         )
 
-    def _limit_pages(self, notebook_uuid: str) -> tuple[list[Path], list[Path]]:
-        """All page files newest first, split by the page limit: (within, beyond)."""
+    def _limit_pages(self, notebook_uuid: str, log: bool = True) -> tuple[list[Path], list[Path]]:
+        """All page files newest first, split by the page limit: (within, beyond).
+
+        ``log=False`` keeps it quiet (listings and the catch-up call it for every notebook).
+        """
         notebook_dir = self.remarkable_folder / notebook_uuid
 
         # Check if notebook directory exists
         if not notebook_dir.exists() or not notebook_dir.is_dir():
-            logger.warning(f"Notebook directory not found: {notebook_dir}")
+            if log:
+                logger.warning(f"Notebook directory not found: {notebook_dir}")
             return [], []
 
         # 1. Get all page files
         all_page_files = list(notebook_dir.glob("*.rm"))
 
         if not all_page_files:
-            logger.info(f"No pages found in notebook {notebook_uuid}")
+            if log:
+                logger.info(f"No pages found in notebook {notebook_uuid}")
             return [], []
 
         # 2. Read .content file to get authoritative page order
@@ -135,7 +140,8 @@ class PagePlanner:
                 logger.debug(f"Found {len(page_order)} pages in .content file for {notebook_uuid}")
 
             except Exception as e:
-                logger.warning(f"Failed to read .content file for {notebook_uuid}: {e}")
+                if log:
+                    logger.warning(f"Failed to read .content file for {notebook_uuid}: {e}")
 
         # 3. Create UUID to file mapping
         page_file_map = {pf.stem: pf for pf in all_page_files}
@@ -152,12 +158,14 @@ class PagePlanner:
             # Add any orphaned pages (in .rm folder but not in .content) at the end
             orphaned_uuids = set(page_file_map.keys()) - set(page_order)
             if orphaned_uuids:
-                logger.warning(f"Found {len(orphaned_uuids)} orphaned pages not in .content file")
+                if log:
+                    logger.warning(f"Found {len(orphaned_uuids)} orphaned pages not in .content file")
                 for uuid in orphaned_uuids:
                     ordered_page_files.append(page_file_map[uuid])
         else:
             # No .content file or empty - fall back to file modification time (newest first)
-            logger.warning("No page order from .content, falling back to file mtime")
+            if log:
+                logger.warning("No page order from .content, falling back to file mtime")
             ordered_page_files = sorted(
                 all_page_files,
                 key=lambda p: p.stat().st_mtime,

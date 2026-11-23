@@ -32,6 +32,10 @@ class AuthenticationRequiredError(CloudSyncError):
     """The stored token was rejected (or is missing); the user has to sign in again."""
 
 
+class StoredPagesUnavailableError(CloudSyncError):
+    """The backend has no ``GET /sync/stored-pages`` (an older backend answered 404 or 405)."""
+
+
 class RateLimitError(Exception):
     """Rate limit exceeded error (429)."""
 
@@ -46,6 +50,17 @@ class QuotaExceededError(Exception):
     def __init__(self, message: str, quota_status: Optional[dict] = None):
         super().__init__(message)
         self.quota_status = quota_status
+
+
+_MISSING_ROUTE_BODIES = {404: {"detail": "Not Found"}, 405: {"detail": "Method Not Allowed"}}
+
+
+def _is_missing_route(response: httpx.Response) -> bool:
+    """True if a 404/405 is FastAPI's own answer for a route that does not exist."""
+    try:
+        return response.json() == _MISSING_ROUTE_BODIES.get(response.status_code)
+    except ValueError:
+        return False
 
 
 class CloudSync:
@@ -753,6 +768,53 @@ class CloudSync:
             f"   Pages remaining: {remaining}\n"
             f"   Resets: {reset_at}"
         )
+
+    async def get_stored_pages(self, _reauthenticated: bool = False) -> dict:
+        """What the backend has stored for this account (``GET /sync/stored-pages``).
+
+        Used once per API host and account by the first-contact catch-up
+        (``app.sync.catch_up``). Returns the decoded JSON object.
+
+        Raises:
+            StoredPagesUnavailableError: the backend does not have the endpoint (404/405).
+            AuthenticationRequiredError: the sign-in was rejected (401, also after one re-check).
+            CloudSyncError: anything else; ``transient`` for network errors, 429 and 5xx.
+        """
+        await self.ensure_authenticated()
+        try:
+            response = await self.client.get(
+                f"{self.config.api.url}/sync/stored-pages",
+                headers=self._get_headers(),
+            )
+        except httpx.HTTPError as e:
+            raise CloudSyncError(f"Stored pages request failed: {type(e).__name__}", transient=True)
+
+        status = response.status_code
+        if status == 401:
+            self.authenticated = False
+            if _reauthenticated:
+                self._sign_out("stored pages rejected with 401 after re-authentication")
+                raise AuthenticationRequiredError("Stored pages request rejected", status_code=401)
+            await self.authenticate()  # raises AuthenticationRequiredError if the token is gone
+            return await self.get_stored_pages(_reauthenticated=True)
+        if status in (404, 405) and _is_missing_route(response):
+            raise StoredPagesUnavailableError(
+                f"Backend has no stored-pages endpoint (status={status})", status_code=status
+            )
+        if status >= 400:
+            # Any other 404 (e.g. "User not found", a proxy page) is retried like a 5xx
+            raise CloudSyncError(
+                f"Stored pages request failed (status={status})",
+                status_code=status,
+                transient=status in (404, 429) or status >= 500,
+            )
+        try:
+            data = response.json()
+        except ValueError:
+            raise CloudSyncError("Stored pages response is not JSON", status_code=status)
+        if not isinstance(data, dict):
+            raise CloudSyncError("Stored pages response is not an object", status_code=status)
+        return data
 
     async def get_deleted_notebooks(self) -> list[dict]:
         """Fetch notebooks deleted on the server that need agent acknowledgement."""

@@ -149,3 +149,5 @@ _.update_quota_limit  # tier change helper for Stripe phase 2
 _.has_agent_connected  # AgentStatusResponse fields (GET /agents/status), read by the dashboard
 _.first_connected_at
 _.last_activity_at
+_.notebook_count  # StoredPagesResponse fields (GET /sync/stored-pages), read by the Mac app
+_.page_count

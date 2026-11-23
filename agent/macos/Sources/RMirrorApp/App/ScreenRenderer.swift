@@ -146,11 +146,13 @@ enum ScreenRenderer {
         /// The main window on the nested library, with the list set up as given and, with `draft`, an
         /// unsaved change so the footer shows.
         func mainList(_ name: String, size: CGSize? = nil, state: AppState = Fixtures.readyState,
+                      library: NotebooksResponse = library, remarkableRunning: Bool = true,
                       list: MainListPreview = MainListPreview(), draft: Set<String>? = nil) -> Screen {
             Screen(name: name, size: size ?? mainSize) {
                 let api = MockLocalAPI(state: state, notebooks: library)
                 let store = AppStore.preview(state: state, api: api, notebooks: library.notebooks,
-                                             folders: library.folders, settings: Fixtures.settings)
+                                             folders: library.folders, settings: Fixtures.settings,
+                                             remarkableAppRunning: remarkableRunning)
                 return AnyView(MainView(previewDraft: draft, previewList: list).environmentObject(store).rmScreen())
             }
         }
@@ -171,6 +173,11 @@ enum ScreenRenderer {
                 return AnyView(FirstSyncView(previewSelection: ticked).environmentObject(store).rmScreen())
             }
         }
+        let caughtUp = Fixtures.catchUpLibraryNotebooks
+        let caughtUpSaved = NotebookList.savedSelection(caughtUp.notebooks)
+        let caughtUpTicked = caughtUpSaved.union(NotebookList.onServerNotTicked(caughtUp.notebooks, draft: caughtUpSaved))
+        var noticeAnswered = Fixtures.readyState
+        noticeAnswered.catchUp = CatchUpInfo(state: .done, unselectedOnServer: 0)
         let savedPlusTwo = NotebookList.savedSelection(library.notebooks).union(["nb-roadmap", "nb-ideas"])
         let deepOpen: Set<String> = ["f-work", "f-work-2026", "f-work-2026-clients", "f-work-2026-clients-acme",
                                      "f-work-2025", "f-home", "f-home-finance"]
@@ -208,6 +215,12 @@ enum ScreenRenderer {
             main("ready-quota-not-paused", state: quotaNotPaused, notebooks: library.notebooks),
             main("ready-deleted", state: Fixtures.readyState, notebooks: library.notebooks,
                  deleted: Fixtures.deletedNotebooks),
+            main("starting-catch-up", state: Fixtures.catchingUpState),
+            mainList("ready-selection-notice", state: Fixtures.selectionNoticeState, library: caughtUp),
+            mainList("ready-selection-notice-and-remarkable", state: Fixtures.selectionNoticeState, library: caughtUp,
+                     remarkableRunning: false),
+            // After "Tick them": the notice is gone and the footer counts only what is not online yet.
+            mainList("ready-selection-notice-ticked", state: noticeAnswered, library: caughtUp, draft: caughtUpTicked),
             main("ready-remarkable-not-running", state: Fixtures.readyState, notebooks: library.notebooks,
                  remarkableRunning: false),
             mainList("ready-footer", draft: savedPlusTwo),
