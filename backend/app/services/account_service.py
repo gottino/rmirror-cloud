@@ -143,7 +143,7 @@ class AccountService:
                 notebook_pages = (
                     db.query(NotebookPage, Page)
                     .join(Page, NotebookPage.page_id == Page.id)
-                    .filter(NotebookPage.notebook_id == notebook.id)
+                    .filter(NotebookPage.notebook_id == notebook.id, Page.removed_at.is_(None))
                     .order_by(NotebookPage.page_number)
                     .all()
                 )

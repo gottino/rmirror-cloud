@@ -45,6 +45,7 @@ FastAPI backend for rMirror Cloud - handles uploads, OCR processing, Notion sync
 - `integration_configs`: User integration settings (target_name, config_encrypted, is_enabled)
 
 ## Recent Major Changes
+- **2026-11**: Pages deleted on the tablet are soft-removed (`pages.removed_at`, migration e4b9c7a1d2f3) by `app/services/page_removal.py`, shared by `POST /notebooks/{uuid}/content` (cPages entries with `deleted.value`) and `POST /sync/metadata` (pages no longer listed). Removed pages are hidden everywhere pages are shown or counted (filter `Page.removed_at.is_(None)`), their todos get `REMOVED_FROM_PAGE`, a `page_removal` queue row deletes the Notion toggle, listing the page again restores it, and the sync worker purges pages removed > 30 days (`PAGE_PURGE_AFTER_DAYS`). A list that would remove every page of a notebook is ignored.
 - **2026-11**: Password login endpoints removed (PR #34); Clerk is the only login. Blocking calls moved off the event loop (`run_off_loop`). The unique index on `sync_records(page_uuid, target_name, user_id)` was restored by migration 95cf6385d77b (51324b8f201a had dropped it without creating its replacement).
 - **2026-11**: Retroactive OCR of `PENDING_QUOTA` pages moved into the sync worker (PR #50); request code such as `reset_quota()` no longer spawns background tasks.
 - **2026-01-22**: Improved OCR prompt for curved arrow (↳) formatting in `app/core/ocr_service.py`

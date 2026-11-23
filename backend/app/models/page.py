@@ -74,6 +74,11 @@ class Page(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
     ocr_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Soft removal: set when the notebook's page list marks the page deleted or
+    # no longer lists it (app/services/page_removal.py). A removed page is
+    # hidden wherever pages are shown or counted; listing it again clears this,
+    # and the sync worker purges it once removed for PAGE_PURGE_AFTER_DAYS.
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
     # Relationships
     notebook: Mapped["Notebook"] = relationship("Notebook", back_populates="pages")

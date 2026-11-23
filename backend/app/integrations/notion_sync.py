@@ -927,6 +927,32 @@ class NotionSyncTarget(SyncTarget):
         )
 
     @run_off_loop
+    async def remove_page_block(self, block_id: str) -> SyncResult:
+        """Delete (archive) one page toggle block of a notebook page.
+
+        Used when the page was deleted on the tablet. A block Notion reports
+        as missing or already archived counts as removed. Other failures come
+        back typed like page syncs (rate limit, auth, transient, permanent).
+        """
+        try:
+            self.client.blocks.delete(block_id=block_id)
+            return SyncResult(
+                status=SyncStatus.SUCCESS,
+                target_id=block_id,
+                metadata={"action": "page_removed"},
+            )
+        except Exception as e:
+            if _is_gone(e):
+                self.logger.info(f"Block {block_id} already archived/deleted")
+                return SyncResult(
+                    status=SyncStatus.SUCCESS,
+                    target_id=block_id,
+                    metadata={"action": "already_gone"},
+                )
+            self.logger.error(f"Error removing page block {block_id}: {e}")
+            return self._error_result(e)
+
+    @run_off_loop
     async def delete_item(self, external_id: str) -> SyncResult:
         """Delete (archive) an item from Notion."""
         try:

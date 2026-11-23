@@ -224,7 +224,9 @@ def test_page_window_uses_sql_limit(db: Session, owner: User):
 
     assert resp.status_code == 200
     page_selects = [
-        s for s in statements if "FROM notebook_pages" in s and "JOIN pages" in s
+        s
+        for s in statements
+        if "FROM notebook_pages" in s and "JOIN pages" in s and "count(" not in s
     ]
     assert len(page_selects) == 1
     assert "LIMIT" in page_selects[0] and "OFFSET" in page_selects[0]

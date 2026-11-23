@@ -43,7 +43,8 @@ async def get_page_pdf(
         .first()
     )
 
-    if not page:
+    # A page deleted on the tablet (removed_at set) is gone for the user too.
+    if not page or page.removed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Page not found",

@@ -41,6 +41,7 @@ def _completed_pages_query(db: Session, user_id: int, notebook_uuids: Optional[L
             Page.ocr_status == OcrStatus.COMPLETED.value,
             Page.ocr_text.isnot(None),
             Page.ocr_text != "",
+            Page.removed_at.is_(None),
         )
     )
     if notebook_uuids is not None:

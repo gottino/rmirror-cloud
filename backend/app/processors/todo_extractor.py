@@ -368,6 +368,7 @@ def process_notebook_todos(
         .filter(
             Page.notebook_id == notebook_id,
             Page.ocr_status == OcrStatus.COMPLETED.value,
+            Page.removed_at.is_(None),
             Page.ocr_text.isnot(None),
             Page.ocr_text != "",
         )
